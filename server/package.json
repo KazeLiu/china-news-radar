@@ -9,6 +9,7 @@
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
+    "admin:init": "node ../scripts/admin-account.cjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

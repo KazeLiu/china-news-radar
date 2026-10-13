@@ -15,11 +15,13 @@ import { ChatModule } from './chat/chat.module';
 import { AgentModule } from './agent/agent.module';
 import { EntitiesModule } from './entities/entities.module';
 import { RadarModule } from './radar.module';
+import { AdminAuthModule } from './admin/admin-auth.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     PrismaModule,
+    AdminAuthModule,
     GatewayModule,
     ServicesModule,
     KeywordsModule,

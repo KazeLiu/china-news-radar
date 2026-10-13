@@ -8,6 +8,7 @@ COPY rsshub-service/package.json ./rsshub-service/package.json
 RUN pnpm install --filter ai-hot-radar-server --frozen-lockfile
 COPY server ./server
 COPY scripts/init-db.cjs ./scripts/init-db.cjs
+COPY scripts/admin-account.cjs ./scripts/admin-account.cjs
 ENV DATABASE_URL=file:/data/radar.db
 RUN pnpm --filter ai-hot-radar-server exec prisma generate && pnpm --filter ai-hot-radar-server build
 

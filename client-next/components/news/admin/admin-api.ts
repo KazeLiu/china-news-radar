@@ -1,6 +1,5 @@
 import type { Source } from '../NewsSourceRow';
 import { requestJson } from '@/services/http';
-import { getAdminToken } from '@/services/admin-session';
 
 export interface AiSettings { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; instructions: string; keyConfigured: boolean; protocolPrompt: string }
 export interface AiTestResult {
@@ -24,8 +23,12 @@ export interface SourceTestResult {
 }
 export interface FilterRule { id: string; enabled: boolean; sourceId: string; field: 'titleExact' | 'titleContains' | 'textContains' | 'urlPrefix' | 'urlExact'; value: string }
 export interface AdminSettings { ai: AiSettings; sources: SourceSettings[]; rules: FilterRule[]; localOnly: boolean; status: { aiMode: string; aiDailyUsed: number; aiDailyLimit: number; aiPending: number; aiFailed: number }; changed?: number }
-export async function adminApi<T>(path: string, token: string, body?: unknown, method = 'PUT'): Promise<T> {
-  return requestJson<T>(`/api/news/${path}`, { method: body === undefined ? 'GET' : method,
-    headers: token || getAdminToken() ? { 'X-Admin-Token': token || getAdminToken() } : {}, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+export async function adminApi<T>(path: string, _token: string, body?: unknown, method = 'PUT'): Promise<T> {
+  try { return await requestJson<T>(`/api/news/${path}`, { method: body === undefined ? 'GET' : method,
+    credentials: 'same-origin', ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
+  catch (error) {
+    if (error instanceof Error && error.message.startsWith('HTTP 401') && !path.startsWith('admin/auth/')) window.dispatchEvent(new CustomEvent('admin:expired', { detail: error.message }));
+    throw error;
+  }
 }
 export type SaveSettings = (path: string, body: unknown, method?: string) => Promise<boolean>;

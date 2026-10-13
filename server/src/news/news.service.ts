@@ -345,7 +345,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const states = await this.sources(true);
     return { ai: { ...ai, keyConfigured: !!apiKey, protocolPrompt: ANALYSIS_PROMPT },
       sources: this.config.sources.map(s => ({ ...s, state: states.find(state => state.id === s.id) })), rules: this.config.rules,
-      status: await this.status(), localOnly: !process.env.ADMIN_TOKEN };
+      status: await this.status(), localOnly: false };
   }
   adminAiKey() { return { apiKey: this.config.ai.apiKey }; }
   private async updateConfig(next: AdminConfig, mutation?: (tx: Prisma.TransactionClient) => Promise<unknown>, afterChange?: () => Promise<unknown>) {

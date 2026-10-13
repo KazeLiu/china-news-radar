@@ -233,3 +233,24 @@ model NewsGenerationLease {
   owner String
   leaseUntil DateTime
 }
+
+model AdminAccount {
+  id String @id @default("admin")
+  username String @unique
+  passwordHash String
+  updatedAt DateTime @updatedAt
+}
+
+model AdminSession {
+  tokenHash String @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+
+model AdminLoginAttempt {
+  key String @id
+  failures Int @default(0)
+  blockedUntil DateTime?
+  updatedAt DateTime @updatedAt
+}
