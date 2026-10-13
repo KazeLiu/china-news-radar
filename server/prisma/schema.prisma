@@ -173,6 +173,13 @@ model NewsItem {
   updatedAt          DateTime   @updatedAt
   saved              Boolean    @default(false)
   visible            Boolean    @default(true)
+  hiddenArticle      Boolean    @default(false)
+  hiddenImages       Boolean    @default(false)
+  isManual           Boolean    @default(false)
+  publicationStatus  String     @default("published")
+  publishedOnceAt    DateTime?
+  displayTitle       String?
+  displaySummary     String?
   aiStatus           String     @default("disabled")
   analysisKey        String?
   decisionBy         String     @default("rules")

@@ -20,6 +20,15 @@ export class NewsController {
   constructor(private readonly news: NewsService) {}
   @Get('health') health() { return { ok: true, mode: 'news' }; }
   @Get('items') items(@Query() query: Parameters<NewsService['items']>[0]) { return this.news.items(query); }
+  @Get('items/:id') article(@Param('id') id: string) { return this.news.article(id); }
+  @Get('admin/items') adminItems(@Query() query: Parameters<NewsService['adminItems']>[0]) { return this.news.adminItems(query); }
+  @Get('admin/items/:id') adminItem(@Param('id') id: string) { return this.news.adminItemsById(id); }
+  @Post('admin/items') createManual(@Body() body: unknown) { return this.news.saveManual(body); }
+  @Post('admin/items/import') importManual(@Body() body: unknown) { return this.news.importManual(body); }
+  @Put('admin/items/:id') editManual(@Param('id') id: string, @Body() body: unknown) { return this.news.saveManual(body, id); }
+  @Patch('admin/items/:id/display') display(@Param('id') id: string, @Body() body: unknown) { return this.news.displayState(id, body); }
+  @Post('admin/items/:id/analyze') analyzeManual(@Param('id') id: string) { return this.news.analyzeManual(id); }
+  @Post('admin/items/:id/publish') publishManual(@Param('id') id: string) { return this.news.publishManual(id); }
   @Get('sources') sources() { return this.news.sources(); }
   @Get('status') status() { return this.news.status(); }
   @Post('scan') scan(@Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.scan(); }

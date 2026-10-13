@@ -51,7 +51,7 @@ export class AgentService {
     const itemsXml = items.map((item) => `
     <item>
       <title>${escape(item.title)}</title>
-      <link>${escape(item.url)}</link>
+      <link>${escape(new URL(item.url, process.env.PUBLIC_SITE_URL || process.env.CLIENT_URL || 'http://localhost:3000').href)}</link>
       <description>${escape(item.summary || item.title)}</description>
       <pubDate>${(item.publishedAt || new Date()).toUTCString()}</pubDate>
       <source>${escape(item.originalPublisher || item.source)}</source>

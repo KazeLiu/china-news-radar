@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { newsMode } from '../news/radar-content';
+import { newsMode, contentScope } from '../news/radar-content';
 
 @Injectable()
 export class NotificationsService {
@@ -12,13 +12,14 @@ export class NotificationsService {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    const where: any = newsMode() ? { id: { startsWith: 'news:' } } : { NOT: { id: { startsWith: 'news:' } } };
+    const allowed = newsMode() ? await this.prisma.hotspot.findMany({ where: contentScope(), select: { id: true } }) : [];
+    const where: any = newsMode() ? { id: { startsWith: 'news:' }, hotspotId: { in: allowed.map(item => item.id) } } : { NOT: { id: { startsWith: 'news:' } } };
     if (unreadOnly === 'true') where.isRead = false;
 
     const [notifications, total, unreadCount] = await Promise.all([
       this.prisma.notification.findMany({ where, orderBy: { createdAt: 'desc' }, skip, take: limitNum }),
       this.prisma.notification.count({ where }),
-      this.prisma.notification.count({ where: { isRead: false } }),
+      this.prisma.notification.count({ where: { ...where, isRead: false } }),
     ]);
 
     return {

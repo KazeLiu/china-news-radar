@@ -5,7 +5,7 @@ import { HotspotGateway } from '../gateway/hotspot.gateway';
 import { computeQualityScore } from '../services/scoring.service';
 import { CURATED_THRESHOLD, SourceTier } from '../rss-feeds/feeds.config';
 import { parseAnalysis, AnalysisResult } from './analysis';
-import { presentHotspot } from './radar-content';
+import { presentHotspot, publicNewsScope } from './radar-content';
 import { ORIGINAL_PUBLISHERS } from './sources';
 import { EmailService } from '../services/email.service';
 
@@ -27,8 +27,9 @@ export class NewsBridgeService {
     }
     const tier = publisherTier(item.originalPublisher);
     const qualityScore = score ? computeQualityScore({ relevToAi: score.relevance, ...score }, tier) : null;
-    const data = { newsItemId: id, title: item.titleZh || item.title, content: item.summaryZh || item.summary,
-      url: item.url, source: `news_${item.sourceId}`, sourceId: item.sourceId, summary: item.summaryZh || item.summary,
+    const data = { newsItemId: id, title: item.displayTitle ?? item.titleZh ?? item.title, content: item.displaySummary ?? item.summaryZh ?? item.summary,
+      url: item.url, source: `news_${item.sourceId}`, sourceId: item.sourceId, summary: item.displaySummary ?? item.summaryZh ?? item.summary,
+      media: item.hiddenImages ? null : JSON.stringify((JSON.parse(item.images) as string[]).map(url => ({ type: 'photo', url }))),
       publishedAt: item.publishedAt, createdAt: item.firstSeenAt, category: item.topic, region: 'international',
       sourceTier: tier, qualityScore, relevance: score ? score.relevance * 10 : 0, relevanceReason: item.aiReason,
       importance: score?.importance || 'low', tags: JSON.stringify(score?.tags || []), clusterKey: item.eventKey,
@@ -37,7 +38,7 @@ export class NewsBridgeService {
     const hotspot = await tx.hotspot.upsert({ where: { newsItemId: id }, create: { id: `news:${id}`, notifyEligible, ...data }, update: data });
     await this.matchItem(tx, item);
     for (const clusterKey of new Set([item.eventKey, previous?.clusterKey].filter((key): key is string => !!key))) {
-      const mains = await tx.hotspot.findMany({ where: { clusterKey, newsItem: { is: { visible: true, originalPublisher: { not: null } } } },
+      const mains = await tx.hotspot.findMany({ where: { clusterKey, newsItem: { is: publicNewsScope() } },
         orderBy: [{ qualityScore: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }], select: { id: true } });
       await tx.hotspot.updateMany({ where: { clusterKey, newsItemId: { not: null } }, data: { isClusterMain: false } });
       if (mains[0]) await tx.hotspot.update({ where: { id: mains[0].id }, data: { isClusterMain: true } });
@@ -71,7 +72,8 @@ export class NewsBridgeService {
 
   async announce(id: string) {
     const hotspot = await this.prisma.hotspot.findUnique({ where: { newsItemId: id }, include: { newsItem: { include: { keywordMatches: { include: { keyword: true } } } } } });
-    if (!hotspot?.notifyEligible || !hotspot.newsItem?.visible || !hotspot.newsItem.originalPublisher || !hotspot.isClusterMain) return;
+    if (!hotspot?.notifyEligible || !hotspot.newsItem?.visible || hotspot.newsItem.hiddenArticle || hotspot.newsItem.publicationStatus !== 'published'
+      || (!hotspot.newsItem.originalPublisher && !hotspot.newsItem.isManual) || !hotspot.isClusterMain) return;
     // The unique notification id prevents edits, backfills and restarts from replaying an alert.
     const notificationId = `news:${id}`;
     try {

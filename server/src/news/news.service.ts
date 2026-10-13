@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, NotFoundException, ConflictException, Optional } from '@nestjs/common';
-import { AiTask, Prisma, NewsAnalysis } from '@prisma/client';
-import { createHash } from 'node:crypto';
+import { AiTask, Prisma, NewsAnalysis, NewsItem } from '@prisma/client';
+import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { NewsSourceConfig } from './sources';
 import { CollectedItem, inspectFeed, parseFeed } from './collector';
@@ -17,6 +17,9 @@ import { CollectionResult, SourceAdapterService } from './source-adapter.service
 import { SourceFetchError } from './public-network';
 import { WebCrawlerService } from './web-crawler.service';
 import { validateWebRules } from './admin-config';
+import { publicNewsScope, presentNews } from './radar-content';
+import { manualInput } from './manual-news';
+import { canonicalUrl, eventKey, isDomesticUrl, publisherForUrl } from './rules';
 const webHash = (source: NewsSourceConfig) => createHash('sha256').update(JSON.stringify([source.target, source.web?.rules])).digest('hex');
 
 @Injectable()
@@ -91,15 +94,132 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   async items(query: { q?: string; source?: string; topic?: string; saved?: string; offset?: string; clues?: string }) {
     const offset = Math.max(0, Math.min(100_000, Math.floor(Number(query.offset) || 0)));
-    const where: Prisma.NewsItemWhereInput = {
+    const where = publicNewsScope({
       ...(query.source ? { sourceId: query.source } : {}), ...(query.topic ? { AND: [{ OR: [{ topic: query.topic }, { aiTopics: { contains: JSON.stringify(query.topic) } }] }] } : {}),
       ...(query.saved === 'true' ? { saved: true } : {}),
-      ...(query.saved === 'true' ? {} : { visible: true }),
-      ...(query.clues === 'true' || query.saved === 'true' ? {} : { originalPublisher: { not: null } }),
       ...(query.q ? { OR: ['title', 'summary', 'titleZh', 'summaryZh'].map(field => ({ [field]: { contains: query.q!.slice(0, 200) } })) } : {}),
-    };
+    });
     const [items, total] = await Promise.all([this.prisma.newsItem.findMany({ where, omit: { body: true }, orderBy: [{ firstSeenAt: 'desc' }, { publishedAt: 'desc' }, { id: 'desc' }], skip: offset, take: 50 }), this.prisma.newsItem.count({ where })]);
+    return { items: items.map(presentNews), total, nextOffset: offset + items.length < total ? offset + items.length : null };
+  }
+  async article(id: string) {
+    const item = await this.prisma.newsItem.findFirst({ where: publicNewsScope({ id }) });
+    if (!item) throw new NotFoundException('新闻不存在或未公开');
+    return presentNews(item);
+  }
+  async adminItems(query: { q?: string; state?: string; offset?: string }) {
+    const offset = Math.max(0, Math.min(100000, Math.floor(Number(query.offset) || 0)));
+    const where: Prisma.NewsItemWhereInput = {
+      ...(query.state === 'draft' ? { isManual: true, publicationStatus: 'draft' } : query.state === 'hidden' ? { hiddenArticle: true } : query.state === 'manual' ? { isManual: true } : {}),
+      ...(query.q ? { OR: ['title', 'summary', 'titleZh', 'displayTitle'].map(field => ({ [field]: { contains: query.q!.slice(0, 200) } })) } : {}),
+    };
+    const [items, total] = await Promise.all([this.prisma.newsItem.findMany({ where, orderBy: { firstSeenAt: 'desc' }, skip: offset, take: 30 }), this.prisma.newsItem.count({ where })]);
     return { items, total, nextOffset: offset + items.length < total ? offset + items.length : null };
+  }
+  private async requireItem(id: string) {
+    const item = await this.prisma.newsItem.findUnique({ where: { id } });
+    if (!item) throw new NotFoundException('新闻不存在'); return item;
+  }
+  adminItemsById(id: string) { return this.requireItem(id); }
+  async saveManual(body: unknown, id?: string) {
+    const input = manualInput(body); const existing = id ? await this.requireItem(id) : null;
+    if (existing && !existing.isManual) throw new BadRequestException('采集原文不能改为手动草稿');
+    const itemId = existing?.id || randomUUID();
+    const url = input.originalUrl || new URL(`/articles/${itemId}`, process.env.PUBLIC_SITE_URL || process.env.CLIENT_URL || 'http://localhost:3420').href;
+    const contentChanged = !existing || existing.title !== input.title || existing.summary !== input.summary || existing.body !== input.body || existing.originalUrl !== input.originalUrl;
+    const data = { ...input, url, contentHash: analysisKey(input), eventKey: eventKey(input.title),
+      ...(contentChanged ? { ...fallbackDecision({ ...input, url }, 'disabled', this.config.rules, 'manual'), analysisKey: null, publicationStatus: 'draft' } : {}) };
+    const item = await this.prisma.$transaction(async tx => {
+      if (input.originalUrl) {
+        const duplicate = await tx.newsItem.findFirst({ where: { ...(id ? { id: { not: id } } : {}), OR: [{ url: input.originalUrl }, { originalUrl: input.originalUrl }] } });
+        if (duplicate) {
+          if (existing) throw new ConflictException('此 URL 已有新闻，请打开原记录，不合并或覆盖它');
+          return { item: duplicate, reused: true };
+        }
+      }
+      await tx.newsSource.upsert({ where: { id: 'manual' }, create: { id: 'manual', enabled: false }, update: {} });
+      if (existing) {
+        if ((body as { updatedAt?: unknown }).updatedAt !== existing.updatedAt.toISOString()) throw new ConflictException('草稿已更新，请重新读取后保存');
+        const changed = await tx.newsItem.updateMany({ where: { id: itemId, updatedAt: existing.updatedAt }, data });
+        if (!changed.count) throw new ConflictException('草稿已更新，请重新读取后保存');
+      } else await tx.newsItem.create({ data: { id: itemId, sourceId: 'manual', isManual: true, acquisitionKind: 'manual', ...fallbackDecision({ ...input, url }, 'disabled', this.config.rules, 'manual'), ...data, publicationStatus: 'draft' } });
+      await this.bridge?.sync(tx, itemId);
+      return { item: await tx.newsItem.findUniqueOrThrow({ where: { id: itemId } }), reused: false };
+    });
+    return item;
+  }
+  async importManual(body: unknown) {
+    const raw = (body as { url?: unknown } | null)?.url;
+    const url = typeof raw === 'string' && raw.length <= 2000 ? canonicalUrl(raw) : null;
+    if (!url || isDomesticUrl(url)) throw new BadRequestException('请填写有效的海外公开文章 URL');
+    const duplicate = await this.prisma.newsItem.findFirst({ where: { OR: [{ url }, { originalUrl: url }] } });
+    if (duplicate) return { item: duplicate, reused: true };
+    const source = validateSource({ name: '手动文章提取', kind: 'web', target: url, publisherHosts: [new URL(url).hostname], pollSeconds: 300, web: { maxPages: 1, maxItems: 1 } });
+    const result = await this.crawler.collect(source, []);
+    const sample = result.samples.find(item => item.title && item.url);
+    if (!sample) throw new BadRequestException('未取得文章元数据，请改用粘贴内容录入');
+    return this.saveManual({ title: sample.title, summary: sample.summary, body: sample.body || '', url: sample.url,
+      publisher: publisherForUrl(sample.url!) || '', publishedAt: sample.publishedAt?.toISOString() || '', images: sample.images });
+  }
+  async displayState(id: string, body: unknown) {
+    const value = body as { hiddenArticle?: unknown; hiddenImages?: unknown; displayTitle?: unknown; displaySummary?: unknown } | null;
+    if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length || Object.keys(value).some(key => !['hiddenArticle', 'hiddenImages', 'displayTitle', 'displaySummary'].includes(key))) throw new BadRequestException('展示设置无效');
+    const item = await this.requireItem(id); const data: Prisma.NewsItemUpdateManyMutationInput = { updatedAt: item.updatedAt };
+    for (const key of ['hiddenArticle', 'hiddenImages'] as const) if (value[key] !== undefined) {
+      if (typeof value[key] !== 'boolean') throw new BadRequestException('隐藏设置必须是布尔值'); data[key] = value[key];
+    }
+    for (const [key, max] of [['displayTitle', 1200], ['displaySummary', 8000]] as const) if (value[key] !== undefined) {
+      if (!item.isManual || (value[key] !== null && (typeof value[key] !== 'string' || value[key].length > max || (key === 'displayTitle' && !value[key].trim())))) throw new BadRequestException('手动展示文案无效');
+      data[key] = value[key] as string | null;
+    }
+    await this.prisma.$transaction(async tx => {
+      const changed = await tx.newsItem.updateMany({ where: { id, updatedAt: item.updatedAt }, data });
+      if (!changed.count) throw new ConflictException('新闻素材已修改，请重新读取后调整展示');
+      await this.bridge?.sync(tx, id);
+      if (value.hiddenArticle !== undefined) await tx.hotspot.updateMany({ where: { newsItemId: id }, data: { notifyEligible: false } });
+    });
+    return this.requireItem(id);
+  }
+  async analyzeManual(id: string) {
+    const item = await this.requireItem(id);
+    if (!item.isManual || item.hiddenArticle) throw new BadRequestException('只能分析未隐藏的手动新闻');
+    if (matchingExclusions(item, this.config.rules, item.sourceId).length) throw new BadRequestException('新闻命中排除规则，请先调整内容或规则');
+    const cache = await this.findCached(item);
+    if (cache?.status === 'done') {
+      const decision = await this.cachedDecision(item, item.sourceId, cache, 'disabled');
+      if (decision.aiStatus === 'done') {
+        const changed = await this.updateItem({ where: { id, updatedAt: item.updatedAt }, data: { ...decision, analysisKey: cache.key, updatedAt: item.updatedAt } });
+        if (!changed.count) throw new ConflictException('分析素材已修改，请重新提交');
+        return { cached: true };
+      }
+    }
+    if (!this.aiEnabled) throw new BadRequestException('请先保存并启用 AI 配置');
+    const key = analysisKey(item);
+    const prepared = await this.prisma.$transaction(async tx => {
+      const changed = await tx.newsItem.updateMany({ where: { id, updatedAt: item.updatedAt }, data: { analysisKey: key, aiStatus: 'pending', updatedAt: item.updatedAt } });
+      if (!changed.count) throw new ConflictException('分析素材已修改，请重新提交');
+      await tx.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: true }, update: {} });
+      await tx.newsAnalysis.updateMany({ where: { key, status: { not: 'done' }, queuedTaskId: null }, data: { status: 'pending', attempts: 0, error: null } });
+      const prepared = await tx.newsAnalysis.findUniqueOrThrow({ where: { key } });
+      if (prepared.status === 'done') await this.applyCache(tx, prepared);
+      return prepared;
+    });
+    if (prepared.status === 'done') return { cached: true };
+    if (prepared.queuedTaskId) return { taskId: prepared.queuedTaskId, status: 'queued' };
+    return this.queueBatch([key]);
+  }
+  async publishManual(id: string) {
+    const item = await this.requireItem(id);
+    if (!item.isManual || item.hiddenArticle || item.aiStatus !== 'done' || !item.visible || matchingExclusions(item, this.config.rules, item.sourceId).length) throw new BadRequestException('请先完成分析并确认新闻符合展示规则、未被隐藏');
+    if (item.publicationStatus === 'published') return item;
+    await this.prisma.$transaction(async tx => {
+      const changed = await tx.newsItem.updateMany({ where: { id, updatedAt: item.updatedAt, publicationStatus: 'draft', hiddenArticle: false, visible: true, aiStatus: 'done', analysisKey: item.analysisKey }, data: { publicationStatus: 'published', publishedOnceAt: item.publishedOnceAt || new Date(), updatedAt: item.updatedAt } });
+      if (!changed.count) throw new ConflictException('新闻状态或素材已修改，请重新读取');
+      await this.bridge?.sync(tx, id);
+      // Only the first publication can schedule an alert; restoring never replays it.
+      if (!item.publishedOnceAt) await tx.hotspot.updateMany({ where: { newsItemId: id }, data: { notifyEligible: true } });
+    });
+    await this.bridge?.announce(id); return this.requireItem(id);
   }
   async save(id: string, saved: unknown) {
     if (typeof saved !== 'boolean') throw new BadRequestException('saved 必须是布尔值');
@@ -174,6 +294,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     }
   }
   private async store(sourceId: string, item: CollectedItem, discoveredAt = new Date(), refresh = false) {
+    if (await this.prisma.newsItem.findFirst({ where: { isManual: true, OR: [{ url: item.url }, ...(item.originalUrl ? [{ originalUrl: item.originalUrl }] : [])] }, select: { id: true } })) return false;
     const where = { sourceId_url: { sourceId, url: item.url } };
     const existing = await this.prisma.newsItem.findUnique({ where });
     const sameContent = existing && existing.title === item.title && existing.summary === item.summary && existing.publishedAt?.getTime() === item.publishedAt?.getTime()
@@ -291,16 +412,19 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     let keys: string[] = []; let inputs: unknown[] = [];
     for (const cache of caches) {
       const linked = await this.prisma.newsItem.findMany({ where: { analysisKey: cache.key } });
-      if (!linked.some(item => item.originalPublisher && !matchingExclusions(item, this.config.rules, item.sourceId).length)) continue;
+      if (!linked.some(item => !item.isManual && this.analysisEligible(item))) continue;
       const input = { id: cache.key, ...JSON.parse(cache.inputJson) };
       if (keys.length && (keys.length >= 20 || JSON.stringify({ items: [...inputs, input] }).length > 6000)) { await this.queueBatch(keys); keys = []; inputs = []; }
       keys.push(cache.key); inputs.push(input);
     }
     if (keys.length) await this.queueBatch(keys);
   }
+  private analysisEligible(item: NewsItem) {
+    return !item.hiddenArticle && (item.isManual || !!item.originalPublisher) && !matchingExclusions(item, this.config.rules, item.sourceId).length;
+  }
   async startHistory() {
     if (!this.aiEnabled) throw new BadRequestException('请先保存并启用 AI 配置');
-    const records = await this.prisma.newsItem.findMany({ where: { aiStatus: { notIn: ['done', 'excluded'] } } });
+    const records = await this.prisma.newsItem.findMany({ where: { isManual: false, hiddenArticle: false, aiStatus: { notIn: ['done', 'excluded'] } } });
     let prepared = 0;
     for (const item of records) {
       if (!item.originalPublisher || matchingExclusions(item, this.config.rules, item.sourceId).length) continue;
@@ -322,7 +446,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const eligible: NewsAnalysis[] = [];
     for (const cache of caches) {
       const linked = await this.prisma.newsItem.findMany({ where: { analysisKey: cache.key } });
-      if (linked.some(item => item.originalPublisher && !matchingExclusions(item, this.config.rules, item.sourceId).length)) eligible.push(cache);
+      if (linked.some(item => this.analysisEligible(item))) eligible.push(cache);
       else await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'obsolete', queuedTaskId: null } });
     }
     const selected = eligible.slice(0, payload.chunkSize);

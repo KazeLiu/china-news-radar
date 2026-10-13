@@ -103,3 +103,12 @@ export async function fetchDigestSSR(date: string): Promise<DigestRecord | null>
 export async function fetchRecentDigestsSSR(): Promise<DigestSummary[]> {
   return getJson<DigestSummary[]>('/api/digest/recent');
 }
+export interface NewsArticle {
+  id: string; title: string; titleZh: string | null; summary: string; summaryZh: string | null; body: string;
+  images: string; originalPublisher: string | null; originalUrl: string | null; isManual: boolean;
+  publishedAt: string | null; firstSeenAt: string;
+}
+export async function fetchArticleSSR(id: string): Promise<NewsArticle | null> {
+  try { return await getJson<NewsArticle>(`/api/news/items/${encodeURIComponent(id)}`); }
+  catch (error) { if (error instanceof Error && error.message.startsWith('HTTP 404')) return null; throw error; }
+}

@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiRuntimeService } from './ai-runtime.service';
 import { NewsBridgeService } from './news-bridge.service';
-import { contentScope, presentHotspot } from './radar-content';
+import { contentScope, presentHotspot, publicNewsScope } from './radar-content';
 import { NEWS_TOPICS } from './analysis';
 
 export const TOPIC_LABELS: Record<string, string> = { policy: '政策', economy: '经济', diplomacy: '外交', technology: '科技', security: '安全', society: '社会' };
@@ -36,9 +36,9 @@ export class NewsEditorialService implements OnModuleInit {
     if (!record) return null;
     const data = JSON.parse(record.data);
     const ids = [...(data.highlights || []), ...(data.sections || []).flatMap((section: any) => section.items)].map((item: any) => item.newsItemId);
-    const allowed = new Set((await this.prisma.newsItem.findMany({ where: { id: { in: ids }, visible: true, originalPublisher: { not: null } }, select: { id: true } })).map(item => item.id));
+    const allowed = new Set((await this.prisma.newsItem.findMany({ where: publicNewsScope({ id: { in: ids } }), select: { id: true } })).map(item => item.id));
     const keep = (item: any) => allowed.has(item.newsItemId);
-    return { ...record, data: { ...data, summary: ids.some((id: string) => !allowed.has(id)) ? '' : data.summary,
+    return { ...record, data: { ...data, itemCount: allowed.size, summary: ids.some((id: string) => !allowed.has(id)) ? '' : data.summary,
       highlights: (data.highlights || []).filter(keep), sections: (data.sections || []).map((section: any) => ({ ...section, items: section.items.filter(keep) })) } };
   }
   async recentDigests(days = 62) {

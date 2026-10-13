@@ -36,3 +36,9 @@ export async function adminApi<T>(path: string, _token: string, body?: unknown, 
   }
 }
 export type SaveSettings = (path: string, body: unknown, method?: string) => Promise<AdminSettings | false>;
+export interface ManagedNews {
+  id: string; title: string; summary: string; body: string; titleZh: string | null; summaryZh: string | null;
+  displayTitle: string | null; displaySummary: string | null; url: string; originalUrl: string | null; originalPublisher: string | null;
+  images: string; publishedAt: string | null; firstSeenAt: string; updatedAt: string; isManual: boolean;
+  publicationStatus: 'draft' | 'published'; hiddenArticle: boolean; hiddenImages: boolean; visible: boolean; aiStatus: string; aiReason: string | null;
+}

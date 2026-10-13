@@ -32,7 +32,9 @@ export function inspectRecords(records: ScrapedRecord[], source: NewsSourceConfi
       author: typeof record.author === 'string' ? plainText(record.author).slice(0, 120) : null,
       body: typeof record.body === 'string' ? plainText(record.body).slice(0, 200000) : '', images: JSON.stringify([...new Set(media)]),
       topic: topicFor(`${title} ${summary}`), eventKey: eventKey(title), contentHash: createHash('sha256').update(JSON.stringify([title, summary, publishedAt])).digest('hex') });
-    return { title, summary, url, publishedAt, images: media, originalPublisher, accepted: !reason, reason };
+    return { title, summary, url, publishedAt, images: media, originalPublisher,
+      body: typeof record.body === 'string' ? plainText(record.body).slice(0, 200000) : '',
+      author: typeof record.author === 'string' ? plainText(record.author).slice(0, 120) : null, accepted: !reason, reason };
   });
   return { items, samples, rawCount: records.length, checkedCount: samples.length, structure, status: 200 } satisfies CollectionResult;
 }
