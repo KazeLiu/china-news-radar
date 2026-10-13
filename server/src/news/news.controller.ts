@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Put, Query, UnauthorizedException, ForbiddenException, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Put, Query, UnauthorizedException, ForbiddenException, Req, UseInterceptors } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
 import { NewsService } from './news.service';
 import { requireAdmin, AdminRequest } from './admin-access';
+import { NewsAuditInterceptor } from './news-audit.interceptor';
 
 export function validCollectorToken(header: string | undefined, token = process.env.COLLECTOR_TOKEN) {
   if (!token || token.length < 32 || !header?.startsWith('Bearer ')) return false;
@@ -16,6 +17,7 @@ function sameOrigin(req: { headers: Record<string, string | string[] | undefined
   if (!allowed.includes(String(origin))) throw new ForbiddenException('不允许跨站修改');
 }
 @Controller('api/news')
+@UseInterceptors(NewsAuditInterceptor)
 export class NewsController {
   constructor(private readonly news: NewsService) {}
   @Get('health') health() { return { ok: true, mode: 'news' }; }

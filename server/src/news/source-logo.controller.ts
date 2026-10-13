@@ -1,4 +1,5 @@
-import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, Res, UseInterceptors } from '@nestjs/common';
+import { NewsAuditInterceptor } from './news-audit.interceptor';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,6 +8,7 @@ function mediaDirectory() {
   return process.env.MEDIA_DIR || path.join(path.dirname(database), 'media');
 }
 @Controller('api/news')
+@UseInterceptors(NewsAuditInterceptor)
 export class SourceLogoController {
   @Post('admin/sources/logo') async upload(@Body() body: { data?: unknown }) {
     if (typeof body.data !== 'string' || body.data.length > 1_400_000) throw new BadRequestException('Logo 最大为 1 MiB');

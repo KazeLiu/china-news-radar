@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Bot, FileText, ListFilter, Moon, Radio, Rss, Sun } from 'lucide-react';
+import { ArrowLeft, Bot, FileText, History, ListFilter, Moon, Radio, Rss, Sun } from 'lucide-react';
 import { useTheme } from '@/providers/ThemeProvider';
 import { adminApi, type AdminSettings } from './admin-api';
 import { AiSettingsForm } from './AiSettingsForm';
@@ -11,11 +11,12 @@ import { AiQueuePanel } from './AiQueuePanel';
 import { SourceSettingsForm } from './SourceSettingsForm';
 import { RulesSettingsForm } from './RulesSettingsForm';
 import { NewsManagementPanel } from './NewsManagementPanel';
+import { LogsPanel } from './LogsPanel';
 import base from '../news.module.css';
 import styles from './admin.module.css';
 
-type Tab = 'ai' | 'sources' | 'rules' | 'news';
-const tabs = [{ id: 'ai' as const, label: 'AI 配置', Icon: Bot }, { id: 'sources' as const, label: '来源配置', Icon: Rss }, { id: 'rules' as const, label: '过滤规则', Icon: ListFilter }, { id: 'news' as const, label: '新闻管理', Icon: FileText }];
+type Tab = 'ai' | 'sources' | 'rules' | 'news' | 'logs';
+const tabs = [{ id: 'ai' as const, label: 'AI 配置', Icon: Bot }, { id: 'sources' as const, label: '来源配置', Icon: Rss }, { id: 'rules' as const, label: '过滤规则', Icon: ListFilter }, { id: 'news' as const, label: '新闻管理', Icon: FileText }, { id: 'logs' as const, label: '日志统计', Icon: History }];
 async function loadAdminSettings(token: string) {
   const [config, key] = await Promise.all([adminApi<AdminSettings>('admin/config', token), adminApi<{ apiKey: string }>('admin/ai/key', token)]);
   return { config, apiKey: key.apiKey };
@@ -35,7 +36,7 @@ export function AdminConsole() {
     const expired = (event: Event) => { setConfig(null); setSavedApiKey(''); setError((event as CustomEvent<string>).detail); };
     window.addEventListener('admin:expired', expired);
     const selected = new URLSearchParams(window.location.search).get('tab');
-    queueMicrotask(() => { if (!cancelled && (selected === 'sources' || selected === 'rules' || selected === 'news')) setTab(selected); });
+    queueMicrotask(() => { if (!cancelled && (selected === 'sources' || selected === 'rules' || selected === 'news' || selected === 'logs')) setTab(selected); });
     adminApi<{ initialized: boolean; authenticated: boolean }>('admin/auth/session', '').then(async session => {
       if (cancelled) return;
       setInitialized(session.initialized);
@@ -82,6 +83,7 @@ export function AdminConsole() {
         <div hidden={tab !== 'sources'}><SourceSettingsForm sources={config.sources} token={token} busy={busy} onSave={save} aiKeyConfigured={config.ai.keyConfigured} onAiUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
         <div hidden={tab !== 'rules'}><RulesSettingsForm initial={config.rules} sources={config.sources} token={token} busy={busy} onSave={save} /></div>
         {tab === 'news' && <NewsManagementPanel />}
+        {tab === 'logs' && <LogsPanel sources={config.sources} />}
         <p className={styles.footnote}>配置和会话保存在本站数据库。账号初始化或重置后，旧会话立即失效。</p>
       </>}
     </main>

@@ -303,5 +303,26 @@ model AiRequest {
   errorJson String?
   analyzedCount Int @default(0)
   translatedCount Int @default(0)
+  sourceIds String @default("[]")
   @@index([startedAt])
+}
+
+model NewsOperationLog {
+  id String @id @default(uuid())
+  startedAt DateTime @default(now())
+  kind String
+  route String
+  sourceId String?
+  status String
+  elapsedMs Int
+  errorCode String?
+  errorReason String?
+  taskId String?
+  discovered Int @default(0)
+  added Int @default(0)
+  updated Int @default(0)
+  duplicates Int @default(0)
+  filtered Int @default(0)
+  @@index([startedAt])
+  @@index([sourceId, startedAt])
 }

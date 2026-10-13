@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ADMIN_CONFIG_KEY, AiConfig, defaultConfig, readAiUsage, restoreConfig } from './admin-config';
 import { AI_TIMEOUT_MS, InvalidAnalysisResponse, aiTestError } from './ai-errors';
 import { SourceFetchError } from './public-network';
+import { NewsLogsService } from './news-logs.service';
 
 export async function reserveAiUsage(tx: Prisma.TransactionClient, limit: number, now = new Date()) {
   const key = `news-ai-usage-${now.toISOString().slice(0, 10)}`;
@@ -33,7 +34,7 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
   private stopped = false;
   private current?: AiTask;
   private lastRequest?: { id: string; requestId?: string; model: string; usage: { used: number; limit: number }; elapsedMs: number; checkedAt: Date };
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly logs: NewsLogsService) {}
   onModuleInit() {
     this.register('json', payload => this.performJson(payload.prompt, payload.input, payload.maxTokens));
     this.register('raw', payload => this.performRaw(payload.messages, payload.maxTokens));
@@ -115,8 +116,8 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
     throw new BadRequestException('服务正在重启，请通过任务 ID 查看结果');
   }
-  async performJson(prompt: string, input: unknown, maxTokens = 4000, onDispatch?: (tx: Prisma.TransactionClient) => Promise<void>) {
-    const raw = await this.performRaw([{ role: 'system', content: prompt }, { role: 'user', content: JSON.stringify(input) }], maxTokens, true, onDispatch);
+  async performJson(prompt: string, input: unknown, maxTokens = 4000, onDispatch?: (tx: Prisma.TransactionClient) => Promise<void>, sourceIds: string[] = []) {
+    const raw = await this.performRaw([{ role: 'system', content: prompt }, { role: 'user', content: JSON.stringify(input) }], maxTokens, true, onDispatch, sourceIds);
     try {
       const result: unknown = JSON.parse(raw);
       if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error();
@@ -126,7 +127,7 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
       throw new InvalidAnalysisResponse('模型必须返回有效的 JSON 对象。', this.lastRequest?.requestId);
     }
   }
-  async performRaw(messages: Messages, maxTokens = 4000, json = false, onDispatch?: (tx: Prisma.TransactionClient) => Promise<void>) {
+  async performRaw(messages: Messages, maxTokens = 4000, json = false, onDispatch?: (tx: Prisma.TransactionClient) => Promise<void>, sourceIds: string[] = []) {
     const task = this.current;
     if (!task) throw new Error('模型请求必须在持久任务中执行');
     const config = await this.config();
@@ -139,7 +140,7 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
       const changed = await tx.aiTask.updateMany({ where: { id: task.id, owner: task.owner, status: 'running', attempts: task.attempts }, data: { attempts: { increment: 1 } } });
       if (!changed.count) throw new ConflictException('任务租期已失效，未提交请求');
       await onDispatch?.(tx);
-      const request = await tx.aiRequest.create({ data: { taskId: task.id, kind: task.kind, model: config.model, attempt: task.attempts + 1 } });
+      const request = await tx.aiRequest.create({ data: { taskId: task.id, kind: task.kind, model: config.model, attempt: task.attempts + 1, sourceIds: JSON.stringify([...new Set(sourceIds)]) } });
       return { usage, request };
     });
     task.attempts++;
@@ -194,6 +195,7 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
       });
       if (!job) return;
       this.current = job; this.lastRequest = undefined;
+      const startedAt = new Date();
       heartbeat = setInterval(() => { void this.prisma.$transaction([
         this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { leaseUntil: new Date(Date.now() + LEASE_MS) } }),
         this.prisma.newsGenerationLease.updateMany({ where: { key: 'ai-runtime', owner }, data: { leaseUntil: new Date(Date.now() + LEASE_MS) } }),
@@ -201,6 +203,8 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
       try {
         const result = await this.handlers.get(job.kind)!(JSON.parse(job.payload), job);
         await this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { status: 'done', resultJson: JSON.stringify(result ?? null), activeKey: null, owner: null, leaseUntil: null, finishedAt: new Date(), errorJson: null } });
+        const failedTest = !!result && typeof result === 'object' && 'ok' in result && result.ok === false;
+        await this.logs.record({ kind: 'task', route: `ai-task/${job.kind}`, taskId: job.id, startedAt, elapsedMs: Date.now() - startedAt.getTime(), status: failedTest ? 'failed' : 'success', errorCode: failedTest ? 'test-failed' : null, errorReason: failedTest ? '后台测试已结束，结果为失败，请查看实际请求记录' : null });
       } catch (problem) {
         const protocolFailure = problem instanceof BadRequestException && !!this.lastRequest && ['digest', 'profile'].includes(job.kind);
         const diagnostic = aiTestError(problem, config.apiKey);
@@ -212,6 +216,7 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
           : response ? { code: 'task-rejected', message: typeof response === 'string' ? response : typeof (response as { message?: unknown }).message === 'string' ? (response as { message: string }).message : '任务未能完成，已有有效结果保留' }
           : aiTestError(problem, config.apiKey);
         await this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { status: retry ? 'queued' : 'failed', availableAt: new Date(Date.now() + (retry ? 30_000 * 2 ** (job.attempts - 1) : 0)), errorJson: JSON.stringify(safe), activeKey: retry ? job.activeKey : null, owner: null, leaseUntil: null, finishedAt: retry ? null : new Date() } });
+        await this.logs.record({ kind: 'task', route: `ai-task/${job.kind}`, taskId: job.id, startedAt, elapsedMs: Date.now() - startedAt.getTime(), status: 'failed', errorCode: retry ? 'retry-scheduled' : safe.code, errorReason: safe.message });
       }
     } finally {
       if (heartbeat) clearInterval(heartbeat);
