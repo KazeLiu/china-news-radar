@@ -668,7 +668,7 @@ export function ChangelogView() {
 
         <ul className="space-y-6">
           {CHANGELOG.map((entry) => (
-            <li key={entry.date} className="relative pl-8">
+            <li key={`${entry.date}-${entry.version || ''}-${entry.items[0]}`} className="relative pl-8">
               {/* dot */}
               <span className="absolute left-[3px] top-2 w-2.5 h-2.5 rounded-full bg-[var(--accent-blue)] dark:bg-blue-500 ring-4 ring-[var(--bg-base)]" />
 

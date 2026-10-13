@@ -32,6 +32,11 @@ export interface ScoringResult extends FiveDimScore {
   region: string;
 }
 
+export function computeQualityScore(dims: Pick<FiveDimScore, 'relevToAi' | 'novelty' | 'audience' | 'quality'>, tier: SourceTier): number {
+  const raw = dims.relevToAi * 3 + dims.novelty * 3 + dims.audience * 2.5 + dims.quality * 1.5;
+  return Math.min(100, Math.round((raw / 100) * TIER_MULTIPLIER[tier] * 100));
+}
+
 @Injectable()
 export class ScoringService {
   private readonly logger = new Logger(ScoringService.name);
@@ -194,13 +199,7 @@ tags: 1-3个简短中文标签（论文请标注研究方向如：Agent/RAG/多�
 
   /** Step 3: Code-computed final quality score */
   computeQualityScore(dims: FiveDimScore, tier: SourceTier): number {
-    const raw =
-      dims.relevToAi * 3.0 +
-      dims.novelty * 3.0 +
-      dims.audience * 2.5 +
-      dims.quality * 1.5;
-    // raw max = 100, apply tier multiplier
-    return Math.min(100, Math.round((raw / 100) * TIER_MULTIPLIER[tier] * 100));
+    return computeQualityScore(dims, tier);
   }
 
   /** Full scoring pipeline for a single item: pre-filter (cheap) → 5-dim scoring (only if AI-related) */

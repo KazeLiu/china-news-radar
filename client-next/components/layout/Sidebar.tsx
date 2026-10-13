@@ -10,6 +10,8 @@ import {
   Plug,
   History,
   Info,
+  Activity,
+  Settings2,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
@@ -31,6 +33,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "内容",
     items: [
+      { path: '/news', label: '快讯流', icon: <Activity className="w-4 h-4" /> },
+      { path: '/saved', label: '我的收藏', icon: <Bookmark className="w-4 h-4" /> },
       { path: "/curated", label: "精选", icon: <Star className="w-4 h-4" />, accent: "text-amber-400" },
       { path: "/hotspot", label: "热点雷达", icon: <Radio className="w-4 h-4" />, accent: "text-blue-400" },
       { path: "/digest", label: "AI 日报", icon: <CalendarDays className="w-4 h-4" />, accent: "text-emerald-400" },
@@ -40,6 +44,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: "工具",
     items: [
+      { path: '/admin', label: '后台管理', icon: <Settings2 className="w-4 h-4" /> },
       { path: "/agent", label: "Agent 接入", icon: <Plug className="w-4 h-4" />, accent: "text-cyan-400" },
       { path: "/changelog", label: "更新日志", icon: <History className="w-4 h-4" />, accent: "text-pink-400" },
       { path: "/about", label: "关于", icon: <Info className="w-4 h-4" />, accent: "text-slate-400" },
@@ -103,7 +108,7 @@ export function Sidebar({ unreadCount, onNavigate }: SidebarProps) {
           <BrandMark />
           <div className="flex flex-col leading-tight">
             <span className="text-[15px] font-bold tracking-wide bg-linear-to-r from-[var(--accent-blue)] via-[var(--accent-cyan)] to-[var(--accent-amber)] dark:from-blue-400 dark:via-cyan-400 dark:to-purple-400 bg-clip-text text-transparent">
-              AI&nbsp;RADAR
+              CHINA&nbsp;RADAR
             </span>
             <span className="text-[10px] text-[var(--text-muted)] tracking-wider uppercase">
               Hot · Curated · Daily

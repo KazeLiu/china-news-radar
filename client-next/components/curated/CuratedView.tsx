@@ -13,10 +13,12 @@ import { BackToTop } from '../common/BackToTop';
 import { SkeletonList } from '../common/Loader';
 import { EmptyState } from '../common/EmptyState';
 import type { Hotspot, HotspotTab } from '../../types';
+import { tabFilter } from '../../lib/filterState';
 
 type Period = 'today' | 'week';
 
 const CATEGORY_LABEL: Record<string, string> = {
+  policy: '政策', economy: '经济', diplomacy: '外交', technology: '科技', security: '安全', society: '社会',
   model: '模型发布', product: 'AI 产品', industry: '行业动态',
   research: '论文研究', community: '社区讨论', tips: '使用技巧',
 };
@@ -64,7 +66,7 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className="flex items-center gap-1 text-[12px] text-[var(--text-muted)] font-medium">
             {getSourceIcon(item.source, 'w-3.5 h-3.5')}
-            {getSourceLabel(item.source)}
+            {item.originalPublisher || getSourceLabel(item.source)}
           </span>
           {item.category && CATEGORY_LABEL[item.category] && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
@@ -229,14 +231,7 @@ export function CuratedView({
     }
 
     setLoading(true);
-    const opts: { category?: string; region?: string; search?: string } = {};
-    // Tab → category or region filter
-    if (activeTab === 'domestic' || activeTab === 'international') {
-      opts.region = activeTab;
-    } else if (activeTab !== 'all') {
-      opts.category = activeTab;
-    }
-    if (appliedSearch) opts.search = appliedSearch;
+    const opts = { ...tabFilter(activeTab), search: appliedSearch };
 
     curatedApi.getAll(period, 50, 0, opts)
       .then((res) => {
@@ -359,25 +354,18 @@ export function CuratedView({
         </div>
       )}
 
-      {loading ? (
-        <SkeletonList count={5} itemClassName="h-28 rounded-3xl" />
-      ) : items.length === 0 ? (
-        <EmptyState
-          variant={appliedSearch ? 'search' : 'star'}
-          title={appliedSearch ? '没有匹配的精选内容' : '暂无精选内容'}
-          description={appliedSearch ? `换个词试试，或者清空搜索看全部精选` : '系统正在抓取并评分最新资讯，稍后回来看看'}
-        />
-      ) : (
-        <div className="space-y-3">
-          {items.map((item, index) => (
-            <CuratedCard key={item.id} item={item} index={index} />
-          ))}
-        </div>
-      )}
+      <CuratedResults loading={loading} items={items} search={appliedSearch} />
 
       <BackToTop />
     </div>
   );
+}
+
+function CuratedResults({ loading, items, search }: { loading: boolean; items: Hotspot[]; search: string }) {
+  if (loading) return <SkeletonList count={5} itemClassName="h-28 rounded-3xl" />;
+  if (!items.length) return <EmptyState variant={search ? 'search' : 'star'} title={search ? '没有匹配的精选内容' : '暂无精选内容'}
+    description={search ? '换个词试试，或者清空搜索看全部精选' : '新报道完成质量评分后会进入精选；未评分记录可在快讯和热点中阅读。'} />;
+  return <div className="space-y-3">{items.map((item, index) => <CuratedCard key={item.id} item={item} index={index} />)}</div>;
 }
 
 function StatTile({

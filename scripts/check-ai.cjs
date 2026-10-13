@@ -30,7 +30,7 @@ function report(overrides = {}) {
     for (const id of ['reuters', 'ap', 'tg-xhqcankao']) await db.newsSource.create({ data: { id, enabled: true } });
     const service = new NewsService(db);
     let calls = 0;
-    let output = { version: 1, relation: 'related', topics: ['policy', 'economy'], type: 'report', language: 'en', reason: '模拟：涉及中国政策', translation: { title: '模拟政策快讯', summary: '模拟摘要。' } };
+    let output = { version: 2, scoring: { relevance: 8, novelty: 7, audience: 8, quality: 7, importance: 'high', tags: ['贸易'] }, relation: 'related', topics: ['policy', 'economy'], type: 'report', language: 'en', reason: '模拟：涉及中国政策', translation: { title: '模拟政策快讯', summary: '模拟摘要。' } };
     service.ai.chat.completions.create = async () => { calls++; return { choices: [{ message: { content: JSON.stringify(output) } }] }; };
     const item = report();
     await service.store('reuters', item);

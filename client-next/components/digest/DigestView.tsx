@@ -451,6 +451,7 @@ export function DigestView({
 
   const data = digest?.data;
   const hasContent = data && (
+    (data.sections?.some(section => section.items.length > 0) ?? false) ||
     (data.highlights?.length ?? 0) > 0 ||
     (data.domestic?.length ?? 0) > 0 ||
     (data.international?.length ?? 0) > 0 ||
@@ -469,7 +470,7 @@ export function DigestView({
             <CalendarDays className="w-4 h-4 text-[var(--accent-blue)] dark:text-blue-400" />
             AI 日报
           </h1>
-          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">AI 行业每日情报</p>
+          <p className="text-[11px] text-[var(--text-muted)] mt-0.5">海外涉华每日情报</p>
         </div>
 
         <div className="flex-1 overflow-y-scroll">
@@ -629,6 +630,11 @@ export function DigestView({
                 </Section>
               )}
 
+              {data!.sections?.filter(section => section.items.length > 0).map(section => (
+                <Section key={section.key} icon={<Globe2 className="w-4 h-4" />} title={section.title} count={section.items.length} accent="blue">
+                  <div className="space-y-2">{section.items.map(item => <SimpleItem key={item.url} item={item} />)}</div>
+                </Section>
+              ))}
               {/* 模型情报 */}
               {data!.modelIntel?.length > 0 && (
                 <Section icon={<Cpu className="w-4 h-4" />} title="模型情报" count={data!.modelIntel.length} accent="blue">

@@ -14,15 +14,12 @@
 	handle @ingest {
 		respond 404
 	}
-	handle /api/news/* {
+	@backend path /api/* /socket.io/* /aihot-skill
+	handle @backend {
 		reverse_proxy server:3001
 	}
-	# Expose the reader and admin page; admin APIs also require ADMIN_TOKEN.
-	@reader path / /admin /admin/ /_next/* /radar-icon.svg /favicon.ico /icon.png /apple-icon.png
-	handle @reader {
-		reverse_proxy client:3000
-	}
+	# Next.js serves the restored upstream pages; mutations still require ADMIN_TOKEN.
 	handle {
-		respond 404
+		reverse_proxy client:3000
 	}
 }

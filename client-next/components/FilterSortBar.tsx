@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { Keyword } from '../services/api';
+import { requestJson } from '../services/http';
 // FilterState and defaultFilterState live in lib/filterState to keep
 // this component file free of non-component exports (Fast Refresh).
 import { type FilterState, defaultFilterState } from '../lib/filterState';
@@ -24,50 +25,10 @@ const SORT_OPTIONS = [
   { value: 'publishedAt', label: '最新发布', icon: Clock },
   { value: 'importance', label: '重要程度', icon: Flame },
   { value: 'relevance', label: '相关性', icon: Target },
-  { value: 'hot', label: '热度综合', icon: TrendingUp },
+  { value: 'qualityScore', label: '质量评分', icon: TrendingUp },
 ];
 
-const SOURCE_OPTIONS = [
-  { value: '', label: '全部来源' },
-  // Search sources
-  { value: 'twitter', label: 'X (搜索)' },
-  { value: 'bing', label: 'Bing' },
-  { value: 'hackernews', label: 'HackerNews' },
-  { value: 'bilibili', label: 'Bilibili' },
-  // Official AI labs (T1)
-  { value: 'rss_openai', label: 'OpenAI Blog' },
-  { value: 'rss_anthropic', label: 'Anthropic' },
-  { value: 'rss_google_ai', label: 'Google AI Blog' },
-  { value: 'rss_deepmind', label: 'Google DeepMind' },
-  { value: 'rss_hugging_face', label: 'Hugging Face' },
-  { value: 'rss_microsoft_ai', label: 'Microsoft AI' },
-  { value: 'rss_mit_tech', label: 'MIT Tech Review' },
-  // Research / arXiv
-  { value: 'rss_arxiv_ai', label: 'arXiv cs.AI' },
-  { value: 'rss_arxiv_lg', label: 'arXiv cs.LG' },
-  { value: 'rss_arxiv_cl', label: 'arXiv cs.CL' },
-  { value: 'rss_arxiv_cv', label: 'arXiv cs.CV' },
-  // Quality media (T1.5)
-  { value: 'rss_the_decoder', label: 'The Decoder' },
-  { value: 'rss_venturebeat', label: 'VentureBeat' },
-  { value: 'rss_techcrunch', label: 'TechCrunch' },
-  { value: 'rss_synced', label: 'Synced' },
-  { value: 'rss_github', label: 'GitHub Blog' },
-  { value: 'rss_wheresyoured', label: "Where's Your Ed At" },
-  // Chinese sources
-  { value: 'rss_ithome', label: 'IT之家' },
-  { value: 'rss_36kr', label: '36氪' },
-  { value: 'rss_cls', label: '财联社' },
-  { value: 'rss_xueqiu', label: '雪球' },
-  { value: 'rss_chinanews', label: '中国新闻网' },
-  { value: 'rss_infoq', label: 'InfoQ' },
-  // Community
-  { value: 'rss_hacker_news', label: 'HN Best' },
-  { value: 'rss_v2ex', label: 'V2EX' },
-  { value: 'rss_juejin', label: '掘金' },
-  // Reddit
-  { value: 'reddit', label: 'Reddit' },
-];
+const DEFAULT_SOURCES = [{ value: '', label: '全部来源' }];
 
 const IMPORTANCE_OPTIONS = [
   { value: '', label: '全部等级' },
@@ -164,6 +125,13 @@ function Dropdown({
 }
 
 export default function FilterSortBar({ filters, onChange, keywords }: FilterSortBarProps) {
+  const [sourceOptions, setSourceOptions] = useState(DEFAULT_SOURCES);
+  const [sourceError, setSourceError] = useState('');
+  useEffect(() => {
+    requestJson<{ id: string; name: string }[]>('/api/news/sources')
+      .then(sources => setSourceOptions([...DEFAULT_SOURCES, ...sources.map(source => ({ value: `news_${source.id}`, label: source.name }))]))
+      .catch(error => setSourceError(error instanceof Error ? error.message : '来源列表读取失败'));
+  }, []);
   const [showFilters, setShowFilters] = useState(false);
   const sortScrollRef = useRef<HTMLDivElement>(null);
   const [sortCanScrollRight, setSortCanScrollRight] = useState(false);
@@ -296,7 +264,7 @@ export default function FilterSortBar({ filters, onChange, keywords }: FilterSor
           <div className="flex items-center gap-1.5 flex-wrap">
             {filters.source && (
               <FilterTag
-                label={SOURCE_OPTIONS.find(o => o.value === filters.source)?.label || filters.source}
+                label={sourceOptions.find(o => o.value === filters.source)?.label || filters.source}
                 onRemove={() => update('source', '')}
               />
             )}
@@ -338,11 +306,11 @@ export default function FilterSortBar({ filters, onChange, keywords }: FilterSor
             transition={{ duration: 0.2 }}
           >
             <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)]">
-              <Dropdown label="来源" value={filters.source} options={SOURCE_OPTIONS} onChange={(v) => update('source', v)} />
+              <Dropdown label="来源" value={filters.source} options={sourceOptions} onChange={(v) => update('source', v)} />
               <Dropdown label="重要程度" value={filters.importance} options={IMPORTANCE_OPTIONS} onChange={(v) => update('importance', v)} />
               <Dropdown label="关键词" value={filters.keywordId} options={keywordOptions} onChange={(v) => update('keywordId', v)} />
               <Dropdown label="时间" value={filters.timeRange} options={TIME_RANGE_OPTIONS} onChange={(v) => update('timeRange', v)} />
-              <Dropdown label="真实性" value={filters.isReal} options={REAL_OPTIONS} onChange={(v) => update('isReal', v)} />
+              {sourceError && <span role="alert" className="text-red-500 text-xs">{sourceError}</span>}
             </div>
           </m.div>
         )}

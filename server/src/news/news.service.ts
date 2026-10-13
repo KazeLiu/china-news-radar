@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, NotFoundException, ConflictException, Optional } from '@nestjs/common';
 import { Prisma, NewsAnalysis } from '@prisma/client';
 import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +12,8 @@ import { fetchSourceFeed, FeedFetchError, restoreFailures } from './feed-fetch';
 import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, restoreConfig, validateAi, validateRules, validateSource, readAiUsage } from './admin-config';
 import { matchingExclusions } from './content-filter';
 import { AI_TIMEOUT_MS, InvalidAnalysisResponse, aiTestError, analysisErrorDetail } from './ai-errors';
+import { createAiClient, reserveAiUsage } from './ai-runtime.service';
+import { NewsBridgeService } from './news-bridge.service';
 
 @Injectable()
 export class NewsService implements OnModuleInit, OnModuleDestroy {
@@ -29,9 +31,9 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private get aiEnabled() { return this.aiRequested && !!this.config.ai.apiKey; }
   private get dailyLimit() { return this.config.ai.dailyLimit; }
   private ai = this.makeAi();
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, @Optional() private readonly bridge?: NewsBridgeService) {}
 
-  private makeAi() { return this.aiEnabled ? new OpenAI({ apiKey: this.config.ai.apiKey, baseURL: this.config.ai.baseUrl, timeout: AI_TIMEOUT_MS, maxRetries: 0 }) : null; }
+  private makeAi() { return this.aiEnabled ? createAiClient(this.config.ai) : null; }
   private startAnalysisTimer() {
     if (!this.analysisTimer) this.analysisTimer = setInterval(() => {
       if (this.aiEnabled) void Promise.all([this.showOverdueFallbacks(), this.drainAnalysis()]).catch(() => this.logger.warn('AI 队列异常，原文已保留'));
@@ -51,6 +53,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       const { title, summary, url, originalPublisher, originalUrl, author, topic, eventKey, contentHash, publishedAt } = record;
       await this.store(record.sourceId, { title, summary, url, originalPublisher, originalUrl, author, topic, eventKey, contentHash, publishedAt }, record.firstSeenAt, true);
     }
+    await this.bridge?.rebuild();
     if (this.aiEnabled) {
       this.startAnalysisTimer();
       void this.drainAnalysis().catch(() => this.logger.warn('AI 队列异常，原文已保留'));
@@ -113,6 +116,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   async scan(force = true) {
     if (this.busy || this.configBusy) return { scanning: true, started: false };
     this.busy = true;
+    this.bridge?.scanStatus(true);
     try {
       const now = new Date();
       const states = await this.prisma.newsSource.findMany({ where: { enabled: true } });
@@ -120,7 +124,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       // At most two HTTP requests at a time. Manual scans still honor error backoff.
       for (let i = 0; i < due.length; i += 2) await Promise.all(due.slice(i, i + 2).map(s => this.collect(s)));
       return { scanning: false, started: true, sourcesChecked: due.length };
-    } finally { this.busy = false; }
+    } finally { this.busy = false; this.bridge?.scanStatus(false); }
   }
   private async collect(source: NewsSourceConfig) {
     if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
@@ -152,19 +156,28 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const where = { sourceId_url: { sourceId, url: item.url } };
     const existing = await this.prisma.newsItem.findUnique({ where });
     if (matchingExclusions(item, this.config.rules, sourceId).length) {
-      if (existing) await this.prisma.newsItem.updateMany({ where: { id: existing.id, updatedAt: existing.updatedAt },
+      if (existing) await this.updateItem({ where: { id: existing.id, updatedAt: existing.updatedAt },
         data: { visible: false, analysisKey: null, aiStatus: 'excluded', updatedAt: existing.updatedAt } });
       return !!existing;
     }
     if (existing?.contentHash === item.contentHash && !refresh) return false;
-    const key = analysisKey(item);
-    let cache = await this.prisma.newsAnalysis.findUnique({ where: { key } });
+    let key = analysisKey(item);
+    let cache = await this.findCached(item);
+    if (cache?.key) key = cache.key;
     if (!cache && this.aiEnabled) cache = await this.prisma.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)) }, update: {} });
     if (cache?.status === 'obsolete' && this.aiEnabled) cache = await this.prisma.newsAnalysis.update({ where: { key }, data: { status: 'pending', retryAt: null, leaseUntil: null } });
     const decision = await this.cachedDecision(item, sourceId, cache, this.aiEnabled ? cache?.status || 'pending' : 'disabled');
     if (this.aiEnabled && (!cache || ['pending', 'processing'].includes(cache.status))) decision.visible = false;
     const data = { ...item, analysisKey: key, ...decision };
-    await this.prisma.newsItem.upsert({ where, create: { ...data, sourceId, firstSeenAt: discoveredAt }, update: { ...data, ...(existing?.contentHash === item.contentHash ? { updatedAt: existing.updatedAt } : {}) } });
+    const args = { where, create: { ...data, sourceId, firstSeenAt: discoveredAt }, update: { ...data, ...(existing?.contentHash === item.contentHash ? { updatedAt: existing.updatedAt } : {}) } };
+    if (this.bridge) {
+      const stored = await this.prisma.$transaction(async tx => {
+        const record = await tx.newsItem.upsert(args);
+        await this.bridge!.sync(tx, record.id, !refresh && !existing);
+        return record;
+      });
+      if (!refresh && !existing) await this.bridge.announce(stored.id);
+    } else await this.prisma.newsItem.upsert(args);
     return true;
   }
   async ingest(input: Parameters<typeof telegramItem>[0]) {
@@ -187,8 +200,12 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private async showOverdueFallbacks() {
     // Slow providers or a long queue must not hide timely rule-matched news indefinitely.
     const overdue = await this.prisma.newsItem.findMany({ where: { aiStatus: 'pending', decisionBy: 'rules', firstSeenAt: { lte: new Date(Date.now() - 15_000) } } });
-    for (const item of overdue) await this.prisma.newsItem.updateMany({ where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt },
-      data: { ...fallbackDecision(item, 'pending', this.config.rules, item.sourceId), decisionBy: 'rules-waiting', updatedAt: item.updatedAt } });
+    for (const item of overdue) {
+      const args = { where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt }, data: { ...fallbackDecision(item, 'pending', this.config.rules, item.sourceId), decisionBy: 'rules-waiting', updatedAt: item.updatedAt } };
+      if (this.bridge) await this.prisma.$transaction(async tx => { await tx.newsItem.updateMany(args); await this.bridge!.sync(tx, item.id); });
+      else await this.prisma.newsItem.updateMany(args);
+      await this.bridge?.announce(item.id);
+    }
   }
   private async applyCache(tx: Prisma.TransactionClient, job: NewsAnalysis) {
     const items = await tx.newsItem.findMany({ where: { analysisKey: job.key } });
@@ -196,7 +213,27 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     for (const item of items) {
       const data = result ? { ...analysisDecision(result, item, this.config.rules, item.sourceId), analyzedAt: job.analyzedAt } : fallbackDecision(item, job.status, this.config.rules, item.sourceId);
       await tx.newsItem.updateMany({ where: { id: item.id, analysisKey: job.key, updatedAt: item.updatedAt }, data: { ...data, updatedAt: item.updatedAt } });
+      await this.bridge?.sync(tx, item.id);
     }
+  }
+  private async announceAnalysis(key: string) {
+    if (!this.bridge) return;
+    const items = await this.prisma.newsItem.findMany({ where: { analysisKey: key }, select: { id: true } });
+    for (const item of items) await this.bridge.announce(item.id);
+  }
+  private async findCached(item: Parameters<typeof analysisKey>[0]) {
+    const current = await this.prisma.newsAnalysis.findUnique({ where: { key: analysisKey(item) } });
+    if (current?.status === 'done') return current;
+    const legacy = await this.prisma.newsAnalysis.findUnique({ where: { key: analysisKey(item, 1) } });
+    return legacy && (legacy.status === 'done' || (legacy.status === 'failed' && legacy.resultJson)) ? legacy : current;
+  }
+  private async updateItem(args: Prisma.NewsItemUpdateManyArgs & { where: { id: string } }) {
+    if (!this.bridge) return this.prisma.newsItem.updateMany(args);
+    return this.prisma.$transaction(async tx => {
+      const result = await tx.newsItem.updateMany(args);
+      if (result.count) await this.bridge!.sync(tx, args.where.id);
+      return result;
+    });
   }
   private async cachedDecision(item: Parameters<typeof fallbackDecision>[0], sourceId: string, cache: NewsAnalysis | null, status: string) {
     if (cache?.status === 'done') {
@@ -236,12 +273,12 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         return { job: updated, call: false };
       }
       // A single SQLite transaction reserves budget before the paid request and claims the job.
-      await tx.setting.upsert({ where: { key: usageKey }, create: { key: usageKey, value: String(usage + 1) }, update: { value: String(usage + 1) } });
+      await reserveAiUsage(tx, this.dailyLimit, now);
       const updated = await tx.newsAnalysis.update({ where: { key: job.key }, data: { status: 'processing', attempts: { increment: 1 }, leaseUntil: new Date(now.getTime() + AI_TIMEOUT_MS + 30_000), retryAt: null } });
       return { job: updated, call: true };
     });
     if (!claimed) return false;
-    if (!claimed.call) return true;
+    if (!claimed.call) { await this.announceAnalysis(claimed.job.key); return true; }
     const { job } = claimed;
     let resultJson: string | null = null; let error: string | null = null; let retryDelay = 30_000 * 2 ** (job.attempts - 1);
     try {
@@ -258,6 +295,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       } });
       if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: job.key } }));
     });
+    await this.announceAnalysis(job.key);
     return true;
   }
 
@@ -271,6 +309,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (!choice?.message?.content) throw new InvalidAnalysisResponse('接口响应缺少 choices[0].message.content，无法读取模型结果。', response._request_id);
     try {
       const result = parseAnalysis(choice.message.content);
+      if (result.version !== 2) throw new Error('AI JSON enum invalid');
       if (JSON.parse(inputJson).summary && result.translation && !result.translation.summary) throw new Error('Translation summary missing');
       return result;
     } catch (problem) { throw new InvalidAnalysisResponse(analysisErrorDetail(problem), response._request_id); }
@@ -289,15 +328,10 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const checkedAt = new Date(); const start = Date.now();
     try {
       const usageKey = `news-ai-usage-${checkedAt.toISOString().slice(0, 10)}`;
-      const usage = await this.prisma.$transaction(async tx => {
-        const used = readAiUsage((await tx.setting.findUnique({ where: { key: usageKey } }))?.value);
-        if (used >= config.dailyLimit) throw new BadRequestException('今日调用额度已用尽，请调整并保存每日上限，或明天再测试');
-        await tx.setting.upsert({ where: { key: usageKey }, create: { key: usageKey, value: String(used + 1) }, update: { value: String(used + 1) } });
-        return { used: used + 1, limit: config.dailyLimit };
-      });
+      const usage = await this.prisma.$transaction(tx => reserveAiUsage(tx, config.dailyLimit, checkedAt));
       const metadata = { checkedAt, model: config.model, input, usage };
       try {
-        const ai = savedClient || new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, timeout: AI_TIMEOUT_MS, maxRetries: 0 });
+        const ai = savedClient || createAiClient(config);
         const result = await this.requestAnalysis(ai, config.model, config.instructions, JSON.stringify(input));
         const decision = analysisDecision(result, { ...input, url: 'https://example.invalid/ai-test' }, []);
         return { ...metadata, ok: true, elapsedMs: Date.now() - start, result, preview: { visible: decision.visible, decisionBy: decision.decisionBy } };
@@ -332,9 +366,10 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const ai = validateAi(body, this.config.ai);
     await this.updateConfig({ ...this.config, ai }, undefined, async () => { if (!this.aiEnabled) {
       const pending = await this.prisma.newsItem.findMany({ where: { aiStatus: 'pending' } });
-      for (const item of pending) await this.prisma.newsItem.updateMany({ where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt },
+      for (const item of pending) await this.updateItem({ where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt },
         data: { ...fallbackDecision(item, 'disabled', this.config.rules, item.sourceId), updatedAt: item.updatedAt } });
     } });
+    await this.bridge?.rebuild();
     return this.adminConfig();
   }
   async configureSource(body: unknown) {
@@ -394,14 +429,14 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         const excluded = matchingExclusions(item, this.config.rules, item.sourceId).length > 0;
         if (excluded) {
           if (item.visible || item.aiStatus !== 'excluded' || item.analysisKey) {
-            const result = await this.prisma.newsItem.updateMany({ where: { id: item.id, updatedAt: item.updatedAt }, data: { visible: false, aiStatus: 'excluded', analysisKey: null, updatedAt: item.updatedAt } });
+            const result = await this.updateItem({ where: { id: item.id, updatedAt: item.updatedAt }, data: { visible: false, aiStatus: 'excluded', analysisKey: null, updatedAt: item.updatedAt } });
             changed += result.count;
           }
         } else if (item.aiStatus === 'excluded') {
           // Restore from an existing cache or rules only; rule edits never buy a new analysis.
-          const key = analysisKey(item); const cache = await this.prisma.newsAnalysis.findUnique({ where: { key } });
+          const cache = await this.findCached(item); const key = cache?.key || analysisKey(item);
           const decision = await this.cachedDecision(item, item.sourceId, cache, 'disabled');
-          const result = await this.prisma.newsItem.updateMany({ where: { id: item.id, updatedAt: item.updatedAt }, data: { ...decision, analysisKey: decision.aiStatus === 'done' ? key : null, updatedAt: item.updatedAt } });
+          const result = await this.updateItem({ where: { id: item.id, updatedAt: item.updatedAt }, data: { ...decision, analysisKey: decision.aiStatus === 'done' ? key : null, updatedAt: item.updatedAt } });
           changed += result.count;
         }
       }

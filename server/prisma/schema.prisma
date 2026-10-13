@@ -19,6 +19,8 @@ model Keyword {
   updatedAt  DateTime    @updatedAt
   hotspots   Hotspot[]
   entityCard EntityCard?
+  newsMatches NewsKeywordMatch[]
+  newsProfile NewsEntityProfile?
 }
 
 model EntityCard {
@@ -43,6 +45,9 @@ model EntityRelation {
 
 model Hotspot {
   id              String    @id @default(uuid())
+  newsItemId      String?   @unique
+  newsItem        NewsItem? @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
+  notifyEligible Boolean @default(false)
   title           String
   content         String
   url             String
@@ -174,6 +179,8 @@ model NewsItem {
   aiReason           String?
   aiInputTruncated   Boolean    @default(false)
   analyzedAt         DateTime?
+  hotspot            Hotspot?
+  keywordMatches     NewsKeywordMatch[]
 
   @@unique([sourceId, url])
   @@index([publishedAt, firstSeenAt])
@@ -197,4 +204,32 @@ model NewsAnalysis {
   updatedAt   DateTime @updatedAt
 
   @@index([status, retryAt])
+}
+
+model NewsKeywordMatch {
+  newsItemId String
+  keywordId String
+  newsItem NewsItem @relation(fields: [newsItemId], references: [id], onDelete: Cascade)
+  keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  @@id([newsItemId, keywordId])
+  @@index([keywordId])
+}
+
+model NewsDigest {
+  date String @id
+  data String
+  createdAt DateTime @default(now())
+}
+
+model NewsEntityProfile {
+  keywordId String @id
+  keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  data String
+  generatedAt DateTime @default(now())
+}
+
+model NewsGenerationLease {
+  key String @id
+  owner String
+  leaseUntil DateTime
 }

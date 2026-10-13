@@ -4,7 +4,7 @@ export type HotspotSource =
   | `rss_${string}`;
 
 export type Importance = 'low' | 'medium' | 'high' | 'urgent';
-export type HotspotCategory = 'model' | 'product' | 'industry' | 'research' | 'community' | 'tips';
+export type HotspotCategory = 'policy' | 'economy' | 'diplomacy' | 'technology' | 'security' | 'society' | 'model' | 'product' | 'industry' | 'research' | 'community' | 'tips';
 export type HotspotRegion = 'domestic' | 'international';
 export type HotspotTab = 'all' | HotspotCategory | 'domestic' | 'international';
 
@@ -28,6 +28,15 @@ export interface Keyword {
 
 export interface Hotspot {
   id: string;
+  newsItemId?: string;
+  originalTitle?: string;
+  originalSummary?: string;
+  originalPublisher?: string;
+  originalUrl?: string;
+  firstSeenAt?: string;
+  aiStatus?: string;
+  scoringStatus?: 'scored' | 'unscored' | 'rules';
+  decisionBy?: string;
   title: string;
   content: string;
   url: string;
@@ -139,6 +148,9 @@ export interface DigestPaperItem {
 }
 
 export interface DigestData {
+  version?: number;
+  sections?: { key: string; title: string; items: DigestSimpleItem[] }[];
+  generationStatus?: string;
   summary: string;
   highlights: DigestHighlight[];
   domestic: DigestSimpleItem[];

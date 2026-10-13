@@ -121,13 +121,14 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
   const handleRefresh = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     setRefreshingId(id);
+    setError('');
     try {
       await entitiesApi.refresh(id);
       onToast?.('刷新成功', 'success');
       await loadEntities();
       if (selectedId === id) loadDetail(id);
-    } catch {
-      onToast?.('刷新失败', 'error');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '刷新失败'; setError(message); onToast?.(message, 'error');
     } finally {
       setRefreshingId(null);
     }
@@ -140,8 +141,8 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
       setEntities((prev) => prev.filter((en) => en.id !== entityId));
       if (selectedId === entityId) { setSelectedId(null); setDetail(null); }
       onToast?.('已删除', 'success');
-    } catch {
-      onToast?.('删除失败', 'error');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '删除失败'; setError(message); onToast?.(message, 'error');
     }
   };
 
@@ -171,7 +172,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
             <input
               value={newKeyword}
               onChange={(e) => setNewKeyword(e.target.value)}
-              placeholder="添加关键词，如 Claude..."
+              placeholder="添加国家、机构、人物或议题…"
               aria-label="添加关键词"
               disabled={isAdding}
               className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm bg-[var(--input-bg)] border border-[var(--input-border)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-blue-500/50 transition-colors"
@@ -193,7 +194,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
             <EmptyState
               variant="bookmark"
               title="添加你关注的实体"
-              description="输入 Claude、OpenAI、Cursor 等关键词，AI 会自动抓取相关动态"
+              description="输入国家、机构、人物或议题，关联已采集的海外涉华报道"
             />
           ) : (
             entities.map((entity) => (
@@ -317,7 +318,7 @@ function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: En
       <div className="grid grid-cols-3 gap-3">
         <StatCard label="今日提及" value={entity.todayMentions} />
         <StatCard label="7日提及" value={totalMentions} />
-        <StatCard label="关联产品" value={relData?.relatedProducts?.length ?? 0} />
+        <StatCard label="关联实体" value={detail.relations.length} />
       </div>
 
       {/* Relation graph */}
@@ -363,6 +364,9 @@ function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: En
           {relData.relatedCompanies?.length > 0 && (
             <RelatedSection title="相关公司" items={relData.relatedCompanies} color="emerald" onTagClick={handleNodeClick} />
           )}
+          {!!relData.relatedCountries?.length && <RelatedSection title="相关国家" items={relData.relatedCountries} color="emerald" onTagClick={handleNodeClick} />}
+          {!!relData.relatedOrganizations?.length && <RelatedSection title="相关机构" items={relData.relatedOrganizations} color="emerald" onTagClick={handleNodeClick} />}
+          {!!relData.relatedPeople?.length && <RelatedSection title="相关人物" items={relData.relatedPeople} color="emerald" onTagClick={handleNodeClick} />}
           {relData.relatedModels?.length > 0 && (
             <RelatedSection title="关联模型" items={relData.relatedModels} color="blue" onTagClick={handleNodeClick} />
           )}
@@ -390,7 +394,7 @@ function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: En
               >
                 {/* Source + importance + quality on top */}
                 <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)] mb-1.5">
-                  <span className="font-medium">{n.source}</span>
+                  <span className="font-medium">{n.originalPublisher || n.source}</span>
                   {n.importance && n.importance !== 'low' && (
                     <span className={cn(
                       'text-[10px] px-1.5 py-0.5 rounded',

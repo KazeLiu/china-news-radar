@@ -1,14 +1,13 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { Activity, ArrowDown, ArrowUpRight, Bookmark, Check, CircleAlert, Globe2, Moon, Radio, RefreshCw, Search, Settings2, Sun, X } from 'lucide-react';
-import { useTheme } from '@/providers/ThemeProvider';
+import { ArrowDown, ArrowUpRight, Bookmark, Check, CircleAlert, Radio, RefreshCw, Search, X } from 'lucide-react';
 import styles from './news.module.css';
 import { NewsAnalysisDetails } from './NewsAnalysisDetails';
 import { topicsFor, decisionName, clock, isGoogleIndex, type AnalysisItem } from './news-format';
 import type { Source } from './NewsSourceRow';
 import { requestJson } from '@/services/http';
+import { adminHeaders } from '@/services/admin-session';
 
 interface Item extends AnalysisItem { id: string; sourceId: string; url: string; originalPublisher: string | null; originalUrl: string | null; eventKey: string; publishedAt: string | null; firstSeenAt: string; updatedAt: string; saved: boolean }
 interface Status { total: number; scanning: boolean; aiEnabled: boolean; aiMode: string; aiDailyUsed: number; aiDailyLimit: number; aiPending: number; aiFailed: number; aiLimited: number; collectorEnabled: boolean; latestDiscoveryAt: string | null }
@@ -16,11 +15,10 @@ const TOPICS = [['', '全部快讯'], ['policy', '政策'], ['economy', '经济'
 const topicName = (topic: string) => TOPICS.find(t => t[0] === topic)?.[1] || '社会';
 function ago(value: string) { const mins = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 60_000)); return mins < 1 ? '刚刚' : mins < 60 ? `${mins} 分钟前` : mins < 1440 ? `${Math.floor(mins / 60)} 小时前` : clock(value); }
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  return requestJson<T>(`/api/news/${path}`, init);
+  return requestJson<T>(`/api/news/${path}`, { ...init, headers: init?.method === 'POST' ? adminHeaders() : init?.headers });
 }
 
-export function NewsReader() {
-  const { theme, toggleTheme } = useTheme();
+export function NewsReader({ initialSaved = false }: { initialSaved?: boolean }) {
   const [items, setItems] = useState<Item[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [status, setStatus] = useState<Status | null>(null);
@@ -28,7 +26,7 @@ export function NewsReader() {
   const [next, setNext] = useState<number | null>(null);
   const [q, setQ] = useState(''); const [search, setSearch] = useState('');
   const [topic, setTopic] = useState(''); const [source, setSource] = useState('');
-  const [saved, setSaved] = useState(false); const [clues, setClues] = useState(false);
+  const saved = initialSaved; const [clues, setClues] = useState(false);
   const [english, setEnglish] = useState(false);
   const [loading, setLoading] = useState(true); const [scanning, setScanning] = useState(false);
   const [error, setError] = useState(''); const [metaError, setMetaError] = useState(''); const [notice, setNotice] = useState('');
@@ -75,19 +73,9 @@ export function NewsReader() {
     catch (e) { setError(e instanceof Error ? e.message : '收藏失败'); }
     finally { setPending(null); }
   }
-  return <div className={styles.app}>
-    <header className={styles.header}>
-      <button type="button" className={styles.brand} onClick={() => setSaved(false)} aria-label="回到全部快讯"><span className={styles.logo}><Radio size={22} /></span><span>CHINA <b>RADAR</b><small>海外涉华快讯</small></span></button>
-      <div className={styles.headerRight}><Link className={styles.adminLink} href="/admin"><Settings2 size={16} />后台管理</Link><button type="button" className={styles.iconButton} onClick={toggleTheme} aria-label={theme === 'dark' ? '切换浅色主题' : '切换深色主题'}>{theme === 'dark' ? <Sun size={19} /> : <Moon size={19} />}</button></div>
-    </header>
+  return <div className={`${styles.app} ${styles.embedded}`}>
     <div className={styles.layout}>
-      <aside className={styles.sidebar}>
-        <p className={styles.navLabel}>工作台 / WORKSPACE</p>
-        <nav aria-label="主要导航"><button type="button" className={!saved ? styles.navActive : ''} onClick={() => setSaved(false)}><Activity size={18} />快讯流</button><button type="button" className={saved ? styles.navActive : ''} onClick={() => setSaved(true)}><Bookmark size={18} />我的收藏</button><Link className={styles.navLink} href="/admin?tab=sources"><Settings2 size={18} />来源管理{failed.length > 0 && <span className={styles.count}>{failed.length}</span>}</Link></nav>
-        <div className={styles.sourceNav}><p className={styles.navLabel}>关注来源 / SOURCES</p>{sources.filter(s => s.kind !== 'telegram').map(s => <button type="button" key={s.id} onClick={() => { setSource(s.id); setSaved(false); }} className={source === s.id ? styles.sourceActive : ''}><span className={`${styles.dot} ${s.error ? styles.dotError : s.enabled && s.lastSuccessAt ? styles.dotOk : ''}`} /><span>{s.name}</span><small>{s.kind === 'reserved' ? '待接入' : s.enabled ? '' : '已暂停'}</small></button>)}</div>
-        <div className={styles.sidebarFoot}><Globe2 size={17} /><p>关注中国，连接世界。<small>保留出处，原文优先。</small></p></div>
-      </aside>
-      <main className={styles.main}>
+      <section className={styles.main} aria-label="快讯内容">
         <div className={styles.heading}><div><p className={styles.eyebrow}>THE WORLD, ON CHINA</p><h1>{saved ? '值得留存的消息。' : '动向，先一步看见。'}</h1><p>{saved ? '收藏保存在服务器，随时回到报道原文。' : '海外报道中的中国。按首次发现时间排列，持续更新。'}</p></div><button type="button" className={styles.refresh} disabled={scanning || status?.scanning} onClick={scan}><RefreshCw size={16} className={scanning || status?.scanning ? styles.spin : ''} />{scanning || status?.scanning ? '采集中' : '检查更新'}</button></div>
         <div className={styles.statusBar}><span><span className={`${styles.dot} ${healthy.length ? styles.dotOk : ''}`} />{!status ? '采集状态未读取' : status.collectorEnabled === false ? '自动采集已暂停' : `${healthy.length} 个来源正常`}</span><span>{failed.length ? `${failed.length} 个来源暂时失败` : '公开 RSS · 每 2–3 分钟检查'}</span><span className={styles.statusEnd}>最近采集 {clock(status?.latestDiscoveryAt || null)}</span></div>
         {status?.aiEnabled && <div className={styles.analysisNotice} role="status"><span>AI 分析待处理 {status.aiPending} 条 · 今日调用 {status.aiDailyUsed}/{status.aiDailyLimit}</span><span>失败 {status.aiFailed} 条 · 额度暂停 {status.aiLimited} 条，均采用规则兜底</span></div>}
@@ -108,8 +96,7 @@ export function NewsReader() {
           {next !== null && <button type="button" className={styles.loadMore} disabled={loading} onClick={() => load(next)}>{loading ? '读取中…' : '加载更多'}<ArrowDown size={16} /></button>}
           <footer className={styles.footer}><span>{!status ? 'AI 状态未读取。' : status.aiEnabled ? 'AI 统一分析与翻译，结果全站复用；失败时规则兜底。' : 'AI 未启用，当前采用规则兜底。'}</span><span>时间按设备所在时区显示</span></footer>
         </>
-      </main>
+      </section>
     </div>
-    <nav className={styles.mobileNav} aria-label="手机导航"><button type="button" className={!saved ? styles.mobileActive : ''} onClick={() => setSaved(false)}><Activity size={19} />快讯</button><button type="button" className={saved ? styles.mobileActive : ''} onClick={() => setSaved(true)}><Bookmark size={19} />收藏</button><Link className={styles.mobileAdmin} href="/admin"><Settings2 size={19} />后台</Link></nav>
   </div>;
 }

@@ -14,6 +14,7 @@ import { DigestModule } from './digest/digest.module';
 import { ChatModule } from './chat/chat.module';
 import { AgentModule } from './agent/agent.module';
 import { EntitiesModule } from './entities/entities.module';
+import { RadarModule } from './radar.module';
 
 @Module({
   imports: [
@@ -24,11 +25,9 @@ import { EntitiesModule } from './entities/entities.module';
     KeywordsModule,
     HotspotsModule,
     NotificationsModule,
-    SettingsModule,
-    SchedulerModule,
+    ...(process.env.RADAR_MODE === 'legacy' ? [SchedulerModule, SettingsModule, ChatModule] : [RadarModule]),
     CuratedModule,
     DigestModule,
-    ChatModule,
     AgentModule,
     EntitiesModule,
   ],

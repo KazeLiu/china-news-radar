@@ -1,13 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { HttpException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import OpenAI from 'openai';
+import { NewsEditorialService } from '../news/news-editorial.service';
+import { contentScope, newsInclude, newsMode, presentHotspot } from '../news/radar-content';
 
 @Injectable()
 export class EntitiesService {
   private readonly client: OpenAI;
   private readonly model: string;
 
-  constructor(private prisma: PrismaService) {
+  constructor(private prisma: PrismaService, @Optional() private readonly editorial?: NewsEditorialService) {
     this.client = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY ?? '',
       baseURL: process.env.OPENAI_BASE_URL ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -17,12 +19,12 @@ export class EntitiesService {
 
   async findAll() {
     const cards = await this.prisma.entityCard.findMany({
-      include: { keyword: { select: { id: true, text: true, isActive: true } } },
+      include: { keyword: { select: { id: true, text: true, isActive: true, newsProfile: true } } },
       orderBy: { createdAt: 'desc' },
     });
     const enriched = await Promise.all(
       cards.map(async (card) => ({
-        ...card,
+        ...this.presentCard(card),
         todayMentions: await this.getTodayMentions(card.name),
         latestNews: await this.getLatestNews(card.name, 3),
       })),
@@ -33,7 +35,7 @@ export class EntitiesService {
   async findOne(id: string) {
     const card = await this.prisma.entityCard.findUnique({
       where: { id },
-      include: { keyword: { select: { id: true, text: true, isActive: true } } },
+      include: { keyword: { select: { id: true, text: true, isActive: true, newsProfile: true } } },
     });
     if (!card) throw new NotFoundException('Entity not found');
     const [trend, latestNews, relations] = await Promise.all([
@@ -41,10 +43,17 @@ export class EntitiesService {
       this.getLatestNews(card.name, 8),
       this.getRelations(card.name),
     ]);
-    return { ...card, trend, latestNews, relations };
+    return { ...this.presentCard(card), trend, latestNews, relations };
   }
 
   async getGraph() {
+    if (this.editorial) {
+      const cards = await this.findAll();
+      const nodes = cards.map(card => ({ name: card.name, type: card.type || 'topic', isTracked: true }));
+      const edges = (await Promise.all(cards.map(card => this.getRelations(card.name)))).flat();
+      for (const edge of edges) if (!nodes.some(node => node.name === edge.toName)) nodes.push({ name: edge.toName, type: 'related', isTracked: false });
+      return { nodes, edges };
+    }
     const [cards, relations] = await Promise.all([
       this.prisma.entityCard.findMany({ select: { name: true, type: true } }),
       this.prisma.entityRelation.findMany(),
@@ -88,12 +97,28 @@ export class EntitiesService {
 
   async createForKeyword(keywordId: string, name: string): Promise<void> {
     const existing = await this.prisma.entityCard.findUnique({ where: { keywordId } });
-    if (existing) return;
+    if (existing && !this.editorial) return;
 
     // Create placeholder immediately so frontend can show loading state
-    const card = await this.prisma.entityCard.create({
+    const card = existing || await this.prisma.entityCard.create({
       data: { keywordId, name, relatedData: null, lastRefresh: new Date() },
     });
+    if (this.editorial) {
+      if (await this.prisma.newsEntityProfile.findUnique({ where: { keywordId } })) return;
+      await this.prisma.newsEntityProfile.upsert({ where: { keywordId }, create: { keywordId, data: JSON.stringify({ generationStatus: 'pending' }) }, update: {} });
+      try { await this.editorial.profile(keywordId); }
+      catch (error) {
+        const response = error instanceof HttpException ? error.getResponse() : null;
+        const safe = typeof response === 'string' ? response : (response as { detail?: string; message?: string } | null)?.detail || (response as { message?: string } | null)?.message;
+        const requestId = typeof response === 'object' && response ? (response as { requestId?: string }).requestId : undefined;
+        const summary = `关注档案生成失败：${typeof safe === 'string' ? safe : '请检查后台 AI 配置与额度后手动刷新。'}${requestId ? `（请求 ID：${requestId}）` : ''}`;
+        await this.prisma.newsEntityProfile.updateMany({
+          where: { keywordId, data: JSON.stringify({ generationStatus: 'pending' }) },
+          data: { data: JSON.stringify({ type: 'topic', summary, generationStatus: 'failed' }) },
+        });
+      }
+      return;
+    }
 
     // Fill in AI profile (may take a few seconds)
     const entityData = await this.generateProfile(name);
@@ -115,6 +140,8 @@ export class EntitiesService {
     const card = await this.prisma.entityCard.findUnique({ where: { id } });
     if (!card) throw new NotFoundException('Entity not found');
 
+    if (this.editorial) { await this.editorial.profile(card.keywordId); return this.findOne(id); }
+
     const entityData = await this.generateProfile(card.name);
 
     await this.prisma.entityRelation.deleteMany({ where: { fromName: card.name } });
@@ -132,6 +159,13 @@ export class EntitiesService {
   }
 
   // ── Private helpers ─────────────────────────────────────────────────────────
+  private presentCard(card: any) {
+    if (!this.editorial) return card;
+    const profile = card.keyword.newsProfile;
+    const data = profile ? JSON.parse(profile.data) : { type: 'topic', summary: `${card.name} 的关注档案尚未生成。`, aliases: [], generationStatus: 'missing' };
+    const { newsProfile, ...keyword } = card.keyword;
+    return { ...card, keyword, type: data.type || 'topic', summary: data.summary, relatedData: data.generationStatus === 'pending' ? null : JSON.stringify(data), lastRefresh: profile?.generatedAt || card.lastRefresh };
+  }
 
   private async generateProfile(name: string): Promise<EntityProfile> {
     const fallback: EntityProfile = {
@@ -210,32 +244,31 @@ export class EntitiesService {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     return this.prisma.hotspot.count({
-      where: {
+      where: contentScope({
         createdAt: { gte: today },
-        OR: [{ title: { contains: name } }, { summary: { contains: name } }],
-      },
+        OR: [{ title: { contains: name } }, { summary: { contains: name } }, ...(newsMode() ? [{ newsItem: { is: { keywordMatches: { some: { keyword: { text: name, isActive: true } } } } } }] : [])],
+      }),
     });
   }
 
   async getLatestNews(name: string, limit: number) {
-    return this.prisma.hotspot.findMany({
-      where: {
-        qualityScore: { gte: 60 },
-        OR: [{ title: { contains: name } }, { summary: { contains: name } }],
-      },
+    const items = await this.prisma.hotspot.findMany({
+      where: contentScope({ ...(newsMode() ? {} : { qualityScore: { gte: 60 } }),
+        OR: [{ title: { contains: name } }, { summary: { contains: name } }, ...(newsMode() ? [{ newsItem: { is: { keywordMatches: { some: { keyword: { text: name, isActive: true } } } } } }] : [])] }),
       orderBy: { createdAt: 'desc' },
       take: limit,
-      select: { id: true, title: true, url: true, source: true, createdAt: true, summary: true },
+      include: newsInclude(),
     });
+    return items.map(presentHotspot);
   }
 
   private async getTrend(name: string): Promise<{ date: string; count: number }[]> {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const hotspots = await this.prisma.hotspot.findMany({
-      where: {
+      where: contentScope({
         createdAt: { gte: sevenDaysAgo },
-        OR: [{ title: { contains: name } }, { summary: { contains: name } }],
-      },
+        OR: [{ title: { contains: name } }, { summary: { contains: name } }, ...(newsMode() ? [{ newsItem: { is: { keywordMatches: { some: { keyword: { text: name, isActive: true } } } } } }] : [])],
+      }),
       select: { createdAt: true },
     });
 
@@ -252,6 +285,12 @@ export class EntitiesService {
   }
 
   private async getRelations(name: string) {
+    if (this.editorial) {
+      const keyword = await this.prisma.keyword.findUnique({ where: { text: name }, include: { newsProfile: true } });
+      const data = JSON.parse(keyword?.newsProfile?.data || '{}');
+      return [...(data.relatedCountries || []), ...(data.relatedOrganizations || []), ...(data.relatedCompanies || []), ...(data.relatedPeople || [])]
+        .map((toName: string) => ({ id: `${name}:${toName}`, fromName: name, toName, relation: 'related_to' }));
+    }
     return this.prisma.entityRelation.findMany({ where: { fromName: name } });
   }
 }

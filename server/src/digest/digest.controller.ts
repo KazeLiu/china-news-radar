@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Req } from '@nestjs/common';
 import { DigestService } from './digest.service';
+import { AdminRequest, requireAdminMutation } from '../news/admin-access';
+import { newsMode } from '../news/radar-content';
 
 @Controller('api/digest')
 export class DigestController {
@@ -12,7 +14,8 @@ export class DigestController {
 
   /** Manually generate digest. date defaults to today (Beijing time). */
   @Post('generate')
-  async generate(@Query('date') date?: string) {
+  async generate(@Req() req: AdminRequest, @Query('date') date?: string) {
+    if (newsMode()) requireAdminMutation(req);
     const target = date || this.digestService.getBeijingDatePublic();
     await this.digestService.generateDigest(target);
     return { message: `Digest generated for ${target}` };

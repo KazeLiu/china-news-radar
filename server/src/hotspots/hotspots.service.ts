@@ -4,19 +4,7 @@ import { TwitterService } from '../services/twitter.service';
 import { SearchService } from '../services/search.service';
 import { AiService } from '../services/ai.service';
 import { sortHotspots } from '../utils/sortHotspots';
-
-/**
- * Parse the JSON-stringified `media` column back into an object array so the
- * frontend doesn't have to JSON.parse it. Mutates a shallow copy.
- */
-function parseMedia<T extends { media?: string | null }>(h: T): T & { media?: any[] | null } {
-  if (!h.media) return h as any;
-  try {
-    return { ...h, media: JSON.parse(h.media) };
-  } catch {
-    return { ...h, media: null };
-  }
-}
+import { contentScope, newsInclude, newsMode, presentHotspot } from '../news/radar-content';
 
 /**
  * Within each cluster, push video sources (bilibili) to the bottom of their group.
@@ -101,7 +89,7 @@ export class HotspotsService {
     const where: any = {
       // Fallback scores: T2=50, T1.5=55 (all-5s × tier multiplier when scoring errors out).
       // score=0 = explicitly not AI-related. All three are noise — only show score ≥ 60.
-      qualityScore: { gte: 60 },
+      ...(newsMode() ? {} : { qualityScore: { gte: 60 } }),
     };
     // Show only the cluster main so the same event doesn't appear as multiple cards.
     // Exception: when filtering by a specific source, dropping that source's non-main
@@ -117,9 +105,15 @@ export class HotspotsService {
       }
     }
     if (importance) where.importance = importance;
-    if (keywordId) where.keywordId = keywordId;
-    if (isReal !== undefined && isReal !== '') where.isReal = isReal === 'true';
-    if (category) where.category = category;
+    if (keywordId) {
+      if (newsMode()) where.newsItem = { is: { keywordMatches: { some: { keywordId, keyword: { isActive: true } } } } };
+      else where.keywordId = keywordId;
+    }
+    if (!newsMode() && isReal !== undefined && isReal !== '') where.isReal = isReal === 'true';
+    if (category) {
+      if (newsMode()) where.AND = [{ newsItem: { is: { OR: [{ topic: category }, { aiTopics: { contains: JSON.stringify(category) } }] } } }];
+      else where.category = category;
+    }
     if (region) where.region = region;
     if (search?.trim()) {
       // SQLite LIKE is case-insensitive for ASCII; no mode:'insensitive' needed
@@ -151,6 +145,7 @@ export class HotspotsService {
 
     let orderBy: any;
     switch (sortBy) {
+      case 'qualityScore': orderBy = [{ qualityScore: order }, { publishedAt: 'desc' }, { createdAt: 'desc' }]; break;
       case 'publishedAt': orderBy = [{ publishedAt: order }, { createdAt: 'desc' }]; break;
       case 'relevance': orderBy = { relevance: order }; break;
       case 'importance':
@@ -162,12 +157,12 @@ export class HotspotsService {
 
     const [rawHotspots, total] = await Promise.all([
       this.prisma.hotspot.findMany({
-        where,
+        where: contentScope(where),
         orderBy,
         ...(needsMemorySort ? {} : { skip, take: limitNum }),
-        include: { keyword: { select: { id: true, text: true, category: true } } },
+        include: { keyword: { select: { id: true, text: true, category: true } }, ...newsInclude() },
       }),
-      this.prisma.hotspot.count({ where }),
+      this.prisma.hotspot.count({ where: contentScope(where) }),
     ]);
 
     let hotspots;
@@ -184,7 +179,7 @@ export class HotspotsService {
     hotspots = reorderClusterByMedium(hotspots);
 
     return {
-      data: hotspots.map(parseMedia),
+      data: hotspots.map(presentHotspot),
       pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
     };
   }
@@ -194,10 +189,10 @@ export class HotspotsService {
     today.setHours(0, 0, 0, 0);
 
     const [totalHotspots, todayHotspots, urgentHotspots, sourceStats] = await Promise.all([
-      this.prisma.hotspot.count(),
-      this.prisma.hotspot.count({ where: { createdAt: { gte: today } } }),
-      this.prisma.hotspot.count({ where: { importance: 'urgent' } }),
-      this.prisma.hotspot.groupBy({ by: ['source'], _count: { source: true } }),
+      this.prisma.hotspot.count({ where: contentScope() }),
+      this.prisma.hotspot.count({ where: contentScope({ createdAt: { gte: today } }) }),
+      this.prisma.hotspot.count({ where: contentScope({ importance: 'urgent' }) }),
+      this.prisma.hotspot.groupBy({ by: ['source'], where: contentScope(), _count: { source: true } }),
     ]);
 
     return {
@@ -212,12 +207,13 @@ export class HotspotsService {
   }
 
   async findOne(id: string) {
-    const hotspot = await this.prisma.hotspot.findUnique({ where: { id }, include: { keyword: true } });
+    const hotspot = await this.prisma.hotspot.findFirst({ where: contentScope({ id }), include: { keyword: true, ...newsInclude() } });
     if (!hotspot) throw new NotFoundException('Hotspot not found');
-    return parseMedia(hotspot);
+    return presentHotspot(hotspot);
   }
 
   async search(body: { query: string; sources?: string[] }) {
+    if (newsMode()) return { results: (await this.findAll({ search: body.query })).data };
     const { query, sources = ['twitter', 'bing'] } = body;
     if (!query) throw new BadRequestException('Query is required');
 
@@ -256,6 +252,7 @@ export class HotspotsService {
   }
 
   async remove(id: string) {
+    if (newsMode()) throw new BadRequestException('请通过后台排除规则隐藏报道，原文和收藏会保留');
     try {
       await this.prisma.hotspot.delete({ where: { id } });
     } catch (error: any) {

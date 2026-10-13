@@ -1,6 +1,7 @@
 import { requestJson } from './http';
 import type { CuratedResponse, DigestRecord } from '../lib/server-api';
 import type { Stats } from '../types';
+import { adminHeaders } from './admin-session';
 
 export interface Keyword {
   id: string;
@@ -43,7 +44,9 @@ export interface Hotspot {
 }
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  return requestJson<T>(`/api${endpoint}`, options);
+  const headers = new Headers(options.headers);
+  if (options.method && options.method !== 'GET') for (const [name, value] of Object.entries(adminHeaders())) if (!headers.has(name)) headers.set(name, value);
+  return requestJson<T>(`/api${endpoint}`, { ...options, headers });
 }
 
 // Keywords API
@@ -135,6 +138,7 @@ export interface NewsItem {
   title: string;
   url: string;
   source: string;
+  originalPublisher?: string | null;
   createdAt: string;
   publishedAt?: string;
   summary: string | null;
@@ -155,6 +159,11 @@ export interface EntityRelationItem {
 }
 
 export interface RelatedData {
+  version?: number;
+  relatedCountries?: string[];
+  relatedOrganizations?: string[];
+  relatedPeople?: string[];
+  generationStatus?: string;
   type: string;
   summary: string;
   relatedCompanies: string[];

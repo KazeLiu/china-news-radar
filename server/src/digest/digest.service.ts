@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import OpenAI from 'openai';
+import { NewsEditorialService } from '../news/news-editorial.service';
 
 export interface DigestHighlight {
   title: string;
@@ -53,7 +54,7 @@ export class DigestService {
   private readonly client: OpenAI;
   private readonly model: string;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(private readonly prisma: PrismaService, @Optional() private readonly editorial?: NewsEditorialService) {
     this.client = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY ?? '',
       baseURL: process.env.OPENAI_BASE_URL ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1',
@@ -80,7 +81,8 @@ export class DigestService {
     return d.toISOString().slice(0, 10);
   }
 
-  async generateDigest(date: string): Promise<void> {
+  async generateDigest(date: string, force = true): Promise<void> {
+    if (this.editorial) return this.editorial.generateDigest(date, force);
     // The digest dated `date` summarizes the *previous* Beijing day's hotspots
     // — matches TLDR-style morning newsletter convention. When the 08:00 cron
     // fires on day N, the "day N digest" is what users open and it covers
@@ -148,10 +150,11 @@ export class DigestService {
   @Cron('0 5 8 * * *', { timeZone: 'Asia/Shanghai' })
   async scheduledDigest(): Promise<void> {
     const today = this.getBeijingDate(0);
-    await this.generateDigest(today);
+    try { await this.generateDigest(today, false); } catch { this.logger.warn('日报生成失败，请在页面查看或手动重试'); }
   }
 
   async getDigestByDate(date: string) {
+    if (this.editorial) return this.editorial.getDigest(date);
     const digest = await this.prisma.dailyDigest.findUnique({ where: { date } });
     if (!digest) return null;
     return { date: digest.date, data: JSON.parse(digest.data) as DigestData, createdAt: digest.createdAt };
@@ -162,6 +165,7 @@ export class DigestService {
   }
 
   async getRecentDigests(days = 62) {
+    if (this.editorial) return this.editorial.recentDigests(days);
     const digests = await this.prisma.dailyDigest.findMany({
       orderBy: { date: 'desc' },
       take: days,

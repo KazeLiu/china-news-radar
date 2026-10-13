@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { contentScope, newsInclude, newsMode, presentHotspot } from '../news/radar-content';
 
 export type CuratedPeriod = 'today' | 'week';
 
@@ -47,13 +48,17 @@ export class CuratedService {
         { AND: [{ publishedAt: null }, { createdAt: { gte: dateFrom } }] },
       ],
     };
-    if (category) where.category = category;
+    if (category) {
+      if (newsMode()) where.AND = [{ newsItem: { is: { OR: [{ topic: category }, { aiTopics: { contains: JSON.stringify(category) } }] } } }];
+      else where.category = category;
+    }
     if (region) where.region = region;
     if (search?.trim()) {
       // Search adds a second OR — combine into AND so both date and text constraints apply.
       const dateOr = where.OR;
       delete where.OR;
       where.AND = [
+        ...(where.AND || []),
         { OR: dateOr },
         {
           OR: [
@@ -67,7 +72,7 @@ export class CuratedService {
 
     const [items, total] = await Promise.all([
       this.prisma.hotspot.findMany({
-        where,
+        where: contentScope(where),
         orderBy: [
           // Time-first ordering: newest publications appear at the top.
           // Quality score acts as tiebreaker for items published at the same minute.
@@ -77,9 +82,9 @@ export class CuratedService {
         ],
         take: limit,
         skip: offset,
-        include: { keyword: true },
+        include: { keyword: true, ...newsInclude() },
       }),
-      this.prisma.hotspot.count({ where }),
+      this.prisma.hotspot.count({ where: contentScope(where) }),
     ]);
 
     return {
@@ -87,10 +92,7 @@ export class CuratedService {
       total,
       limit,
       offset,
-      items: items.map((h) => {
-        if (!h.media) return h;
-        try { return { ...h, media: JSON.parse(h.media) as any }; } catch { return h; }
-      }),
+      items: items.map(presentHotspot),
     };
   }
 }

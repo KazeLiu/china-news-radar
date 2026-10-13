@@ -6,6 +6,10 @@ import { fetchCuratedSSR, fetchDigestSSR, fetchHotspotsSSR, fetchRecentDigestsSS
 
 afterEach(() => vi.unstubAllGlobals());
 describe('frontend request failure handling', () => {
+  it('shows safe model diagnostics and the provider request identifier', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ message: '模型服务返回 HTTP 429。', detail: '服务限流，请检查提供商额度。', requestId: 'req-fixture-429' }), { status: 400 })));
+    await expect(requestJson('/api/digest/generate', { method: 'POST' })).rejects.toThrow('请求 ID：req-fixture-429');
+  });
   it('preserves JSON, no-content responses and request headers', async () => {
     const fetch = vi.fn().mockResolvedValueOnce(new Response('{"ok":true}')).mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetch);

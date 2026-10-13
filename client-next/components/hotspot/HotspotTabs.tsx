@@ -6,13 +6,12 @@ import type { HotspotTab } from '../../types';
 
 const TABS: { value: HotspotTab; label: string }[] = [
   { value: 'all', label: '全部' },
-  { value: 'domestic', label: '国内' },
-  { value: 'international', label: '国外' },
-  { value: 'community', label: '社区' },
-  { value: 'model', label: '模型' },
-  { value: 'product', label: '产品' },
-  { value: 'industry', label: '行业' },
-  { value: 'research', label: '论文' },
+  { value: 'policy', label: '政策' },
+  { value: 'economy', label: '经济' },
+  { value: 'diplomacy', label: '外交' },
+  { value: 'technology', label: '科技' },
+  { value: 'security', label: '安全' },
+  { value: 'society', label: '社会' },
 ];
 
 interface HotspotTabsProps {

@@ -37,7 +37,7 @@ async function main() {
       timers.delete(timer);
       response.writeHead(200, { 'content-type': 'application/json', 'x-request-id': 'req-delayed-local-fixture' });
       response.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({
-        version: 1, relation: 'related', topics: ['policy'], type: 'report', language: 'en', reason: '涉及中国政策',
+        version: 2, scoring: { relevance: 8, novelty: 7, audience: 8, quality: 7, importance: 'high', tags: ['贸易'] }, relation: 'related', topics: ['policy'], type: 'report', language: 'en', reason: '涉及中国政策',
         translation: { title: '中国公布新政策', summary: '新的贸易规则。' },
       }) } }] }));
     }, 32_000);

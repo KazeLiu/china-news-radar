@@ -1,13 +1,12 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
-import { RadarModule } from './radar.module';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 async function bootstrap() {
-  const rootModule = process.env.RADAR_MODE === 'legacy' ? (await import('./app.module')).AppModule : RadarModule;
+  const rootModule = (await import('./app.module')).AppModule;
   const app = await NestFactory.create(rootModule);
   app.enableShutdownHooks();
 

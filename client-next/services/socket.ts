@@ -6,7 +6,7 @@ export function getSocket(): Socket {
   if (!socket) {
     socket = io(window.location.origin, {
       path: '/socket.io',
-      transports: ['websocket', 'polling']
+      transports: ['polling', 'websocket']
     });
 
     socket.on('connect', () => {

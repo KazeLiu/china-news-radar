@@ -22,3 +22,8 @@ export function requireAdmin(req: AdminRequest) {
     throw new ForbiddenException('后台默认仅允许本机访问；服务器需配置 ADMIN_TOKEN');
   }
 }
+export function requireAdminMutation(req: AdminRequest) {
+  const origin = req.headers.origin;
+  if (origin && ![process.env.CLIENT_URL || 'http://localhost:3000', process.env.PUBLIC_SITE_URL].includes(String(origin))) throw new ForbiddenException('不允许跨站修改');
+  requireAdmin(req);
+}

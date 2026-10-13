@@ -1,5 +1,6 @@
 import type { Source } from '../NewsSourceRow';
 import { requestJson } from '@/services/http';
+import { getAdminToken } from '@/services/admin-session';
 
 export interface AiSettings { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; instructions: string; keyConfigured: boolean; protocolPrompt: string }
 export interface AiTestResult {
@@ -25,6 +26,6 @@ export interface FilterRule { id: string; enabled: boolean; sourceId: string; fi
 export interface AdminSettings { ai: AiSettings; sources: SourceSettings[]; rules: FilterRule[]; localOnly: boolean; status: { aiMode: string; aiDailyUsed: number; aiDailyLimit: number; aiPending: number; aiFailed: number }; changed?: number }
 export async function adminApi<T>(path: string, token: string, body?: unknown, method = 'PUT'): Promise<T> {
   return requestJson<T>(`/api/news/${path}`, { method: body === undefined ? 'GET' : method,
-    headers: token ? { 'X-Admin-Token': token } : {}, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    headers: token || getAdminToken() ? { 'X-Admin-Token': token || getAdminToken() } : {}, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 export type SaveSettings = (path: string, body: unknown, method?: string) => Promise<boolean>;

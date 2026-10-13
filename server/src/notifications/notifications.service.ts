@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { newsMode } from '../news/radar-content';
 
 @Injectable()
 export class NotificationsService {
@@ -11,7 +12,7 @@ export class NotificationsService {
     const limitNum = parseInt(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    const where: any = {};
+    const where: any = newsMode() ? { id: { startsWith: 'news:' } } : { NOT: { id: { startsWith: 'news:' } } };
     if (unreadOnly === 'true') where.isRead = false;
 
     const [notifications, total, unreadCount] = await Promise.all([

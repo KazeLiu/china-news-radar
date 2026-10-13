@@ -19,3 +19,9 @@ export const defaultFilterState: FilterState = {
   sortBy: 'createdAt',
   sortOrder: 'desc',
 };
+
+export function tabFilter(tab: string): { category?: string; region?: string } {
+  if (tab === 'all') return {};
+  if (tab === 'domestic' || tab === 'international') return { region: tab };
+  return { category: tab };
+}

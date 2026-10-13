@@ -1,6 +1,6 @@
 # China Radar · 海外涉华快讯
 
-当前本地改造版基于 [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar)，默认启动独立新闻模块。免费 RSS 与可选 Telegram 新闻由管理员统一配置 AI，一次返回涉华关系、主题、类型及非简体中文译文；结果持久缓存，阅读不调用模型，无密钥/失败/超额时规则兜底。Telegram 接入默认关闭。详见 [AI 处理说明](docs/AI-ANALYSIS.md)。
+当前本地改造版基于 [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar)，保留上游主要模块和页面，通过涉华扩展接入 RSS 与可选 Telegram 新闻。首页为快讯，热点雷达、精选、日报、我的关注及 Agent 接入读取同一套涉华数据。管理员统一配置 AI，分类、翻译与质量评分共用一次请求；日报与关注档案共享每日额度。结果持久缓存，阅读不调用模型，无密钥/失败/超额时规则兜底。详见 [模块接入说明](docs/UPSTREAM-INTEGRATION.md)及 [AI 处理说明](docs/AI-ANALYSIS.md)。
 
 来源支持配置多个 RSS 地址，按顺序尝试备用，可在后台测试获取或删除来源。RSSHub 作为完整 RSS 地址填写；彭博/CNBC/卫报/BBC 使用媒体公开 RSS，路透/美联/日经亚洲默认使用 Google 索引。详见 [RSSHub 接入与实测](docs/RSSHUB.md)。
 

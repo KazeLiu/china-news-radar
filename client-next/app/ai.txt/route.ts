@@ -1,46 +1,25 @@
 import { NextResponse } from 'next/server';
 
-/**
- * GEO: ai.txt 文件
- *
- * 这是一个新兴标准（类似 robots.txt），用于向 AI 搜索引擎声明：
- * - 站点用途、数据来源、爬取策略
- * - 联系方式、API 接入点
- *
- * 参考：https://github.com/ai-txt/ai-txt
- * 部分 AI 搜索引擎（Perplexity、You.com）已开始识别此文件
- */
-export async function GET() {
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://aihotradar.com';
+// Describe the deployed content scope and existing Agent interfaces.
+export async function GET(request: Request) {
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(request.url).origin;
 
-  const content = `# AI.txt for AI Hot Radar
-# https://aihotradar.com/ai.txt
-# Version: 1.0
+  const content = `# AI.txt for China Radar
+# Version: 2.0
 
 # About
-Site-Name: AI Hot Radar
+Site-Name: China Radar
 Site-URL: ${siteUrl}
-Description: 实时聚合 20+ AI 信息源（Twitter、HackerNews、arXiv、官方博客等），通过 AI 双阶段评分筛选高质量资讯，每日自动生成 AI 行业日报。
+Description: 聚合海外涉华报道，提供快讯、热点、精选、日报与关注档案。
 Language: zh-CN
-Purpose: news-aggregation, ai-content-curation
-Topics: artificial-intelligence, machine-learning, llm, openai, anthropic, ai-news
-Target-Audience: AI practitioners, researchers, developers in China and globally
-
-# Contact
-Contact-Email: support@aihotradar.com
-GitHub: https://github.com/zenitlab/ai-hot-radar
-
-# Supported AI Search Engines
-# 国际
-Optimized-For: ChatGPT Search, Perplexity, Claude, Google Gemini, You.com
-# 国内
-Optimized-For-CN: 豆包搜索, 百度 AI 搜索, 360 AI 搜索, 搜狗 AI 问答, 秘塔 AI 搜索, Kimi, 通义千问, 文心一言
+Purpose: news-aggregation, news-curation
+Topics: china, policy, economy, diplomacy, technology, security, society
+Upstream-Repository: https://github.com/zenitlab/ai-hot-radar
 
 # Crawling Policy
 Allow-AI-Training: no
 Allow-AI-Indexing: yes
 Preferred-Crawl-Rate: 1 req/sec
-Last-Updated: 2026-07-27
 
 # API Access (for AI agents)
 API-Endpoint: ${siteUrl}/api/agent
@@ -49,17 +28,16 @@ RSS-Feed: ${siteUrl}/api/agent/rss/curated.xml
 Skill-Package: ${siteUrl}/aihot-skill
 
 # Data Freshness
-Update-Frequency: every 10 minutes (hotspot), daily at 08:00 Beijing (digest)
-Historical-Data: 30 days retention
+Update-Frequency: configured per source; digest daily at 08:05 Beijing
 
 # Citation Preference
-Citation-Format: "AI Hot Radar - [Article Title], ${siteUrl}/hotspot"
+Citation-Format: cite the identified publisher and original article URL
 Attribution-Required: yes
 
 # Additional Context
-Data-Sources: Twitter/X, Bing News, HackerNews, arXiv, Reddit, IT之家, 36氪, 雪球, Bilibili, Google DeepMind Blog, OpenAI Blog, Anthropic News, etc.
-AI-Scoring: Two-stage scoring (pre-filter + 5-dimension evaluation) to reduce noise
-Deduplication: Multi-source event merging with authority-based primary selection
+Data-Sources: configured overseas media RSS, Google News indexes, and enabled Telegram news channels
+AI-Scoring: classification, translation and quality scoring in one article request; reading uses saved results
+Deduplication: unique URLs; identical titles are folded for display
 `;
 
   return new NextResponse(content, {

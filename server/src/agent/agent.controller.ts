@@ -1,12 +1,15 @@
 import { Controller, Get, Query, Res, Header } from '@nestjs/common';
 import { AgentService } from './agent.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { contentScope, presentHotspot } from '../news/radar-content';
+import { DigestService } from '../digest/digest.service';
 
 @Controller()
 export class AgentController {
   constructor(
     private readonly agentService: AgentService,
     private readonly prisma: PrismaService,
+    private readonly digestService: DigestService,
   ) {}
 
   // ===== REST API =====
@@ -32,8 +35,7 @@ export class AgentController {
   @Get('api/agent/digest')
   async getDigest(@Query('date') date?: string) {
     const targetDate = date || this.getTodayBeijing();
-    const digest = await this.prisma.dailyDigest.findUnique({ where: { date: targetDate } });
-    return digest ? { date: digest.date, data: JSON.parse(digest.data) } : null;
+    return this.digestService.getDigestByDate(targetDate);
   }
 
   // ===== RSS Feeds =====
@@ -43,8 +45,8 @@ export class AgentController {
   async getCuratedRss(@Res() res: any) {
     const items = await this.agentService.getCurated(50, 0);
     const xml = this.agentService.buildRssXml(
-      'AI Hot Radar · 精选资讯',
-      '经过 AI 五维评分精选的 AI 行业资讯',
+      'China Radar · 精选资讯',
+      '经过 AI 质量评分精选的海外涉华资讯',
       items,
     );
     res.type('application/xml').send(xml);
@@ -54,13 +56,15 @@ export class AgentController {
   @Header('Content-Type', 'application/xml; charset=utf-8')
   async getAllRss(@Res() res: any) {
     const items = await this.prisma.hotspot.findMany({
+      where: contentScope({ isClusterMain: true }),
+      include: { newsItem: true },
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
     const xml = this.agentService.buildRssXml(
-      'AI Hot Radar · 全部资讯',
-      '所有 AI 相关资讯（含关键词监控和 RSS 信源）',
-      items,
+      'China Radar · 全部资讯',
+      '海外涉华资讯与关键词监控',
+      items.map(presentHotspot),
     );
     res.type('application/xml').send(xml);
   }
@@ -68,21 +72,18 @@ export class AgentController {
   @Get('api/agent/rss/digest.xml')
   @Header('Content-Type', 'application/xml; charset=utf-8')
   async getDigestRss(@Res() res: any) {
-    const digests = await this.prisma.dailyDigest.findMany({
-      orderBy: { date: 'desc' },
-      take: 7,
-    });
-    const baseUrl = process.env.PUBLIC_URL || 'http://localhost:5173';
+    const digests = await this.digestService.getRecentDigests(7);
+    const baseUrl = process.env.PUBLIC_SITE_URL || process.env.PUBLIC_URL || process.env.CLIENT_URL || 'http://localhost:3000';
     const items = digests.map((d) => ({
-      title: `AI 日报 ${d.date}`,
-      url: `${baseUrl}/digest?date=${d.date}`,
-      summary: `${d.date} 的 AI 行业精选日报`,
+      title: `涉华日报 ${d.date}`,
+      url: `${baseUrl}/digest/${d.date}`,
+      summary: `${d.date} 的海外涉华精选日报`,
       publishedAt: d.createdAt,
-      source: 'AI Hot Radar Daily',
+      source: 'China Radar Daily',
     }));
     const xml = this.agentService.buildRssXml(
-      'AI Hot Radar · AI 日报',
-      '每日 AI 行业精选资讯日报',
+      'China Radar · AI 日报',
+      '每日海外涉华精选资讯日报',
       items,
     );
     res.type('application/xml').send(xml);
@@ -93,14 +94,14 @@ export class AgentController {
   @Get('aihot-skill')
   getSkill() {
     return {
-      name: 'AI Hot Radar',
+      name: 'China Radar',
       version: '1.0',
-      description: 'AI 热点雷达数据查询 - 精选 AI 行业资讯、每日日报、关键词搜索',
+      description: '海外涉华新闻查询：精选资讯、每日日报与关键词搜索',
       endpoints: [
         {
           path: '/api/agent/curated',
           method: 'GET',
-          description: '获取精选 AI 资讯（经质量评分筛选）',
+          description: '获取精选涉华资讯（经质量评分筛选）',
           params: { limit: '条数（默认20）', offset: '偏移（默认0）' },
         },
         {
@@ -112,7 +113,7 @@ export class AgentController {
         {
           path: '/api/agent/search',
           method: 'GET',
-          description: '按关键词搜索 AI 资讯',
+          description: '按关键词搜索涉华资讯',
           params: { q: '搜索关键词', limit: '条数（默认20）' },
         },
         {

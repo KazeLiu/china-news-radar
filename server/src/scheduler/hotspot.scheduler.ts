@@ -193,7 +193,7 @@ export class HotspotScheduler implements OnApplicationBootstrap {
 
     // Delete notifications first (they reference hotspots via hotspotId)
     const oldHotspots = await this.prisma.hotspot.findMany({
-      where: { createdAt: { lt: cutoff } },
+      where: { createdAt: { lt: cutoff }, newsItemId: null },
       select: { id: true },
     });
     const hotspotIds = oldHotspots.map(h => h.id);

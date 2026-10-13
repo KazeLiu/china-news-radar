@@ -32,6 +32,7 @@ import { EmptyState } from "../common/EmptyState";
 import { cn } from "../../lib/utils";
 import type { Hotspot, HotspotTab } from "../../types";
 import type { Keyword } from "../../services/api";
+import { tabFilter } from '../../lib/filterState';
 
 /**
  * `initialHotspots` / `initialTotal` / `initialTotalPages` are prefetched on
@@ -101,12 +102,7 @@ export function HotspotView({
       if (filters.sortOrder) filterParams.sortOrder = filters.sortOrder;
       if (appliedSearch) filterParams.search = appliedSearch;
 
-      // Tab-based filtering
-      if (activeTab === "domestic" || activeTab === "international") {
-        filterParams.region = activeTab;
-      } else if (activeTab !== "all") {
-        filterParams.category = activeTab;
-      }
+      Object.assign(filterParams, tabFilter(activeTab));
 
       const [hotspotsData, keywordsData] = await Promise.all([
         hotspotsApi.getAll(
@@ -160,12 +156,7 @@ export function HotspotView({
 
   // WebSocket
   useEffect(() => {
-    const unsubHotspot = onNewHotspot((hotspot) => {
-      setHotspots((prev) => [
-        hotspot as unknown as Hotspot,
-        ...prev.slice(0, 19),
-      ]);
-    });
+    const unsubHotspot = onNewHotspot(() => { void loadData(); });
     const unsubScan = onScanStatus((status) => {
       setIsChecking(status.isScanning);
       if (status.error) setError(status.error);
@@ -233,8 +224,8 @@ export function HotspotView({
     setIsChecking(true);
     setError('');
     try {
-      await triggerHotspotCheck();
-      // Scan now runs in the background; UI will update via onScanStatus.
+      const status = await triggerHotspotCheck();
+      if (!status.isScanning) { setIsChecking(false); setLastCheckTime(new Date()); await loadData(); }
     } catch (err) {
       setError(err instanceof Error ? err.message : '检查更新失败');
       setIsChecking(false);

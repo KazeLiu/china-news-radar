@@ -9,6 +9,10 @@ interface Props {
   selectedNode?: string | null;
   onNodeClick: (name: string | null) => void;
 }
+type GraphData = { id: string; name: string; label?: { formatter?: string } };
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char] || char));
+}
 
 const CAT: Record<number, { color: string; label: string }> = {
   0: { color: '#3b82f6', label: '实体' },
@@ -16,6 +20,9 @@ const CAT: Record<number, { color: string; label: string }> = {
   2: { color: '#8b5cf6', label: '模型' },
   3: { color: '#f59e0b', label: '产品' },
   4: { color: '#ef4444', label: '竞品' },
+  5: { color: '#06b6d4', label: '国家' },
+  6: { color: '#a855f7', label: '机构' },
+  7: { color: '#f97316', label: '人物' },
 };
 
 const EDGE_LABEL: Record<number, string> = {
@@ -23,6 +30,9 @@ const EDGE_LABEL: Record<number, string> = {
   2: '同系列',
   3: '集成产品',
   4: '竞争关系',
+  5: '相关国家',
+  6: '相关机构',
+  7: '相关人物',
 };
 
 export function EntityRelationGraph({ entityName, relatedData, selectedNode, onNodeClick }: Props) {
@@ -46,8 +56,8 @@ export function EntityRelationGraph({ entityName, relatedData, selectedNode, onN
     const tc = isDark ? '#c4c6d0' : '#374151';
     const tm = isDark ? '#8b8fa8' : '#9ca3af';
 
-    const nodes: any[] = [];
-    const links: any[] = [];
+    const nodes: Extract<NonNullable<echarts.GraphSeriesOption['data']>[number], { id?: string }>[] = [];
+    const links: NonNullable<echarts.GraphSeriesOption['links']> = [];
 
     // Center node
     nodes.push({
@@ -67,7 +77,7 @@ export function EntityRelationGraph({ entityName, relatedData, selectedNode, onN
       for (const name of list ?? []) {
         if (!name || name === entityName) continue;
         const isSelected = selectedNode === name;
-        if (!nodes.find((n) => n.id === name)) {
+        if (!nodes.find((n) => n?.id === name)) {
           nodes.push({
             id: name,
             name,
@@ -91,6 +101,9 @@ export function EntityRelationGraph({ entityName, relatedData, selectedNode, onN
     };
 
     pushGroup(relatedData.relatedCompanies, 1);
+    pushGroup(relatedData.relatedCountries, 5);
+    pushGroup(relatedData.relatedOrganizations, 6);
+    pushGroup(relatedData.relatedPeople, 7);
     pushGroup(relatedData.relatedModels, 2);
     pushGroup(relatedData.relatedProducts, 3);
     pushGroup(relatedData.competesWith, 4);
@@ -99,10 +112,12 @@ export function EntityRelationGraph({ entityName, relatedData, selectedNode, onN
       {
         backgroundColor: 'transparent',
         tooltip: {
-          formatter: (p: any) =>
-            p.dataType === 'node'
-              ? `<b style="color:${isDark ? '#e8eaf0' : '#1a1d2e'}">${p.data.name}</b>${p.data.id !== entityName ? `<br/><span style="color:${tm};font-size:11px">点击查看相关资讯</span>` : ''}`
-              : `<span style="color:${tm}">${p.data.label?.formatter ?? ''}</span>`,
+          formatter: (input: unknown) => {
+            const p = input as { dataType: string; data: GraphData };
+            return p.dataType === 'node'
+              ? `<b style="color:${isDark ? '#e8eaf0' : '#1a1d2e'}">${escapeHtml(p.data.name)}</b>${p.data.id !== entityName ? `<br/><span style="color:${tm};font-size:11px">点击查看相关资讯</span>` : ''}`
+              : `<span style="color:${tm}">${escapeHtml(p.data.label?.formatter ?? '')}</span>`;
+          },
           backgroundColor: isDark ? '#0d0d20' : '#fff',
           borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
           extraCssText: 'border-radius:8px;padding:6px 10px;',
@@ -140,7 +155,7 @@ export function EntityRelationGraph({ entityName, relatedData, selectedNode, onN
         legend: {
           bottom: 4,
           left: 'center',
-          data: Object.values(CAT).map((c) => c.label),
+          data: Object.values(CAT).filter((_, index) => nodes.some(node => node.category === index)).map(c => c.label),
           textStyle: { color: tm, fontSize: 10 },
           itemWidth: 8,
           itemHeight: 8,
@@ -152,12 +167,13 @@ export function EntityRelationGraph({ entityName, relatedData, selectedNode, onN
     );
 
     chartRef.current.off('click');
-    chartRef.current.on('click', (p: any) => {
+    chartRef.current.on('click', (p: { dataType?: string; data?: unknown }) => {
       if (p.dataType !== 'node') return;
-      if (p.data.id === entityName) {
+      const data = p.data as GraphData;
+      if (data.id === entityName) {
         onClickRef.current(null);
       } else {
-        onClickRef.current(selectedNode === p.data.id ? null : p.data.id);
+        onClickRef.current(selectedNode === data.id ? null : data.id);
       }
     });
 
@@ -185,6 +201,9 @@ export function EntityRelationGraph({ entityName, relatedData, selectedNode, onN
   const hasNodes =
     [
       ...(relatedData.relatedCompanies ?? []),
+      ...(relatedData.relatedCountries ?? []),
+      ...(relatedData.relatedOrganizations ?? []),
+      ...(relatedData.relatedPeople ?? []),
       ...(relatedData.relatedModels ?? []),
       ...(relatedData.relatedProducts ?? []),
       ...(relatedData.competesWith ?? []),

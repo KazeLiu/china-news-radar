@@ -3,7 +3,7 @@ import { NewsService } from './news.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { analysisKey } from './analysis';
 
-const result = { version: 1, relation: 'related', topics: ['policy', 'economy'], type: 'report', language: 'en', reason: '中国相关政策', translation: { title: '中国相关政策', summary: '新规定。' } };
+const result = { version: 2, scoring: { relevance: 8, novelty: 7, audience: 8, quality: 7, importance: 'high', tags: ['贸易'] }, relation: 'related', topics: ['policy', 'economy'], type: 'report', language: 'en', reason: '中国相关政策', translation: { title: '中国相关政策', summary: '新规定。' } };
 function fixture(usage = '0') {
   vi.stubEnv('AI_ANALYSIS_ENABLED', 'true'); vi.stubEnv('OPENAI_API_KEY', 'test-only-key'); vi.stubEnv('AI_DAILY_LIMIT', '100');
   const originalTime = new Date('2026-10-10T00:00:00Z');

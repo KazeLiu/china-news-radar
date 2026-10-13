@@ -10,7 +10,7 @@ vi.mock('openai', async importOriginal => ({ ...await importOriginal<typeof impo
   constructor(options: unknown) { model.options(options); }
 } }));
 const sample = { title: 'China announces new trade measures', summary: 'New import rules.' };
-const analysis = { version: 1, relation: 'related', topics: ['policy', 'economy'], type: 'report', language: 'en', reason: '涉及中国贸易政策', translation: { title: '中国公布新贸易措施', summary: '新的进口规定。' } };
+const analysis = { version: 2, scoring: { relevance: 8, novelty: 7, audience: 8, quality: 7, importance: 'high', tags: ['贸易'] }, relation: 'related', topics: ['policy', 'economy'], type: 'report', language: 'en', reason: '涉及中国贸易政策', translation: { title: '中国公布新贸易措施', summary: '新的进口规定。' } };
 
 function fixture(used = '0', enabled = true, key = 'test-only-key') {
   vi.stubEnv('AI_ANALYSIS_ENABLED', String(enabled)); vi.stubEnv('OPENAI_API_KEY', key); vi.stubEnv('AI_DAILY_LIMIT', '5');

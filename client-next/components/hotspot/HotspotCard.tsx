@@ -105,6 +105,7 @@ export function HotspotCard({
               Kept: importance · source · keyword · 可疑 (only when suspicious,
               acts as a warning) · heat. */}
           <div className="flex flex-wrap items-center gap-2 mb-3">
+            {hotspot.newsItemId && hotspot.qualityScore == null && <span className="text-xs text-[var(--text-muted)]">{hotspot.aiStatus === 'done' ? '未评分' : '规则兜底'}</span>}
             <span className={cn(
               'px-2.5 py-1 rounded-lg text-[10px] font-semibold uppercase tracking-wider flex items-center',
               hotspot.importance === 'urgent' && 'bg-red-500/15 text-red-400 border border-red-500/20',
@@ -117,23 +118,23 @@ export function HotspotCard({
             </span>
             <span className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
               {getSourceIcon(hotspot.source)}
-              {getSourceLabel(hotspot.source)}
+              {hotspot.originalPublisher || getSourceLabel(hotspot.source)}
             </span>
             {hotspot.keyword && (
               <span className="text-[10px] px-2 py-0.5 rounded-md bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] border border-[var(--accent-blue)]/20 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20">
                 {hotspot.keyword.text}
               </span>
             )}
-            {!hotspot.isReal && (
+            {!hotspot.newsItemId && !hotspot.isReal && (
               <span className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-red-500/10 text-red-400 border border-red-500/20" title="AI 评分认为可疑">
                 <ShieldAlert className="w-3 h-3" />
                 可疑
               </span>
             )}
-            <span className={cn('flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--input-bg)] border border-[var(--input-border)] font-medium', heat.color)}>
+            {!hotspot.newsItemId && <span className={cn('flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-[var(--input-bg)] border border-[var(--input-border)] font-medium', heat.color)}>
               <ThermometerSun className="w-3 h-3" />
               {heat.label} {heatScore}
-            </span>
+            </span>}
           </div>
 
           {/* Title */}
@@ -153,7 +154,7 @@ export function HotspotCard({
               <div className="flex items-center gap-1.5 mb-0.5">
                 <Sparkles className="w-3 h-3 text-[var(--accent-blue)] dark:text-blue-400" />
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent-blue)]/80 dark:text-blue-400/70">
-                  AI 摘要
+                  {hotspot.newsItemId ? '报道摘要' : 'AI 摘要'}
                 </span>
               </div>
               <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{hotspot.summary}</p>
@@ -188,10 +189,10 @@ export function HotspotCard({
 
           {/* Engagement metrics */}
           <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-muted)] mb-2">
-            <span className="flex items-center gap-1">
+            {(!hotspot.newsItemId || hotspot.qualityScore != null) && <span className="flex items-center gap-1">
               <Target className="w-3.5 h-3.5" />
               相关性 {hotspot.relevance}%
-            </span>
+            </span>}
             {hotspot.likeCount != null && hotspot.likeCount > 0 && (
               <span className="flex items-center gap-1" title="点赞">
                 <Zap className="w-3.5 h-3.5" />
@@ -269,7 +270,7 @@ export function HotspotCard({
                 className="flex items-center gap-1 text-[11px] text-[var(--accent-blue)]/70 dark:text-blue-400/70 hover:text-[var(--accent-blue)] dark:hover:text-blue-400 transition-colors"
               >
                 {reasonOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                关键词关联分析
+                {hotspot.newsItemId ? '涉华分析依据' : '关键词关联分析'}
               </button>
               <AnimatePresence>
                 {reasonOpen && (

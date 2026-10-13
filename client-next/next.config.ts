@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Socket.IO polling must keep its trailing slash without an HTTP redirect.
+  skipTrailingSlashRedirect: true,
   // Give the backend's 120-second AI timeout enough time to return its diagnostics.
   experimental: { proxyTimeout: 150_000 },
   // API 代理到后端 NestJS
@@ -10,6 +12,14 @@ const nextConfig: NextConfig = {
       {
         source: '/api/:path*',
         destination: `${apiUrl}/api/:path*`,
+      },
+      {
+        source: '/aihot-skill',
+        destination: `${apiUrl}/aihot-skill`,
+      },
+      {
+        source: '/socket.io',
+        destination: `${apiUrl}/socket.io/`,
       },
       {
         source: '/socket.io/:path*',

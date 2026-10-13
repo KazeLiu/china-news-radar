@@ -1,11 +1,14 @@
 'use client';
-import { RefreshCw, Trash2, Clock, Flame, Package, Cpu, Building2, User, Zap } from 'lucide-react';
+import { RefreshCw, Trash2, Clock, Flame, Package, Cpu, Building2, User, Zap, Globe2, Target } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { relativeTime } from '../../utils/relativeTime';
 import { Skeleton } from '../common/Loader';
 import type { EntityCardSummary, RelatedData } from '../../services/api';
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
+  country: <Globe2 className="w-3.5 h-3.5" />,
+  organization: <Building2 className="w-3.5 h-3.5" />,
+  topic: <Target className="w-3.5 h-3.5" />,
   model:      <Cpu className="w-3.5 h-3.5" />,
   company:    <Building2 className="w-3.5 h-3.5" />,
   product:    <Package className="w-3.5 h-3.5" />,
@@ -14,6 +17,9 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
 };
 
 const TYPE_COLOR: Record<string, string> = {
+  country: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
+  organization: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
+  topic: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   model:      'bg-blue-500/10 text-blue-400 border-blue-500/20',
   company:    'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
   product:    'bg-amber-500/10 text-amber-400 border-amber-500/20',
@@ -36,7 +42,7 @@ export function EntityCard({ entity, isSelected, isRefreshing, onClick, onRefres
   })();
 
   const type = entity.type ?? relData?.type ?? 'technology';
-  const typeLabel = { model: '模型', company: '公司', product: '产品', technology: '技术', person: '人物' }[type] ?? type;
+  const typeLabel = { country: '国家', organization: '机构', topic: '主题', model: '模型', company: '公司', product: '产品', technology: '技术', person: '人物' }[type] ?? type;
   const products = relData?.relatedProducts?.slice(0, 4) ?? [];
   const tags = relData?.tags?.slice(0, 3) ?? [];
   const isLoading = !entity.relatedData;

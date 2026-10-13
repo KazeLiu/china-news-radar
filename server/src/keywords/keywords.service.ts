@@ -1,32 +1,41 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EntitiesService } from '../entities/entities.service';
+import { NewsBridgeService } from '../news/news-bridge.service';
+import { contentScope, presentHotspot } from '../news/radar-content';
 
 @Injectable()
 export class KeywordsService {
   constructor(
     private prisma: PrismaService,
     private entitiesService: EntitiesService,
+    @Optional() private bridge?: NewsBridgeService,
   ) {}
 
-  findAll() {
-    return this.prisma.keyword.findMany({
+  async findAll() {
+    const keywords = await this.prisma.keyword.findMany({
       orderBy: { createdAt: 'desc' },
       include: { _count: { select: { hotspots: true } } },
     });
+    if (!this.bridge) return keywords;
+    return Promise.all(keywords.map(async keyword => ({ ...keyword, _count: { hotspots: await this.prisma.hotspot.count({ where: contentScope({ newsItem: { is: { keywordMatches: { some: { keywordId: keyword.id } } } } }) }) } })));
   }
 
   async findOne(id: string) {
     const keyword = await this.prisma.keyword.findUnique({
       where: { id },
-      include: { hotspots: { orderBy: { createdAt: 'desc' }, take: 20 } },
+      include: { hotspots: { where: contentScope(), orderBy: { createdAt: 'desc' }, take: 20 } },
     });
     if (!keyword) throw new NotFoundException('Keyword not found');
+    if (this.bridge) {
+      const hotspots = await this.prisma.hotspot.findMany({ where: contentScope({ newsItem: { is: { keywordMatches: { some: { keywordId: id } } } } }), include: { newsItem: true }, orderBy: { createdAt: 'desc' }, take: 20 });
+      return { ...keyword, hotspots: hotspots.map(presentHotspot) };
+    }
     return keyword;
   }
 
   async create(data: { text: string; category?: string }) {
-    if (!data.text || data.text.trim().length === 0) {
+    if (typeof data.text !== 'string' || data.text.trim().length === 0 || data.text.length > 200) {
       throw new BadRequestException('Keyword text is required');
     }
     let keyword: Awaited<ReturnType<typeof this.prisma.keyword.create>>;
@@ -39,6 +48,7 @@ export class KeywordsService {
       throw error;
     }
     // Fire-and-forget entity profile generation
+    await this.bridge?.rebuild();
     this.entitiesService.createForKeyword(keyword.id, keyword.text).catch((err) => {
       console.error('[Keywords] entity generation failed:', err);
     });
@@ -46,8 +56,10 @@ export class KeywordsService {
   }
 
   async update(id: string, data: { text?: string; category?: string; isActive?: boolean }) {
+    if (data.text !== undefined && (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 200)) throw new BadRequestException('关键词应为 1–200 个字符');
+    if (data.isActive !== undefined && typeof data.isActive !== 'boolean') throw new BadRequestException('启用状态必须为布尔值');
     try {
-      return await this.prisma.keyword.update({
+      const keyword = await this.prisma.keyword.update({
         where: { id },
         data: {
           ...(data.text && { text: data.text.trim() }),
@@ -55,6 +67,9 @@ export class KeywordsService {
           ...(data.isActive !== undefined && { isActive: data.isActive }),
         },
       });
+      if (data.text) await this.prisma.entityCard.updateMany({ where: { keywordId: id }, data: { name: keyword.text } });
+      await this.bridge?.rebuild();
+      return keyword;
     } catch (error: any) {
       if (error.code === 'P2025') throw new NotFoundException('Keyword not found');
       throw error;
@@ -64,12 +79,15 @@ export class KeywordsService {
   async toggle(id: string) {
     const keyword = await this.prisma.keyword.findUnique({ where: { id } });
     if (!keyword) throw new NotFoundException('Keyword not found');
-    return this.prisma.keyword.update({ where: { id }, data: { isActive: !keyword.isActive } });
+    const updated = await this.prisma.keyword.update({ where: { id }, data: { isActive: !keyword.isActive } });
+    await this.bridge?.rebuild();
+    return updated;
   }
 
   async remove(id: string) {
     try {
       await this.prisma.keyword.delete({ where: { id } });
+      await this.bridge?.rebuild();
     } catch (error: any) {
       if (error.code === 'P2025') throw new NotFoundException('Keyword not found');
       throw error;

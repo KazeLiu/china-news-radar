@@ -1,5 +1,7 @@
-import { Controller, Get, Post, Param, Query, HttpCode } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, HttpCode, Req } from '@nestjs/common';
 import { EntitiesService } from './entities.service';
+import { AdminRequest, requireAdminMutation } from '../news/admin-access';
+import { newsMode } from '../news/radar-content';
 
 @Controller('api/entities')
 export class EntitiesController {
@@ -27,7 +29,8 @@ export class EntitiesController {
 
   @Post(':id/refresh')
   @HttpCode(200)
-  refresh(@Param('id') id: string) {
+  refresh(@Param('id') id: string, @Req() req: AdminRequest) {
+    if (newsMode()) requireAdminMutation(req);
     return this.entitiesService.refresh(id);
   }
 }

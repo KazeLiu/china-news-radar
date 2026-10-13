@@ -18,12 +18,12 @@ const getRssFeeds = (baseUrl: string) => [
   {
     label: '全部资讯 RSS',
     url: `${baseUrl}/api/agent/rss/all.xml`,
-    desc: '不做筛选，所有抓取到的 AI 资讯，适合需要全量信息的场景',
+    desc: '全部可展示的海外涉华报道，使用与网站一致的来源和排除规则',
   },
   {
     label: 'AI 日报 RSS',
     url: `${baseUrl}/api/agent/rss/digest.xml`,
-    desc: '每日早上 8:00 自动生成的 AI 行业日报，覆盖模型 / 产品 / 行业 / 论文',
+    desc: '每天北京时间 08:05 生成的涉华日报，覆盖政策、经济、外交、科技、安全与社会',
   },
 ];
 
@@ -39,7 +39,7 @@ const SKILL_CAPABILITIES = [
   {
     icon: CalendarDays,
     title: 'AI 日报',
-    desc: '获取今日或指定日期的 AI 行业日报，按模型 / 产品 / 行业 / 论文等板块返回',
+    desc: '获取今日或指定日期的涉华日报，按政策、经济、外交、科技、安全与社会板块返回',
     example: '给我一份今天的 AI 日报',
     accent: 'text-blue-400',
     bg: 'bg-blue-500/10',
@@ -47,16 +47,16 @@ const SKILL_CAPABILITIES = [
   {
     icon: Newspaper,
     title: '精选资讯',
-    desc: '获取经质量评分精选的 AI 资讯，按重要度排序',
-    example: '看看最新的精选 AI 资讯',
+    desc: '获取经质量评分精选的 涉华资讯，按重要度排序',
+    example: '看看最新的精选 涉华资讯',
     accent: 'text-emerald-400',
     bg: 'bg-emerald-500/10',
   },
   {
     icon: LayoutList,
     title: '分类查询',
-    desc: '按内容分类（模型 / 产品 / 行业 / 论文）或时间范围筛选资讯',
-    example: '最近 3 天有哪些新模型发布',
+    desc: '按政策、经济、外交、科技、安全、社会主题或时间范围筛选报道',
+    example: '最近 3 天有哪些涉华外交报道',
     accent: 'text-purple-400',
     bg: 'bg-purple-500/10',
   },
@@ -64,7 +64,7 @@ const SKILL_CAPABILITIES = [
     icon: Search,
     title: '关键词搜索',
     desc: '在所有资讯中搜索包含特定关键词的内容',
-    example: 'Claude 最近有什么新动态',
+    example: '中国贸易政策最近有什么新动态',
     accent: 'text-amber-400',
     bg: 'bg-amber-500/10',
   },
@@ -141,7 +141,7 @@ export function AgentView() {
           <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Agent 接入</h1>
         </div>
         <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-          把 AI Hot Radar 的「精选资讯」「AI 日报」「关键词搜索」能力，以 <span className="text-[var(--accent-blue)] dark:text-blue-400 font-medium">Skill</span>、
+          把 China Radar 的「精选资讯」「AI 日报」「关键词搜索」能力，以 <span className="text-[var(--accent-blue)] dark:text-blue-400 font-medium">Skill</span>、
           <span className="text-[var(--accent-emerald)] dark:text-emerald-400 font-medium"> RSS</span>、
           <span className="text-[var(--accent-amber)] dark:text-purple-400 font-medium"> API</span> 三种方式开放给外部消费 —
           无论是 Claude Code、Cursor、Feedly，还是企业 IM 机器人，都能一键接入。
@@ -348,7 +348,7 @@ export function AgentView() {
             <code className="block text-xs text-[var(--text-secondary)] font-mono whitespace-pre-wrap break-all">
 {`curl ${baseUrl}/api/agent/curated?limit=5
 curl ${baseUrl}/api/agent/digest?date=2026-05-21
-curl "${baseUrl}/api/agent/search?q=Claude&limit=10"`}
+curl "${baseUrl}/api/agent/search?q=trade&limit=10"`}
             </code>
           </div>
         </div>

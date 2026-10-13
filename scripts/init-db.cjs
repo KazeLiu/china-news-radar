@@ -6,6 +6,28 @@ if (!url?.startsWith('file:')) throw new Error('DATABASE_URL must be a SQLite fi
 const target = path.resolve(__dirname, '../server/prisma', url.slice(5));
 fs.mkdirSync(path.dirname(target), { recursive: true });
 try { fs.closeSync(fs.openSync(target, 'wx', 0o600)); } catch (error) { if (error.code !== 'EEXIST') throw error; }
-const command = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-const result = spawnSync(command, ['exec', 'prisma', 'db', 'push', '--skip-generate'], { cwd: path.join(__dirname, '../server'), stdio: 'inherit', shell: process.platform === 'win32' });
-process.exit(result.status ?? 1);
+async function main() {
+  const { PrismaClient } = require('../server/node_modules/@prisma/client');
+  const db = new PrismaClient();
+  try {
+    const tables = await db.$queryRawUnsafe("SELECT name FROM sqlite_master WHERE type='table' AND name='Hotspot'");
+    if (tables.length) {
+      const columns = await db.$queryRawUnsafe('PRAGMA table_info("Hotspot")');
+      const missing = ['newsItemId', 'notifyEligible'].filter(name => !columns.some(column => column.name === name));
+      if (missing.length) {
+        const backup = `${target}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}.db`;
+        await db.$executeRawUnsafe(`VACUUM INTO '${backup.replaceAll("'", "''")}'`);
+        console.log('已创建升级前 SQLite 一致性备份');
+        await db.$transaction(async tx => {
+          if (missing.includes('newsItemId')) await tx.$executeRawUnsafe('ALTER TABLE "Hotspot" ADD COLUMN "newsItemId" TEXT REFERENCES "NewsItem"("id") ON DELETE CASCADE ON UPDATE CASCADE');
+          if (missing.includes('notifyEligible')) await tx.$executeRawUnsafe('ALTER TABLE "Hotspot" ADD COLUMN "notifyEligible" BOOLEAN NOT NULL DEFAULT false');
+          await tx.$executeRawUnsafe('CREATE UNIQUE INDEX IF NOT EXISTS "Hotspot_newsItemId_key" ON "Hotspot"("newsItemId")');
+        });
+      }
+    }
+  } finally { await db.$disconnect(); }
+  const prismaCli = require.resolve('prisma/build/index.js', { paths: [path.join(__dirname, '../server')] });
+  const result = spawnSync(process.execPath, [prismaCli, 'db', 'push', '--skip-generate'], { cwd: path.join(__dirname, '../server'), stdio: 'inherit' });
+  process.exitCode = result.status ?? 1;
+}
+main().catch(() => { console.error('数据库初始化或升级失败；请检查数据库和备份，未自动接受数据丢失'); process.exitCode = 1; });
