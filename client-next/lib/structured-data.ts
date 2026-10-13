@@ -3,8 +3,6 @@
  * 为 AI 搜索引擎（Perplexity、ChatGPT Search、Claude）提供明确的语义标记
  */
 
-type JsonLd = Record<string, unknown>;
-
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://aihotradar.com';
 
 /**
@@ -21,54 +19,6 @@ export function safeJsonLd(data: unknown): string {
     .replace(/</g, '\\u003c')
     .replace(/>/g, '\\u003e')
     .replace(/&/g, '\\u0026');
-}
-
-/**
- * 网站主体 Organization Schema
- * 用于根 layout，建立站点身份
- */
-export function generateOrganizationSchema(): JsonLd {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'Organization',
-    name: 'AI Hot Radar',
-    alternateName: 'AI 热点雷达',
-    url: SITE_URL,
-    logo: `${SITE_URL}/og-image.png`,
-    description: '实时聚合 20+ AI 信息源，AI 双阶段评分识别真伪，自动生成每日日报',
-    sameAs: [
-      'https://github.com/zenitlab/ai-hot-radar',
-      'https://twitter.com/aihotradar',
-    ],
-    contactPoint: {
-      '@type': 'ContactPoint',
-      contactType: 'Technical Support',
-      url: `${SITE_URL}/about`,
-    },
-  };
-}
-
-/**
- * 网站整体 WebSite Schema
- * 支持站内搜索功能的发现
- */
-export function generateWebSiteSchema(): JsonLd {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'WebSite',
-    name: 'AI Hot Radar',
-    url: SITE_URL,
-    description: '实时聚合 AI 资讯，AI 评分精选，自动生成每日日报',
-    inLanguage: 'zh-CN',
-    potentialAction: {
-      '@type': 'SearchAction',
-      target: {
-        '@type': 'EntryPoint',
-        urlTemplate: `${SITE_URL}/api/agent/search?q={search_term_string}`,
-      },
-      'query-input': 'required name=search_term_string',
-    },
-  };
 }
 
 /**
@@ -136,24 +86,6 @@ export function generateHotspotListSchema(
         url: item.url,
         datePublished: item.publishedAt,
         description: item.description,
-      },
-    })),
-  };
-}
-
-/**
- * FAQ Schema（关于页/文档用）
- */
-export function generateFAQSchema(faqs: Array<{ question: string; answer: string }>) {
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    mainEntity: faqs.map(faq => ({
-      '@type': 'Question',
-      name: faq.question,
-      acceptedAnswer: {
-        '@type': 'Answer',
-        text: faq.answer,
       },
     })),
   };

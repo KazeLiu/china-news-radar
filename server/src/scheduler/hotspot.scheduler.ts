@@ -634,7 +634,7 @@ export class HotspotScheduler implements OnApplicationBootstrap {
         // Resolve each item to a cluster: eventKey-derived key first, with the
         // existing 方案2 Jaccard fallback so reworded headlines of the same event
         // join one cluster instead of each becoming its own main.
-        const keys = analyzed.map((a, j) =>
+        const keys = analyzed.map(a =>
           resolveClusterKey(a.clusterTokens, a.baseClusterKey, claimedClusters));
 
         // Batch-internal main selection: exactly one winner per cluster within
@@ -847,16 +847,6 @@ export class HotspotScheduler implements OnApplicationBootstrap {
       return deduped.map(item => ({ ...item, _hint: group.targetCategory! }));
     }
     return deduped;
-  }
-
-  /** Search a source with multiple keywords, dedup by URL */
-  private async searchMultiKeyword(
-    fn: (query: string) => Promise<SearchResult[]>,
-    keywords: string[],
-  ): Promise<SearchResult[]> {
-    const settled = await Promise.allSettled(keywords.map(kw => fn(kw)));
-    const all = settled.flatMap(r => r.status === 'fulfilled' ? r.value : []);
-    return this.searchService.deduplicateResults(all);
   }
 
   private async processRssItems(): Promise<void> {

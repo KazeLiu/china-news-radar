@@ -10,4 +10,5 @@
 - 保留媒体发布时间、首次发现时间和更新时间。URL 去重，标题相同仅折叠显示；不要把关键词相似当作同一事件，也不要让内容编辑覆盖收藏和首次发现时间。
 - 部署文件使用项目根构建上下文和 `*.radar` Dockerfile，目标支持 Ubuntu ARM64。数据库放在持久卷，禁止自动接受数据丢失；后端和 Telegram 接收入口不发布宿主端口。
 - 运行开发服务前核对端口，不按端口批量杀进程。凭据、SQLite、Telegram session 和队列文件不得提交；验证前端时另遵循 `client-next/AGENTS.md`。
+- 前端源码、工作区和部署入口统一使用 `client-next`；旧 Vite `client` 已移除。调整前端调用后验证 Next.js 构建与现有页面，不再维护第二份组件实现。
 - 常规验证：后端 `pnpm --filter ai-hot-radar-server test` 与 `build`；前端构建以及所改文件 ESLint；Telegram 公用逻辑运行 `python -m unittest test_common.py`。本机通过不等于 ARM64 Docker、真实 Telegram 登录或 TLS 已通过，交付时分别说明证据范围。

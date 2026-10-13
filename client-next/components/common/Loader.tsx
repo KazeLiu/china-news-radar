@@ -1,16 +1,6 @@
 'use client';
 import { cn } from '../../lib/utils';
 
-/**
- * Unified loading primitives. Three flavors so each surface picks the right one:
- *
- * - <PageLoader />  : centered spinner — for whole-view async work
- * - <Skeleton />    : shimmer block — for predictable card lists
- * - <InlineSpinner/>: tiny inline spinner — for buttons / inline async
- *
- * All three pull from the same theme tokens so light + dark stay consistent.
- */
-
 export function PageLoader({
   label,
   className,
@@ -60,16 +50,5 @@ export function SkeletonList({
         <Skeleton key={i} className={itemClassName} />
       ))}
     </div>
-  );
-}
-
-function InlineSpinner({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        'inline-block w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent animate-spin',
-        className,
-      )}
-    />
   );
 }

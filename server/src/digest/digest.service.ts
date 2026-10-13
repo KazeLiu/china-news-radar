@@ -118,9 +118,9 @@ export class DigestService {
 
     let data: DigestData;
     if (items.length === 0) {
-      data = this.emptyDigest(date, 0);
+      data = this.emptyDigest(0);
     } else if (!process.env.OPENAI_API_KEY) {
-      data = this.fallbackDigest(items, date);
+      data = this.fallbackDigest(items);
     } else {
       data = await this.generateAiDigest(items, date);
     }
@@ -179,7 +179,7 @@ export class DigestService {
   // ── AI generation ──────────────────────────────────────────────────────────
 
   private async generateAiDigest(items: any[], date: string): Promise<DigestData> {
-    const fallback = this.fallbackDigest(items, date);
+    const fallback = this.fallbackDigest(items);
     try {
       const numbered = items
         .slice(0, 60)
@@ -294,7 +294,7 @@ ${numbered}
     }
   }
 
-  private fallbackDigest(items: any[], date: string): DigestData {
+  private fallbackDigest(items: any[]): DigestData {
     const pick = (cat: string, region?: string) =>
       items
         .filter((h) => (!cat || h.category === cat) && (!region || h.region === region))
@@ -335,7 +335,7 @@ ${numbered}
     };
   }
 
-  private emptyDigest(date: string, itemCount: number): DigestData {
+  private emptyDigest(itemCount: number): DigestData {
     return {
       summary: '',
       highlights: [],
