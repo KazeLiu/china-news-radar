@@ -1,253 +1,74 @@
 # China Radar · 海外涉华快讯
 
-本项目由蓝芷怡维护，基于 [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar)，保留上游主要模块和页面。首页进入精选，全部通过内容与展示规则筛选的海外涉华报道均可进入，质量评分只用于排序；热点、日报、我的关注和 Agent/RSS 使用统一公共范围。管理员统一配置来源和 AI，新增内容按周期合批分析，分类、翻译与评分在同一请求内完成；结果持久缓存，阅读不调用模型。详见 [开发计划与进度](docs/DEVELOPMENT-PLAN.md)。
+聚合海外媒体涉华报道，提供中文分类、翻译、精选、热点、日报与关键词关注。由蓝芷怡维护。
 
-来源支持配置多个 RSS 地址，按顺序尝试备用，可在后台测试获取或删除来源。RSSHub 作为完整 RSS 地址填写；彭博/CNBC/卫报/BBC 使用媒体公开 RSS，路透/美联/日经亚洲默认使用 Google 索引。详见 [RSSHub 接入与实测](docs/RSSHUB.md)。
+简体中文 · [English](README.en.md)
 
-部署目标为 Ubuntu ARM64 + Docker，预定域名 `china-news.951211.xyz`。请先阅读 [部署与使用说明](docs/DEPLOY-RADAR.md)，使用 `compose.arm64.yml` 及 `Dockerfile.radar`，不要照下方原项目配置启动旧采集任务。
+## 主要功能
 
-本地源码使用 Node 22、pnpm 9.12.1、Next.js 16。无需 GitHub 登录即可开发此公开仓库。
+- **精选阅读**：首页进入精选，可按来源、主题、时间和关键词筛选，切换原文。通过内容与展示规则筛选的报道均可展示，质量评分只用于排序，未评分内容不会因此被排除。
+- **来源管理**：管理 RSS、网页与 Telegram 来源，配置排除规则。RSS 支持多个备用地址，按顺序尝试；RSSHub 作为完整 RSS 地址填写。
+- **统一 AI 分析**：新增内容进入持久队列，按周期合批完成分类、翻译与评分。分析结果持久缓存，阅读、筛选和查看统计不调用模型。
+- **手动新闻与人工隐藏**：在 `/admin?tab=news` 粘贴内容或提取 URL，保存草稿、主动分析、编辑展示文案，再明确发布。文章和图片可分别隐藏与恢复，保留原始数据。
+- **操作日志**：在 `/admin?tab=logs` 查看采集和 AI 请求统计，区分正式采集、来源预览、实际请求、重试与处理文章。日期按北京时间，额度按 UTC；日志保留 30 天。
+- **热点、日报、关注与 Agent/RSS**：公共内容范围统一，草稿和人工隐藏的文章不会进入公共查询。接口与订阅用法见站内「Agent 接入」页。
 
-管理入口为 `/admin`，账号通过本地交互命令初始化，见 [管理员登录](docs/ADMIN-ACCESS.md)。后台包含来源、排除规则、AI 队列、手动新闻与人工隐藏、日志统计。手动新闻先保存草稿，主动分析后预览，再点击发布；隐藏与恢复保留原文、图片 URL、收藏和时间。日志保留 30 天，统计不调用模型。网页与 URL 提取需按 [网页采集说明](docs/WEB-CRAWLER.md)安装独立 Chromium。
+## 本地准备
 
-当前开发电脑不启动预览、不爬数据、不调用模型，Chromium 下载已暂缓；最终测试在其他电脑进行。目标电脑接续、初始化与待验收项见 [接续说明](docs/CONTINUE-ON-ANOTHER-PC.md)。
+- Node.js 22、pnpm 9.12.1。
+- 后端：NestJS 11、Prisma、SQLite；前端：Next.js 16、React 19。
+- AI 分析使用兼容 OpenAI 协议的模型，由管理员统一配置；准备依赖与空数据库不需要模型密钥。
+- 网页采集和 URL 提取需要独立 Chromium；粘贴录入不依赖它，RSSHub 也是可选服务。
 
----
-
-以下保留上游 README，描述的是原 AI 行业雷达和 `RADAR_MODE=legacy` 模式，供参考。
-
-# 🛰️ AI Hot Radar
-
-<p align="center">
-  <strong>简体中文</strong> ·
-  <a href="README.en.md">English</a>
-</p>
-
-<p align="center">
-  <a href="https://aihotradar.com"><strong>🌐 在线体验 aihotradar.com</strong></a>
-</p>
-
-<p align="center">
-  <img alt="License" src="https://img.shields.io/github/license/zenitlab/ai-hot-radar?color=blue">
-  <img alt="Stars" src="https://img.shields.io/github/stars/zenitlab/ai-hot-radar?style=flat&logo=github">
-  <img alt="Last commit" src="https://img.shields.io/github/last-commit/zenitlab/ai-hot-radar?color=orange">
-  <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A518-43853d?logo=node.js&logoColor=white">
-  <img alt="NestJS" src="https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white">
-  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-000000?logo=next.js&logoColor=white">
-  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
-  <img alt="Prisma" src="https://img.shields.io/badge/Prisma-ORM-2D3748?logo=prisma&logoColor=white">
-  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white">
-</p>
-
-> 一款实时聚合多源 AI 资讯、AI 自动评分精选、生成每日日报的开源工具。
-
-## 一、项目简介
-
-AI Hot Radar 是一个面向 AI 行业从业者的热点雷达。系统每 10 分钟从 Twitter / X、Bing、HackerNews、IT之家、雪球、Bilibili、Google DeepMind Blog 等 20+ 信息源抓取最新资讯，通过两阶段 AI 评分（短 prompt 预筛 + 5 维评分）筛掉噪音，把真正值得看的内容沉淀到「精选」「AI 日报」「我的关注」三个视图中。
-
-技术栈：
-
-- **后端**：NestJS 11 + Express + Prisma + SQLite + Socket.io
-- **前端**：Next.js 15 + React 19 + TailwindCSS + lucide-react
-- **AI**：兼容 OpenAI 协议的任意模型（阿里云百炼 / 硅基流动 / DeepSeek / OpenAI 均可）
-- **数据源**：RSS、Bing/HackerNews 搜索、twitterapi.io、Bilibili 抓取
-
-## 二、核心功能
-
-### 1. 热点雷达（多源聚合 + AI 评分）
-
-- 20+ 信息源持续抓取，关键词预过滤跳过非 AI 内容（IT之家 / 36氪 / 财联社等综合源）
-- 两阶段评分：便宜模型预筛 → 完整评分，节省 AI 调用成本
-- 同事件多源去重，按权威性挑主条（OpenAI Blog 优先于 V2EX 转发）
-- 默认按真实发布时间排序，每天凌晨 03:30 自动清理 30 天前数据
-
-### 2. 精选模式
-
-经 AI 五维评分 + tier 加成 + 阈值过滤后的高质量资讯流，按重要度排序。
-
-### 3. AI 日报
-
-每天北京时间早上 8:00 自动生成，包含「今日重点 / 模型情报 / 国内国外动态 / AI 产品 / 社区热议 / 论文趋势」六大板块，可手动重新生成。
-
-### 4. 我的关注
-
-订阅自定义关键词，AI 自动扩展同义词、判断真伪与相关性。订阅后实时通过 WebSocket 推送，重要热点可触发邮件通知。
-
-### 5. Agent 接入
-
-把整个系统封装为三种接入方式，让 AI 应用 / RSS 阅读器 / 第三方服务都能消费：
-
-- **Skill**：在 Claude Code、Cursor 等支持 Skills 的工具中 `/install-skill`，AI 助手自动获得「查日报、查精选、按关键词搜索」能力
-- **RSS**：精选 / 全量 / 日报三个 RSS Feed，可被 Feedly、Inoreader 等订阅
-- **REST API**：5 个无认证 JSON 接口，可直接接入飞书机器人、企业微信、自动化工作流
-
-## 三、快速开始
-
-> 详细的本地运行说明见 [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md)；
-> 服务器 Docker 部署见 [docs/DEPLOY.md](docs/DEPLOY.md)；本地一键发版到 Docker Hub 用 `./release.sh`。
-
-### 前置条件
-
-- Node.js ≥ 18（推荐 20 LTS）
-- 一个兼容 OpenAI 协议的 AI API Key（阿里云百炼 / 硅基流动 / DeepSeek 任选其一）
-
-### 1. 克隆并安装
-
-```bash
-git clone https://github.com/zenitlab/ai-hot-radar.git
-cd ai-hot-radar
-
-cd server && pnpm install && npx prisma generate && npx prisma db push
-cd ../client-next && pnpm install
+```powershell
+git clone https://github.com/KazeLiu/china-news-radar.git
+cd china-news-radar
+npx --yes pnpm@9.12.1 --filter ai-hot-radar-server --filter client-next install --frozen-lockfile
 ```
 
-### 2. 配置环境变量
+没有 `server/.env` 时，从 `server/.env.radar.example` 复制并编辑，不覆盖已有配置。首次准备保持 `COLLECTOR_ENABLED=false`、`AI_ANALYSIS_ENABLED=false`。数据库可使用新空库，也可安全迁入旧库；结构升级、账号初始化、端口配置与验收步骤见 [目标电脑接续与验收说明](docs/CONTINUE-ON-ANOTHER-PC.md)。不要将数据库、密码、模型密钥或 Telegram session 提交到 Git。
 
-```bash
-cp server/.env.example server/.env
+管理入口为 `/admin`，账号通过本地交互命令初始化，没有默认账号。详见 [管理员登录](docs/ADMIN-ACCESS.md)。
+
+## 部署
+
+部署目标为 **Ubuntu ARM64 + Docker**，预定域名为 `china-news.951211.xyz`。使用仓库中的 `compose.arm64.yml` 和 `Dockerfile.radar`，按 [部署与使用说明](docs/DEPLOY-RADAR.md)配置持久卷、访问保护与反向代理。
+
+网页能力的 Chromium 安装与容器配置见 [网页采集说明](docs/WEB-CRAWLER.md)，不连接个人 Chrome 或加载个人登录资料。
+
+## 文档导航
+
+- [开发计划与当前进度](docs/DEVELOPMENT-PLAN.md)
+- [目标电脑接续与验收说明](docs/CONTINUE-ON-ANOTHER-PC.md)
+- [部署与使用说明](docs/DEPLOY-RADAR.md)
+- [管理员登录与账号初始化](docs/ADMIN-ACCESS.md)
+- [网页采集与独立 Chromium](docs/WEB-CRAWLER.md)
+- [RSSHub 接入与实测记录](docs/RSSHUB.md)
+
+## 当前开发状态
+
+手动新闻、人工隐藏、日志统计和前台整合代码已写入。当前开发电脑使用新空库，不启动预览、不采集数据、不调用模型；Chromium 下载已暂缓。最终运行测试与部署验收在目标电脑进行，待验收项已列入接续说明。
+
+## 项目结构
+
+```text
+china-news-radar/
+├── client-next/         # Next.js 前端
+├── server/              # NestJS 后端与 Prisma 数据结构
+├── scripts/             # 数据库升级、账号初始化等工具
+├── skills/hot-monitor/  # Agent Skill
+├── docs/                # 开发、部署与接续文档
+└── compose.arm64.yml    # Ubuntu ARM64 部署配置
 ```
 
-编辑 `server/.env`，至少填入 AI Key：
+## 作者与致谢
 
-```env
-OPENAI_API_KEY=your_api_key_here
-OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-MODEL_NAME=qwen-coder-turbo
+- 作者：[蓝芷怡 / KazeLiu](https://github.com/KazeLiu)
+- 仓库：[KazeLiu/china-news-radar](https://github.com/KazeLiu/china-news-radar)
+- 邮箱：kaze.liu@qq.com
 
-# 可选
-TWITTER_API_KEY=your_twitter_api_key_here
-```
+本项目基于 [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar) 开发，感谢上游作者提供的基础实现。
 
-### 3. 启动（两个终端）
+## 许可
 
-```bash
-# 终端 1
-cd server && pnpm run dev   # http://localhost:3001
-
-# 终端 2
-cd client-next && pnpm run dev   # http://localhost:3000
-```
-
-打开 http://localhost:3000，即可看到主界面。
-
-| 服务          | 地址                             |
-| ------------- | -------------------------------- |
-| 前端页面      | http://localhost:3000            |
-| 后端 API      | http://localhost:3001            |
-| Prisma Studio | `cd server && npx prisma studio` |
-
-## 四、项目结构
-
-```
-ai-hot-radar/
-├── client-next/         # Next.js 前端（App Router）
-│   └── src/components/
-│       ├── curated/     # 精选
-│       ├── hotspot/     # 热点雷达
-│       ├── digest/      # AI 日报
-│       ├── keywords/    # 我的关注
-│       ├── agent/       # Agent 接入
-│       └── changelog/   # 更新日志
-├── server/              # NestJS 后端
-│   └── src/
-│       ├── agent/       # Agent 接入：RSS / API / Skill
-│       ├── curated/     # 精选筛选
-│       ├── digest/      # 日报生成
-│       ├── entities/    # 关键词聚合
-│       ├── hotspots/    # 热点抓取与评分
-│       ├── keywords/    # 关键词管理
-│       ├── rss-feeds/   # RSS 信源
-│       ├── scheduler/   # 定时任务
-│       └── notifications/
-├── skills/hot-monitor/  # Agent Skill 包
-└── docs/                # 项目文档
-```
-
-## 五、Agent 接入示例
-
-启动服务后，所有 Agent 接口已可用：
-
-```bash
-# 精选 RSS
-curl http://localhost:3001/api/agent/rss/curated.xml
-
-# 查询今日 AI 日报
-curl http://localhost:3001/api/agent/digest
-
-# 按关键词搜索
-curl "http://localhost:3001/api/agent/search?q=Claude&limit=5"
-
-# Skill 描述
-curl http://localhost:3001/aihot-skill
-```
-
-更多用法见前端「Agent 接入」页。
-
-## 六、生产部署与发版
-
-> 完整说明见 [docs/DEPLOY.md](docs/DEPLOY.md) 与 [docs/DEPLOY-NEXTJS.md](docs/DEPLOY-NEXTJS.md)，这里只列日常发版流程与踩过的坑。
-
-### 架构
-
-```
-公网 HTTPS(443)
-   └─ 宿主机 nginx（宝塔面板，SSL + 反代）
-        ├─ location /      → 127.0.0.1:8080  前端容器（Next.js standalone）
-        └─ location /api/  → 127.0.0.1:3001  后端容器（NestJS）
-```
-
-前端镜像 `zenitlab/ai-hot-radar-frontend:latest`、后端 `...-backend:latest`，均由本地 `release.sh` 构建后推送到 Docker Hub，服务器 `docker compose pull` 拉取。
-
-### 发版流程（三步，缺一不可）
-
-```bash
-# 1. 本地 Mac：构建并推送新镜像到 Docker Hub
-./release.sh frontend            # 或 backend / all
-
-# 2. 服务器：拉取新镜像（务必看到 "Downloaded newer image"，
-#    显示 "up to date" 说明没拉到新镜像，多半是第 1 步没推成功）
-docker compose pull frontend
-
-# 3. 服务器：强制重建容器（漏了 --force-recreate 可能仍跑旧容器）
-docker compose up -d --force-recreate frontend
-```
-
-> `release.sh` 设置 `SERVER_HOST=user@host` 可在推完镜像后自动 SSH 部署。
-
-### ⚠️ 坑：发版后线上页面不更新
-
-**现象**：镜像已更新、容器已重建，但线上页面 / favicon 仍是旧的，甚至不同页面卡在不同版本。
-
-**根因**：宿主机 nginx 全局 `proxy.conf` 里的 `proxy_cache` 会被站点 `location /` 继承，把前端 **HTML 页面**按 URL 缓存了很久（Next.js 对静态 prerender 页面会下发 `Cache-Control: s-maxage=31536000`，即一年，nginx 照单全收）。容器本身是对的，是缓存挡住了。
-
-**根治**：在站点配置 `location /`（反代到 8080 那段）里关闭 HTML 缓存，已生效：
-
-```nginx
-location / {
-    proxy_pass http://127.0.0.1:8080;
-    proxy_cache off;          # 关键：HTML 页面不缓存，每次回源新容器
-    # ...其余 proxy_set_header 不变
-}
-```
-
-`/api/`(3001) 与 `/_next/static/`（带 hash 的静态资源）不受影响，性能无损。改完发版即时生效，无需再手动清缓存。
-
-若临时需要清一次已有缓存：
-
-```bash
-sudo rm -rf /www/server/nginx/proxy_cache_dir/*   # 清空缓存目录，按需回源重建
-```
-
-### 排查小抄
-
-```bash
-# 直连容器看真实内容（绕过 nginx 缓存）
-curl -s http://127.0.0.1:8080/curated | grep -oE 'rel="icon" href="[^"]*"'
-
-# 从公网核对（以 curl 为准，别以自己浏览器为准——浏览器会本地缓存 favicon）
-curl -s https://www.aihotradar.com/curated | grep -oE 'rel="icon" href="[^"]*"'
-```
-
-## 七、License
-
-MIT
+MIT（沿用上游 README 的许可声明）。

@@ -1,170 +1,53 @@
-# 🛰️ AI Hot Radar
+# China Radar · Overseas News About China
 
-<p align="center">
-  <a href="README.md">简体中文</a> ·
-  <strong>English</strong>
-</p>
+China Radar aggregates overseas reporting about China, with Chinese classification, translation, curated news, hotspots, daily digests, and keyword subscriptions. Maintained by 蓝芷怡 (KazeLiu).
 
-<p align="center">
-  <a href="https://aihotradar.com"><strong>🌐 Live demo at aihotradar.com</strong></a>
-</p>
+[简体中文](README.md) · English
 
-<p align="center">
-  <img alt="License" src="https://img.shields.io/github/license/zenitlab/ai-hot-radar?color=blue">
-  <img alt="Stars" src="https://img.shields.io/github/stars/zenitlab/ai-hot-radar?style=flat&logo=github">
-  <img alt="Last commit" src="https://img.shields.io/github/last-commit/zenitlab/ai-hot-radar?color=orange">
-  <img alt="Node" src="https://img.shields.io/badge/node-%E2%89%A518-43853d?logo=node.js&logoColor=white">
-  <img alt="NestJS" src="https://img.shields.io/badge/NestJS-11-E0234E?logo=nestjs&logoColor=white">
-  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-000000?logo=next.js&logoColor=white">
-  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black">
-  <img alt="Prisma" src="https://img.shields.io/badge/Prisma-ORM-2D3748?logo=prisma&logoColor=white">
-  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178C6?logo=typescript&logoColor=white">
-</p>
+## Features
 
-> A real-time, multi-source AI news radar with AI-driven curation and daily digests.
+- **Curated reading**: the home page opens curated news, with source, topic, time, and keyword filters. Quality scores affect ordering, not eligibility; unscored articles can still appear.
+- **Source management**: RSS, public web pages, Telegram, and exclusion rules. RSS supports ordered fallback URLs; RSSHub feeds use complete URLs.
+- **Shared AI analysis**: classification, translation, and scoring run in persistent batch jobs. Results are cached; reading and viewing statistics do not call a model.
+- **Manual publishing**: save pasted content or URL extracts as drafts, request analysis, edit display text, then explicitly publish. Articles and images can be hidden and restored separately without deleting the original data.
+- **Operation logs**: collection and AI statistics distinguish previews, actual requests, retries, and processed articles. Dates use Beijing time; quotas use UTC. Logs are retained for 30 days.
+- **Hotspots, digests, subscriptions, and Agent/RSS**: public queries share the same content rules and exclude drafts and hidden articles. Integration details are available on the in-app Agent page.
 
-## 1. Overview
+## Setup and deployment
 
-AI Hot Radar is a hotspot tracker built for AI practitioners. Every 10 minutes it pulls from 20+ sources — Twitter / X, Bing, HackerNews, IT Home, Xueqiu, Bilibili, Google DeepMind Blog and more — then runs a two-stage AI scoring pipeline (short pre-filter prompt + full 5-dim scoring) to drop noise and surface only what's worth reading.
+Use **Node.js 22 and pnpm 9.12.1**. The backend uses NestJS 11, Prisma, and SQLite; the frontend uses Next.js 16 and React 19.
 
-**Stack**
+Clone [KazeLiu/china-news-radar](https://github.com/KazeLiu/china-news-radar), then follow the [main README](README.md#本地准备) and [target-computer setup and acceptance guide](docs/CONTINUE-ON-ANOTHER-PC.md) for dependencies, environment configuration, database upgrades, and account initialization. The detailed guides are in Chinese.
 
-- **Backend**: NestJS 11 + Express + Prisma + SQLite + Socket.io
-- **Frontend**: Next.js 15 (App Router) + React 19 + TailwindCSS + lucide-react
-- **AI**: any OpenAI-compatible model (DashScope / SiliconFlow / DeepSeek / OpenAI)
-- **Sources**: RSS, Bing / HackerNews scraping, twitterapi.io, Bilibili
+Keep `COLLECTOR_ENABLED=false` and `AI_ANALYSIS_ENABLED=false` during initial preparation. Model credentials are not required to install dependencies or prepare an empty database. Do not commit databases, passwords, API keys, or Telegram sessions.
 
-## 2. Features
+Administration is available at `/admin`; accounts are initialized through an interactive local command, with no default account. See [administrator access](docs/ADMIN-ACCESS.md).
 
-### 2.1 Hotspot Radar
+The deployment target is **Ubuntu ARM64 with Docker**, using `compose.arm64.yml` and `Dockerfile.radar`. The planned domain is `china-news.951211.xyz`. See the [deployment guide](docs/DEPLOY-RADAR.md) for persistent storage and access protection.
 
-- 8+ ingestion sources, with keyword pre-filter to drop non-AI items from general feeds (IT Home, 36Kr, etc.)
-- Two-stage AI scoring: cheap model pre-filter, full scorer for survivors — saves on AI cost
-- Cross-source dedup with authority weighting (OpenAI Blog beats a V2EX repost)
-- Sorted by actual publish time, automatic 30-day cleanup at 03:30 daily
+Web collection and URL extraction require a separate Chromium installation, not a personal Chrome profile. Pasted content does not require Chromium, and RSSHub is optional.
 
-### 2.2 Curated
+## Documentation
 
-A high-quality stream filtered by 5-axis AI scoring + source-tier bonus + threshold cut, ranked by importance.
+- [Development plan and progress](docs/DEVELOPMENT-PLAN.md)
+- [Target-computer setup and acceptance](docs/CONTINUE-ON-ANOTHER-PC.md)
+- [Deployment](docs/DEPLOY-RADAR.md)
+- [Administrator access](docs/ADMIN-ACCESS.md)
+- [Web collection and Chromium](docs/WEB-CRAWLER.md)
+- [RSSHub integration](docs/RSSHUB.md)
 
-### 2.3 Daily Digest
+## Current status
 
-Auto-generated at 08:00 Beijing time every morning. Six sections: Top Stories, Model Intel, Domestic, International, AI Products, Community, Papers. Manual regeneration supported.
+Manual publishing, content hiding, operation logs, and frontend integration have been implemented. The current development computer uses a new empty database, without running a preview, collecting data, or calling models. Chromium installation is deferred. Runtime testing and deployment acceptance will take place on the target computer; the acceptance checklist is in the setup guide.
 
-### 2.4 My Keywords
+## Author and credits
 
-Subscribe to custom keywords; AI expands synonyms and judges authenticity / relevance. Updates pushed live via WebSocket; high-importance hits trigger email notifications.
+- Author: [蓝芷怡 / KazeLiu](https://github.com/KazeLiu)
+- Repository: [KazeLiu/china-news-radar](https://github.com/KazeLiu/china-news-radar)
+- Email: kaze.liu@qq.com
 
-### 2.5 Agent Integrations
+Built on [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar). Thanks to the upstream author for the foundation.
 
-The system exposes itself in three ways for AI apps, RSS readers, and third-party services:
+## License
 
-- **Skill** — install on Claude Code, Cursor, or other Skill-aware tools (`/install-skill`); the AI assistant gains "query digest / curated / search by keyword" capabilities
-- **RSS** — three feeds (curated / all / digest), ready for Feedly, Inoreader, etc.
-- **REST API** — five auth-free JSON endpoints, drop-in for Feishu / WeCom bots and automation pipelines
-
-## 3. Quick Start
-
-> Local dev: [docs/LOCAL_SETUP.md](docs/LOCAL_SETUP.md).
-> Docker deploy: [docs/DEPLOY.md](docs/DEPLOY.md).
-
-### Prerequisites
-
-- Node.js ≥ 18 (20 LTS recommended)
-- One OpenAI-compatible API key (DashScope / SiliconFlow / DeepSeek / OpenAI)
-
-### Install
-
-```bash
-git clone https://github.com/zenitlab/ai-hot-radar.git
-cd ai-hot-radar
-
-cd server && pnpm install && npx prisma generate && npx prisma db push
-cd ../client-next && pnpm install
-```
-
-### Configure
-
-```bash
-cp server/.env.example server/.env
-```
-
-Edit `server/.env`, fill in at least the AI key:
-
-```env
-OPENAI_API_KEY=your_api_key_here
-OPENAI_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-MODEL_NAME=qwen-coder-turbo
-
-# optional
-TWITTER_API_KEY=your_twitter_api_key_here
-```
-
-### Run (two terminals)
-
-```bash
-# terminal 1
-cd server && pnpm run dev   # http://localhost:3001
-
-# terminal 2
-cd client-next && pnpm run dev   # http://localhost:3000
-```
-
-Open http://localhost:3000 to use the app.
-
-| Service       | URL                              |
-| ------------- | -------------------------------- |
-| Frontend      | http://localhost:3000            |
-| Backend API   | http://localhost:3001            |
-| Prisma Studio | `cd server && npx prisma studio` |
-
-## 4. Project Structure
-
-```
-ai-hot-radar/
-├── client-next/         # Next.js frontend (App Router)
-│   └── src/components/
-│       ├── curated/
-│       ├── hotspot/
-│       ├── digest/
-│       ├── keywords/
-│       ├── agent/
-│       └── changelog/
-├── server/              # NestJS backend
-│   └── src/
-│       ├── agent/       # RSS / API / Skill exports
-│       ├── curated/
-│       ├── digest/
-│       ├── entities/
-│       ├── hotspots/    # ingestion + scoring
-│       ├── keywords/
-│       ├── rss-feeds/
-│       ├── scheduler/
-│       └── notifications/
-├── skills/hot-monitor/  # Agent Skill bundle
-└── docs/
-```
-
-## 5. Agent Endpoints
-
-Once the server is running:
-
-```bash
-# Curated RSS
-curl http://localhost:3001/api/agent/rss/curated.xml
-
-# Today's digest
-curl http://localhost:3001/api/agent/digest
-
-# Keyword search
-curl "http://localhost:3001/api/agent/search?q=Claude&limit=5"
-
-# Skill descriptor
-curl http://localhost:3001/aihot-skill
-```
-
-Full reference is on the in-app **Agent** page.
-
-## 6. License
-
-MIT
+MIT, retaining the license declaration from the upstream README.
