@@ -1,0 +1,103 @@
+name: china-news-radar
+services:
+  server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile.radar
+    restart: unless-stopped
+    init: true
+    environment:
+      DATABASE_URL: file:/data/radar.db
+      RADAR_MODE: news
+      HOST: 0.0.0.0
+      PORT: '3001'
+      CLIENT_URL: https://${RADAR_DOMAIN:?请配置 RADAR_DOMAIN}
+      PUBLIC_SITE_URL: https://${RADAR_DOMAIN}
+      AI_ANALYSIS_ENABLED: ${AI_ANALYSIS_ENABLED:-true}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-100}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      COLLECTOR_TOKEN: ${COLLECTOR_TOKEN:-}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      RSSHUB_BASE_URL: http://rsshub:3412
+    volumes:
+      - radar_data:/data
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3001/api/news/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    mem_limit: 2g
+  rsshub:
+    build:
+      context: .
+      dockerfile: rsshub-service/Dockerfile.radar
+    restart: unless-stopped
+    init: true
+    environment:
+      RSSHUB_HOST: 0.0.0.0
+      RSSHUB_PORT: '3412'
+    healthcheck:
+      test: ['CMD', 'node', '-e', "fetch('http://127.0.0.1:3412/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    mem_limit: 1g
+  client:
+    build:
+      context: .
+      dockerfile: client-next/Dockerfile.radar
+      args:
+        INTERNAL_API_URL: http://server:3001
+    restart: unless-stopped
+    init: true
+    depends_on:
+      server:
+        condition: service_healthy
+    mem_limit: 1g
+  caddy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    depends_on:
+      - client
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      RADAR_DOMAIN: ${RADAR_DOMAIN:?请配置 RADAR_DOMAIN}
+      RADAR_USER: ${RADAR_USER:-reader}
+      RADAR_PASSWORD_HASH: ${RADAR_PASSWORD_HASH:?请生成私人访问密码 hash}
+    volumes:
+      - ./Caddyfile.radar:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+  telegram:
+    profiles: ['telegram']
+    build:
+      context: .
+      dockerfile: telegram-collector/Dockerfile
+    restart: unless-stopped
+    init: true
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TG_USE_CONFIRMED: ${TG_USE_CONFIRMED:-false}
+      TG_API_ID: ${TG_API_ID:-}
+      TG_API_HASH: ${TG_API_HASH:-}
+      COLLECTOR_TOKEN: ${COLLECTOR_TOKEN:-}
+      RADAR_INGEST_URL: http://server:3001/api/news/telegram
+    volumes:
+      - telegram_data:/state
+    mem_limit: 256m
+volumes:
+  radar_data:
+  caddy_data:
+  caddy_config:
+  telegram_data:

@@ -1,0 +1,28 @@
+{$RADAR_DOMAIN} {
+	encode zstd gzip
+	basic_auth {
+		{$RADAR_USER} {$RADAR_PASSWORD_HASH}
+	}
+	header {
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		X-Robots-Tag "noindex, nofollow"
+	}
+	# The Telegram token endpoint is reachable only inside the Docker network.
+	@ingest path /api/news/telegram /api/news/telegram/*
+	handle @ingest {
+		respond 404
+	}
+	handle /api/news/* {
+		reverse_proxy server:3001
+	}
+	# Expose the reader and admin page; admin APIs also require ADMIN_TOKEN.
+	@reader path / /admin /admin/ /_next/* /radar-icon.svg /favicon.ico /icon.png /apple-icon.png
+	handle @reader {
+		reverse_proxy client:3000
+	}
+	handle {
+		respond 404
+	}
+}

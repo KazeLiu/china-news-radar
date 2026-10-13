@@ -1,0 +1,15 @@
+**/node_modules
+**/.next
+**/dist
+.git
+**/.env
+**/.env.*
+**/*.db
+**/*.db-*
+**/*.sqlite*
+**/*.session*
+**/__pycache__
+**/*.log
+telegram-collector/state
+backups
+work
