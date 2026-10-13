@@ -43,6 +43,12 @@ describe('persistent unified AI worker', () => {
     expect(f.completion).not.toHaveBeenCalled(); expect(f.item).toMatchObject({ visible: true, decisionBy: 'rules', aiStatus: 'limited' });
     expect(f.job.retryAt.toISOString()).toMatch(/T00:00:00.000Z$/); expect(f.settings.get(f.usageKey)).toBe('100');
   });
+  it('stops before a paid request when the persisted daily usage is corrupt', async () => {
+    const f = fixture('invalid');
+    await expect(f.service['analyzeNext']()).rejects.toThrow('用量无效');
+    expect(f.completion).not.toHaveBeenCalled(); expect(f.db.setting.upsert).not.toHaveBeenCalled();
+    expect(f.job.status).toBe('pending');
+  });
   it('invalid model output does not apply a partial translation and has bounded retry attempts', async () => {
     const f = fixture(); f.item.title = 'China trade policy'; f.completion.mockResolvedValue({ choices: [{ message: { content: '{"translation":"bad"}' } }] } as never);
     for (let attempt = 0; attempt < 3; attempt++) { f.job.retryAt = new Date(0); await f.service['analyzeNext'](); }

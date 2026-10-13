@@ -7,6 +7,12 @@ import { isLocalFeed } from './transports';
 export const ADMIN_CONFIG_KEY = 'news-admin-config-v1';
 export interface AiConfig { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; apiKey: string; instructions: string }
 export interface AdminConfig { ai: AiConfig; sources: NewsSourceConfig[]; rules: FilterRule[]; removedSourceIds: string[] }
+export function readAiUsage(value?: string): number {
+  if (value === undefined) return 0;
+  const usage = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(usage)) throw new Error('已保存的 AI 用量无效，请检查数据库；调用已停止');
+  return usage;
+}
 export function defaultConfig(): AdminConfig {
   const limit = Number(process.env.AI_DAILY_LIMIT || 100);
   return { ai: { enabled: (process.env.AI_ANALYSIS_ENABLED ?? process.env.AI_TRANSLATION_ENABLED) === 'true',

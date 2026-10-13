@@ -7,15 +7,21 @@ import { retryAfterMs } from './rules';
 export interface FeedAttempt { url: string; status: number | null; error: string | null; skipped?: boolean }
 export type FeedFailures = Record<string, { retryAt: string; error: string; status: number | null }>;
 export function restoreFailures(raw?: string): FeedFailures {
-  try { return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  if (raw === undefined) return {};
+  try {
+    const failures: FeedFailures = JSON.parse(raw);
+    if (!failures || typeof failures !== 'object' || Array.isArray(failures) || Object.values(failures).some(failure =>
+      !failure || typeof failure.retryAt !== 'string' || !Number.isFinite(Date.parse(failure.retryAt)) || typeof failure.error !== 'string'
+      || (failure.status !== null && (!Number.isInteger(failure.status) || failure.status < 100 || failure.status > 599)))) throw new Error();
+    return failures;
+  } catch { throw new Error('已保存的 RSS 重试状态无效，请检查数据库；退避记录未重置'); }
 }
 export class FeedFetchError extends Error {
-  constructor(public attempts: FeedAttempt[], public problem: unknown, public failures: FeedFailures) { super(attempts.map(a => a.error).join('；')); }
+  constructor(public attempts: FeedAttempt[], public failures: FeedFailures) { super(attempts.map(a => a.error).join('；')); }
 }
 export async function fetchSourceFeed<T>(source: NewsSourceConfig, parse: (xml: string, selected: NewsSourceConfig) => Promise<T>, cache?: { activeFeedUrl: string | null; etag: string | null; lastModified: string | null; feedFailures?: string }) {
   const attempts: FeedAttempt[] = [];
   const failures = restoreFailures(cache?.feedFailures);
-  let problem: unknown;
   for (const url of feedUrlsFor(source)) {
     if (failures[url] && Date.parse(failures[url].retryAt) > Date.now()) {
       attempts.push({ url, status: failures[url].status, error: `${failures[url].error}，等待重试`, skipped: true });
@@ -33,7 +39,6 @@ export async function fetchSourceFeed<T>(source: NewsSourceConfig, parse: (xml: 
       delete failures[url];
       return { selected, response, parsed, attempts, failures };
     } catch (error) {
-      problem = error;
       const status = axios.isAxiosError(error) ? error.response?.status ?? null : null;
       const message = status ? `HTTP ${status}` : stage === 'parse' ? 'RSS 格式无法解析' : '连接失败或请求超时';
       const delay = status === 429 && axios.isAxiosError(error) ? retryAfterMs(error.response?.headers['retry-after']) : 300_000;
@@ -41,5 +46,5 @@ export async function fetchSourceFeed<T>(source: NewsSourceConfig, parse: (xml: 
       attempts.push({ url, status, error: message });
     }
   }
-  throw new FeedFetchError(attempts, problem, failures);
+  throw new FeedFetchError(attempts, failures);
 }

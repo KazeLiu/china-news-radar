@@ -1,10 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { defaultConfig, restoreConfig, validateAi, validateRules, validateSource } from './admin-config';
+import { defaultConfig, restoreConfig, validateAi, validateRules, validateSource, readAiUsage } from './admin-config';
 import { matchingExclusions } from './content-filter';
 import { requireAdmin } from './admin-access';
 
 afterEach(() => vi.unstubAllEnvs());
 describe('administrator configuration', () => {
+  it('rejects corrupt stored usage instead of bypassing the daily budget', () => {
+    expect(readAiUsage()).toBe(0); expect(readAiUsage('0')).toBe(0); expect(readAiUsage('100')).toBe(100);
+    for (const value of ['', 'invalid', '-1', '1.5', 'Infinity', '9007199254740992']) expect(() => readAiUsage(value)).toThrow('用量无效');
+  });
   it('preserves saved keys when blank, replaces keys across restarts, and validates budgets', () => {
     vi.stubEnv('OPENAI_API_KEY', 'environment-fixture');
     const config = defaultConfig();

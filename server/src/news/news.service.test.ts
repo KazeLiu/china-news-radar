@@ -11,13 +11,34 @@ const source = NEWS_SOURCES.find(s => s.id === 'reuters')!;
 const item = { title: 'China trade policy', summary: 'New export measures', url: 'https://news.google.com/rss/articles/id', originalPublisher: 'Reuters', originalUrl: null, author: null, topic: 'economy', eventKey: 'hash', contentHash: 'v1', publishedAt: new Date() };
 function database() {
   return { newsSource: { findUniqueOrThrow: vi.fn().mockResolvedValue({ id: source.id, enabled: true }), update: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]) },
-    newsItem: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}), findFirst: vi.fn().mockResolvedValue(null), updateMany: vi.fn(), update: vi.fn() }, setting: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn() },
-    newsAnalysis: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({ status: 'pending' }) } };
+    newsItem: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}), findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn(), update: vi.fn() }, setting: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn() },
+    newsAnalysis: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({ status: 'pending' }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) } };
 }
 let db: ReturnType<typeof database>; let service: NewsService;
 beforeEach(() => { vi.clearAllMocks(); vi.stubEnv('AI_ANALYSIS_ENABLED', 'false'); vi.stubEnv('AI_TRANSLATION_ENABLED', 'false'); vi.stubEnv('TELEGRAM_ENABLED', 'false'); db = database(); service = new NewsService(db as unknown as PrismaService); });
 afterEach(() => vi.unstubAllEnvs());
 describe('independent collector', () => {
+  it('marks an invalid completed AI cache as failed without paying for a replacement', async () => {
+    vi.stubEnv('AI_ANALYSIS_ENABLED', 'true'); vi.stubEnv('OPENAI_API_KEY', 'test-only-key');
+    service = new NewsService(db as unknown as PrismaService);
+    const key = analysisKey(item);
+    db.newsAnalysis.findUnique.mockResolvedValue({ key, status: 'done', resultJson: '{"translation":"bad"}' } as never);
+    await service['store'](source.id, item);
+    expect(db.newsAnalysis.updateMany).toHaveBeenCalledWith({ where: { key, status: 'done' }, data: expect.objectContaining({ status: 'failed', retryAt: null }) });
+    expect(db.newsItem.upsert.mock.calls[0][0].create).toMatchObject({ aiStatus: 'failed', decisionBy: 'rules', analyzedAt: null });
+    expect(db.newsAnalysis.upsert).not.toHaveBeenCalled();
+  });
+  it('restores an excluded article through rules when its AI cache is corrupt, preserving bookmarks and dates', async () => {
+    const updatedAt = new Date('2026-10-10T00:00:00Z');
+    db.newsItem.findMany.mockResolvedValueOnce([{ ...item, id: 'excluded-article', sourceId: source.id, aiStatus: 'excluded', saved: true, updatedAt }] as never);
+    db.newsItem.updateMany.mockResolvedValue({ count: 1 } as never);
+    db.newsAnalysis.findUnique.mockResolvedValue({ key: analysisKey(item), status: 'done', resultJson: '{' } as never);
+    expect(await service['reapplyFilters']()).toBe(1);
+    const update = db.newsItem.updateMany.mock.calls[0][0].data;
+    expect(update).toMatchObject({ aiStatus: 'failed', decisionBy: 'rules', analysisKey: null, updatedAt });
+    expect(update.saved).toBeUndefined(); expect(update.firstSeenAt).toBeUndefined();
+    expect(db.newsAnalysis.upsert).not.toHaveBeenCalled();
+  });
   it('does not queue or create a Google-indexed media collection page for AI', async () => {
     vi.stubEnv('AI_ANALYSIS_ENABLED', 'true'); vi.stubEnv('OPENAI_API_KEY', 'test-only-key');
     service = new NewsService(db as unknown as PrismaService);

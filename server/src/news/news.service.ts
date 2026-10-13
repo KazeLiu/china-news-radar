@@ -9,7 +9,7 @@ import { telegramItem } from './telegram';
 import { analysisKey, analysisInput, parseAnalysis, analysisDecision, fallbackDecision, ANALYSIS_PROMPT } from './analysis';
 import { feedUrlsFor, distributionFor } from './transports';
 import { fetchSourceFeed, FeedFetchError, restoreFailures } from './feed-fetch';
-import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, restoreConfig, validateAi, validateRules, validateSource } from './admin-config';
+import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, restoreConfig, validateAi, validateRules, validateSource, readAiUsage } from './admin-config';
 import { matchingExclusions } from './content-filter';
 import { AI_TIMEOUT_MS, InvalidAnalysisResponse, aiTestError, analysisErrorDetail } from './ai-errors';
 
@@ -81,7 +81,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       this.prisma.setting.findUnique({ where: { key: `news-ai-usage-${day}` } }), this.prisma.newsAnalysis.count({ where: { status: { in: ['pending', 'processing'] } } }),
       this.prisma.newsAnalysis.count({ where: { status: 'failed' } }), this.prisma.newsAnalysis.count({ where: { status: 'limited' } })]);
     return { total, latestDiscoveryAt: latest?.firstSeenAt || null, scanning: this.busy, aiEnabled: this.aiEnabled, aiMode: this.aiEnabled ? 'enabled' : this.aiRequested ? 'missing-key' : 'disabled',
-      aiDailyUsed: Number(usage?.value || 0), aiDailyLimit: this.dailyLimit, aiPending: pending, aiFailed: failed, aiLimited: limited,
+      aiDailyUsed: readAiUsage(usage?.value), aiDailyLimit: this.dailyLimit, aiPending: pending, aiFailed: failed, aiLimited: limited,
       collectorEnabled: process.env.COLLECTOR_ENABLED !== 'false', serverTime: new Date() };
   }
   async items(query: { q?: string; source?: string; topic?: string; saved?: string; offset?: string; clues?: string }) {
@@ -161,11 +161,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     let cache = await this.prisma.newsAnalysis.findUnique({ where: { key } });
     if (!cache && this.aiEnabled) cache = await this.prisma.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)) }, update: {} });
     if (cache?.status === 'obsolete' && this.aiEnabled) cache = await this.prisma.newsAnalysis.update({ where: { key }, data: { status: 'pending', retryAt: null, leaseUntil: null } });
-    let decision: (ReturnType<typeof fallbackDecision> | ReturnType<typeof analysisDecision>) & { analyzedAt: Date | null } = { ...fallbackDecision(item, this.aiEnabled ? cache?.status || 'pending' : 'disabled', this.config.rules, sourceId), analyzedAt: null };
-    if (cache?.status === 'done' && cache.resultJson) {
-      try { decision = { ...analysisDecision(parseAnalysis(cache.resultJson), item, this.config.rules, sourceId), analyzedAt: cache.analyzedAt }; }
-      catch { decision = fallbackDecision(item, 'failed', this.config.rules, sourceId); }
-    } else if (this.aiEnabled && (!cache || ['pending', 'processing'].includes(cache.status))) decision.visible = false;
+    const decision = await this.cachedDecision(item, sourceId, cache, this.aiEnabled ? cache?.status || 'pending' : 'disabled');
+    if (this.aiEnabled && (!cache || ['pending', 'processing'].includes(cache.status))) decision.visible = false;
     const data = { ...item, analysisKey: key, ...decision };
     await this.prisma.newsItem.upsert({ where, create: { ...data, sourceId, firstSeenAt: discoveredAt }, update: { ...data, ...(existing?.contentHash === item.contentHash ? { updatedAt: existing.updatedAt } : {}) } });
     return true;
@@ -201,6 +198,20 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       await tx.newsItem.updateMany({ where: { id: item.id, analysisKey: job.key, updatedAt: item.updatedAt }, data: { ...data, updatedAt: item.updatedAt } });
     }
   }
+  private async cachedDecision(item: Parameters<typeof fallbackDecision>[0], sourceId: string, cache: NewsAnalysis | null, status: string) {
+    if (cache?.status === 'done') {
+      try {
+        if (!cache.resultJson) throw new Error('AI JSON object required');
+        return { ...analysisDecision(parseAnalysis(cache.resultJson), item, this.config.rules, sourceId), analyzedAt: cache.analyzedAt };
+      } catch (problem) {
+        const error = `已保存的 AI 结果无效：${analysisErrorDetail(problem)} 采用规则兜底，不自动重新调用模型。`;
+        await this.prisma.newsAnalysis.updateMany({ where: { key: cache.key, status: 'done' }, data: { status: 'failed', error, retryAt: null, leaseUntil: null } });
+        this.logger.warn(error);
+        status = 'failed';
+      }
+    }
+    return fallbackDecision(item, status, this.config.rules, sourceId);
+  }
   private async analyzeNext(): Promise<boolean> {
     const ai = this.ai; const model = this.config.ai.model; const instructions = this.config.ai.instructions;
     if (!ai || !this.aiEnabled || this.configBusy) return false;
@@ -217,7 +228,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         await tx.newsAnalysis.update({ where: { key: job.key }, data: { status: 'obsolete', leaseUntil: null, retryAt: null } });
         return { job, call: false };
       }
-      const usage = Number((await tx.setting.findUnique({ where: { key: usageKey } }))?.value || 0);
+      const usage = readAiUsage((await tx.setting.findUnique({ where: { key: usageKey } }))?.value);
       if (job.attempts >= 3 || usage >= this.dailyLimit) {
         const updated = await tx.newsAnalysis.update({ where: { key: job.key }, data: { status: job.attempts >= 3 ? 'failed' : 'limited',
           error: job.attempts >= 3 ? '尝试次数已用尽，采用规则兜底' : '今日调用额度已用尽，采用规则兜底', retryAt: job.attempts >= 3 ? null : nextDay, leaseUntil: null } });
@@ -279,7 +290,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     try {
       const usageKey = `news-ai-usage-${checkedAt.toISOString().slice(0, 10)}`;
       const usage = await this.prisma.$transaction(async tx => {
-        const used = Number((await tx.setting.findUnique({ where: { key: usageKey } }))?.value || 0);
+        const used = readAiUsage((await tx.setting.findUnique({ where: { key: usageKey } }))?.value);
         if (used >= config.dailyLimit) throw new BadRequestException('今日调用额度已用尽，请调整并保存每日上限，或明天再测试');
         await tx.setting.upsert({ where: { key: usageKey }, create: { key: usageKey, value: String(used + 1) }, update: { value: String(used + 1) } });
         return { used: used + 1, limit: config.dailyLimit };
@@ -389,11 +400,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         } else if (item.aiStatus === 'excluded') {
           // Restore from an existing cache or rules only; rule edits never buy a new analysis.
           const key = analysisKey(item); const cache = await this.prisma.newsAnalysis.findUnique({ where: { key } });
-          let decision: (ReturnType<typeof fallbackDecision> | ReturnType<typeof analysisDecision>) & { analyzedAt: Date | null } = { ...fallbackDecision(item, 'disabled', this.config.rules, item.sourceId), analyzedAt: null };
-          if (cache?.status === 'done' && cache.resultJson) {
-            try { decision = { ...analysisDecision(parseAnalysis(cache.resultJson), item, this.config.rules, item.sourceId), analyzedAt: cache.analyzedAt }; } catch { /* keep rule fallback */ }
-          }
-          const result = await this.prisma.newsItem.updateMany({ where: { id: item.id, updatedAt: item.updatedAt }, data: { ...decision, analysisKey: cache?.status === 'done' ? key : null, updatedAt: item.updatedAt } });
+          const decision = await this.cachedDecision(item, item.sourceId, cache, 'disabled');
+          const result = await this.prisma.newsItem.updateMany({ where: { id: item.id, updatedAt: item.updatedAt }, data: { ...decision, analysisKey: decision.aiStatus === 'done' ? key : null, updatedAt: item.updatedAt } });
           changed += result.count;
         }
       }
