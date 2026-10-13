@@ -19,5 +19,5 @@ export function feedSource(source: NewsSourceConfig, feedUrl: string): NewsSourc
   return { ...source, feedUrl, kind: new URL(feedUrl).hostname === 'news.google.com' ? 'google-rss' : 'rss' };
 }
 export function distributionFor(kind: string) {
-  return kind === 'google-rss' ? 'Google News RSS 索引' : kind === 'rss' ? 'RSS 订阅' : kind === 'telegram' ? 'Telegram 频道' : '待接入';
+  return kind === 'google-rss' ? 'Google News RSS 索引' : kind === 'rss' ? 'RSS 订阅' : kind === 'telegram' ? 'Telegram 频道' : kind === 'api' ? 'API / 平台适配器' : kind === 'web' ? '浏览器网页采集' : '待接入';
 }

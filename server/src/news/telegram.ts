@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto';
 import { BadRequestException } from '@nestjs/common';
 import { canonicalUrl, eventKey, isDomesticUrl, plainText, publisherForUrl, shouldDisplay, safePublishedAt, topicFor, withinNewsWindow } from './rules';
-import { NEWS_SOURCES } from './sources';
+import { NEWS_SOURCES, NewsSourceConfig } from './sources';
 import type { CollectedItem } from './collector';
 
-export function telegramItem(input: { channel?: unknown; messageId?: unknown; text?: unknown; links?: unknown; publishedAt?: unknown }, filterByRules = true): { sourceId: string; item: CollectedItem } | null {
-  const source = NEWS_SOURCES.find(s => s.kind === 'telegram' && s.channel?.toLowerCase() === String(input.channel).toLowerCase());
+export function telegramItem(input: { channel?: unknown; messageId?: unknown; text?: unknown; links?: unknown; publishedAt?: unknown; backfill?: unknown }, filterByRules = true, sources: NewsSourceConfig[] = NEWS_SOURCES): { sourceId: string; item: CollectedItem } | null {
+  const source = sources.find(s => s.kind === 'telegram' && s.channel?.toLowerCase() === String(input.channel).replace(/^@/, '').toLowerCase());
   if (!source || !Number.isSafeInteger(input.messageId) || Number(input.messageId) <= 0 || typeof input.text !== 'string' || input.text.length > 20_000) throw new BadRequestException('频道或消息格式无效');
+  if (input.backfill !== undefined && typeof input.backfill !== 'boolean') throw new BadRequestException('回填标记必须为布尔值');
   const text = plainText(input.text).slice(0, 6000);
   const publishedAt = safePublishedAt(input.publishedAt);
   if (!text || (filterByRules && !shouldDisplay(text, '', `https://t.me/${source.channel}/${input.messageId}`)) || !withinNewsWindow(publishedAt)) return null;

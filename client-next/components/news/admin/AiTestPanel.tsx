@@ -11,11 +11,12 @@ const typeLabels = { breaking: '突发快讯', report: '新闻报道', analysis:
 const languageLabels = { 'zh-Hans': '简体中文', 'zh-Hant': '繁体中文', en: '英文', other: '其他语言', mixed: '混合语言' };
 const errorLabels: Record<string, string> = { timeout: '等待超时', 'connection-error': '连接失败', 'http-error': '提供商拒绝或服务出错', 'invalid-response': '模型输出格式错误', 'unknown-error': '未识别异常' };
 
-export function AiTestPanel({ token, busy, keyConfigured, onUsage }: {
+export function AiTestPanel({ token, busy, keyConfigured, onUsage, sample }: {
   token: string; busy: boolean; keyConfigured: boolean; onUsage: (usage: AiTestResult['usage']) => void;
+  sample?: { title: string; summary: string };
 }) {
-  const [title, setTitle] = useState('China announces new trade measures');
-  const [summary, setSummary] = useState('Officials announced new rules affecting imports and exports. Details will be published next week.');
+  const [title, setTitle] = useState(sample?.title || 'China announces new trade measures');
+  const [summary, setSummary] = useState(sample?.summary ?? 'Officials announced new rules affecting imports and exports. Details will be published next week.');
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<AiTestResult | null>(null);
   const [error, setError] = useState('');
@@ -38,8 +39,8 @@ export function AiTestPanel({ token, busy, keyConfigured, onUsage }: {
   }
 
   return <form className={`${styles.card} ${styles.aiTest}`} onSubmit={event => { event.preventDefault(); void test(); }} aria-busy={testing}>
-    <h2>测试 AI 调用</h2>
-    <p>使用已保存的接口、模型、密钥和额外指令。上方配置有改动时，请先保存。下面是虚构测试样例，可以替换成 RSS 中的真实标题、摘要。</p>
+    <h2>{sample ? '分析来源样例' : '测试 AI 调用'}</h2>
+    <p>使用已保存的接口、模型、密钥和额外指令。配置有改动时先保存。{sample ? '已填入抓取样例，点击下方按钮才产生一次实际请求；不保存为新闻。' : '下面是虚构测试样例，可以替换成来源中的真实标题、摘要。'}</p>
     <div className={styles.fields}>
       <label>测试标题<textarea required rows={3} maxLength={600} value={title} disabled={testing} onChange={event => setTitle(event.target.value)} /><small>{title.length} / 600 字符</small></label>
       <label>测试摘要（可留空）<textarea rows={3} maxLength={1600} value={summary} disabled={testing} onChange={event => setSummary(event.target.value)} /><small>{summary.length} / 1600 字符；模型只读取你提供的文本。</small></label>

@@ -31,6 +31,7 @@ export class NewsController {
   @Post('admin/ai/test') testAi(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testAi(body); }
   @Post('admin/ai/history') history(@Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.startHistory(); }
   @Put('admin/sources') configureSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureSource(body); }
+  @Get('admin/sources/:id/private') @Header('Cache-Control', 'no-store') privateSource(@Param('id') id: string, @Req() req: AdminRequest) { requireAdmin(req); return this.news.privateSource(id); }
   @Delete('admin/sources/:id') deleteSource(@Param('id') id: string, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.deleteSource(id); }
   @Post('admin/sources/test') testSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testSource(body); }
   @Put('admin/rules') rules(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureRules(body); }
@@ -38,5 +39,9 @@ export class NewsController {
   @Post('telegram') ingest(@Headers('authorization') auth: string | undefined, @Body() body: Parameters<NewsService['ingest']>[0]) {
     if (!validCollectorToken(auth)) throw new UnauthorizedException('采集令牌无效或未配置');
     return this.news.ingest(body);
+  }
+  @Get('telegram/sources') @Header('Cache-Control', 'no-store') telegramSources(@Headers('authorization') auth: string | undefined) {
+    if (!validCollectorToken(auth)) throw new UnauthorizedException('采集令牌无效或未配置');
+    return this.news.telegramSources();
   }
 }

@@ -13,6 +13,8 @@ import { matchingExclusions } from './content-filter';
 import { InvalidAnalysisResponse, aiTestError, analysisErrorDetail } from './ai-errors';
 import { AiRuntimeService } from './ai-runtime.service';
 import { NewsBridgeService } from './news-bridge.service';
+import { SourceAdapterService } from './source-adapter.service';
+import { SourceFetchError } from './public-network';
 
 @Injectable()
 export class NewsService implements OnModuleInit, OnModuleDestroy {
@@ -27,7 +29,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private get aiRequested() { return this.config.ai.enabled; }
   private get aiEnabled() { return this.aiRequested && !!this.config.ai.apiKey; }
   private get dailyLimit() { return this.config.ai.dailyLimit; }
-  constructor(private readonly prisma: PrismaService, private readonly runtime: AiRuntimeService, @Optional() private readonly bridge?: NewsBridgeService) {}
+  constructor(private readonly prisma: PrismaService, private readonly runtime: AiRuntimeService, private readonly adapters: SourceAdapterService, @Optional() private readonly bridge?: NewsBridgeService) {}
 
   private startAnalysisTimer() {
     if (!this.analysisTimer) this.analysisTimer = setInterval(() => {
@@ -65,7 +67,9 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const states = await this.prisma.newsSource.findMany();
     return this.config.sources.map(s => {
       const state = states.find(x => x.id === s.id);
-      return { ...s, feedUrl: undefined, feedUrls: undefined, ...state, configured: feedUrlsFor(s).length > 0 || (s.kind === 'telegram' && process.env.TELEGRAM_ENABLED === 'true'),
+      return { id: s.id, name: s.name, englishName: s.englishName, kind: s.kind, logo: s.logo, website: s.website, description: s.description, pollSeconds: s.pollSeconds,
+        enabled: state?.enabled ?? s.enabled, lastCheckedAt: state?.lastCheckedAt, lastSuccessAt: state?.lastSuccessAt, nextCheckAt: state?.nextCheckAt, error: state?.error,
+        lastItemCount: state?.lastItemCount ?? 0, configured: this.adapters.configured(s),
         activeFeedUrl: includeFeedAddresses ? state?.activeFeedUrl || null : undefined,
         feedFailures: undefined, feedWarning: Object.values(restoreFailures(state?.feedFailures)).map(f => f.error).join('；'),
         distribution: distributionFor(state?.activeKind || s.kind) };
@@ -89,7 +93,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       ...(query.clues === 'true' || query.saved === 'true' ? {} : { originalPublisher: { not: null } }),
       ...(query.q ? { OR: ['title', 'summary', 'titleZh', 'summaryZh'].map(field => ({ [field]: { contains: query.q!.slice(0, 200) } })) } : {}),
     };
-    const [items, total] = await Promise.all([this.prisma.newsItem.findMany({ where, orderBy: [{ firstSeenAt: 'desc' }, { publishedAt: 'desc' }, { id: 'desc' }], skip: offset, take: 50 }), this.prisma.newsItem.count({ where })]);
+    const [items, total] = await Promise.all([this.prisma.newsItem.findMany({ where, omit: { body: true }, orderBy: [{ firstSeenAt: 'desc' }, { publishedAt: 'desc' }, { id: 'desc' }], skip: offset, take: 50 }), this.prisma.newsItem.count({ where })]);
     return { items, total, nextOffset: offset + items.length < total ? offset + items.length : null };
   }
   async save(id: string, saved: unknown) {
@@ -102,7 +106,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (typeof enabled !== 'boolean') throw new BadRequestException('开关必须是布尔值');
     const config = this.config.sources.find(s => s.id === id);
     if (!config) throw new NotFoundException('来源不存在');
-    if (enabled && !feedUrlsFor(config).length && !(config.kind === 'telegram' && process.env.TELEGRAM_ENABLED === 'true')) throw new BadRequestException('来源尚未配置，请先完成接入');
+    if (enabled && !this.adapters.configured(config)) throw new BadRequestException('来源尚未完成接入，或本轮不启用该平台');
     await this.prisma.newsSource.update({ where: { id }, data: { enabled, nextCheckAt: enabled ? null : undefined } });
     return this.sources();
   }
@@ -113,7 +117,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     try {
       const now = new Date();
       const states = await this.prisma.newsSource.findMany({ where: { enabled: true } });
-      const due = this.config.sources.filter(s => feedUrlsFor(s).length && states.some(x => x.id === s.id && (!x.nextCheckAt || x.nextCheckAt <= now || (force && !x.error))));
+      const due = this.config.sources.filter(s => s.kind !== 'telegram' && this.adapters.configured(s) && states.some(x => x.id === s.id && (!x.nextCheckAt || x.nextCheckAt <= now || (force && !x.error))));
       // At most two HTTP requests at a time. Manual scans still honor error backoff.
       for (let i = 0; i < due.length; i += 2) await Promise.all(due.slice(i, i + 2).map(s => this.collect(s)));
       return { scanning: false, started: true, sourcesChecked: due.length };
@@ -123,6 +127,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
     const state = await this.prisma.newsSource.findUniqueOrThrow({ where: { id: source.id } });
     const now = new Date();
+    if (source.kind === 'api' || source.kind === 'web') return this.collectAdapted(source, now);
     try {
       const { response, parsed, selected, failures } = await fetchSourceFeed(source, (xml, selected) => parseFeed(xml, selected, now, false, this.config.rules), state);
       if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
@@ -145,23 +150,42 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         ...(error instanceof FeedFetchError ? { feedFailures: JSON.stringify(failures) } : {}) } });
     }
   }
+  private async collectAdapted(source: NewsSourceConfig, now: Date) {
+    try {
+      const result = await this.adapters.collect(source, this.config.rules);
+      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      let changed = 0;
+      for (const item of result.items) {
+        if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+        if (await this.store(source.id, item, now)) changed++;
+      }
+      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: now, lastSuccessAt: now, nextCheckAt: new Date(Date.now() + source.pollSeconds * 1000), error: null, lastItemCount: result.items.length, activeKind: source.kind, activeFeedUrl: null } });
+      this.logger.log(`${source.name}：${changed} 条新增或更新`);
+    } catch (error) {
+      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: now, nextCheckAt: new Date(Date.now() + 300000), error: error instanceof SourceFetchError ? `${error.code}：${error.message}` : '来源采集或入库失败，请核对配置和服务状态' } });
+    }
+  }
   private async store(sourceId: string, item: CollectedItem, discoveredAt = new Date(), refresh = false) {
     const where = { sourceId_url: { sourceId, url: item.url } };
     const existing = await this.prisma.newsItem.findUnique({ where });
+    const sameContent = existing && existing.title === item.title && existing.summary === item.summary && existing.publishedAt?.getTime() === item.publishedAt?.getTime()
+      && existing.body === (item.body ?? existing.body) && existing.images === (item.images ?? existing.images);
     if (matchingExclusions(item, this.config.rules, sourceId).length) {
       if (existing) await this.updateItem({ where: { id: existing.id, updatedAt: existing.updatedAt },
         data: { visible: false, analysisKey: null, aiStatus: 'excluded', updatedAt: existing.updatedAt } });
       return !!existing;
     }
-    if (existing?.contentHash === item.contentHash && !refresh) return false;
+    if (sameContent && !refresh && existing.originalPublisher === item.originalPublisher && existing.originalUrl === item.originalUrl && existing.author === item.author) return false;
     let key = analysisKey(item);
     let cache = await this.findCached(item);
     if (cache?.key) key = cache.key;
     if (!cache) cache = await this.prisma.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: !this.config.ai.autoAnalyzeNew }, update: {} });
     const decision = await this.cachedDecision(item, sourceId, cache, this.aiEnabled && this.config.ai.autoAnalyzeNew ? cache?.status || 'pending' : 'disabled');
     if (this.aiEnabled && this.config.ai.autoAnalyzeNew && !cache.historical && ['pending', 'processing'].includes(cache.status)) decision.visible = false;
-    const data = { ...item, analysisKey: key, ...decision };
-    const args = { where, create: { ...data, sourceId, firstSeenAt: discoveredAt }, update: { ...data, ...(existing?.contentHash === item.contentHash ? { updatedAt: existing.updatedAt } : {}) } };
+    const data = { ...item, analysisKey: key, acquisitionKind: this.config.sources.find(s => s.id === sourceId)?.kind || 'rss', ...decision };
+    const args = { where, create: { ...data, sourceId, firstSeenAt: discoveredAt }, update: { ...data, ...(sameContent ? { updatedAt: existing.updatedAt } : {}) } };
     if (this.bridge) {
       const stored = await this.prisma.$transaction(async tx => {
         const record = await tx.newsItem.upsert(args);
@@ -174,14 +198,18 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   async ingest(input: Parameters<typeof telegramItem>[0]) {
     if (process.env.TELEGRAM_ENABLED !== 'true') throw new BadRequestException('Telegram 尚未启用');
-    const parsed = telegramItem(input, false);
+    const parsed = telegramItem(input, false, this.config.sources);
     if (!parsed) return { accepted: false, reason: '空消息、过期或国内来源' };
     if (!this.config.sources.some(s => s.id === parsed.sourceId)) return { accepted: false, reason: '频道来源已删除' };
     const state = await this.prisma.newsSource.findUniqueOrThrow({ where: { id: parsed.sourceId } });
     if (!state.enabled) return { accepted: false, reason: '频道已暂停，请在来源管理中启用' };
-    const changed = await this.store(parsed.sourceId, parsed.item);
+    const changed = await this.store(parsed.sourceId, parsed.item, new Date(), input.backfill === true);
     await this.prisma.newsSource.update({ where: { id: parsed.sourceId }, data: { lastCheckedAt: new Date(), lastSuccessAt: new Date(), error: null } });
     return { accepted: true, changed };
+  }
+  async telegramSources() {
+    const states = await this.prisma.newsSource.findMany({ where: { enabled: true } });
+    return this.config.sources.filter(s => s.kind === 'telegram' && states.some(state => state.id === s.id)).map(s => ({ channel: s.channel }));
   }
   private async prepareAnalysis() {
     if (this.stopped || this.configBusy) return;
@@ -364,10 +392,15 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const { apiKey, ...ai } = this.config.ai;
     const states = await this.sources(true);
     return { ai: { ...ai, keyConfigured: !!apiKey, protocolPrompt: ANALYSIS_PROMPT },
-      sources: this.config.sources.map(s => ({ ...s, state: states.find(state => state.id === s.id) })), rules: this.config.rules,
+      sources: this.config.sources.map(({ notes, api, ...s }) => ({ ...s, ...(api ? { api: { ...api, body: '', auth: { ...api.auth, value: '', keyConfigured: !!api.auth.value } } } : {}), state: states.find(state => state.id === s.id) })), rules: this.config.rules,
       status: await this.status(), localOnly: false };
   }
   adminAiKey() { return { apiKey: this.config.ai.apiKey }; }
+  privateSource(id: string) {
+    const source = this.config.sources.find(s => s.id === id);
+    if (!source) throw new NotFoundException('来源不存在');
+    return { notes: source.notes || '', api: source.api };
+  }
   private async updateConfig(next: AdminConfig, mutation?: (tx: Prisma.TransactionClient) => Promise<unknown>, afterChange?: () => Promise<unknown>) {
     if (this.configBusy) throw new ConflictException('正在保存配置，请稍后重试');
     this.configBusy = true;
@@ -400,7 +433,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const sources = previous ? this.config.sources.map(s => s.id === source.id ? source : s) : [...this.config.sources, source];
     await this.updateConfig({ ...this.config, sources, removedSourceIds: this.config.removedSourceIds.filter(id => id !== source.id) }, tx => tx.newsSource.upsert({ where: { id: source.id },
       create: { id: source.id, enabled: false }, update: { etag: null, lastModified: null, activeKind: null, activeFeedUrl: null, feedFailures: '{}', nextCheckAt: null, error: null } }));
-    return this.adminConfig();
+    return { ...await this.adminConfig(), savedSourceId: source.id };
   }
   async deleteSource(id: string) {
     if (!this.config.sources.some(s => s.id === id)) throw new NotFoundException('来源不存在');
@@ -416,6 +449,11 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     this.testingSource = true;
     const now = new Date();
     try {
+      if (source.kind === 'api' || source.kind === 'web' || source.kind === 'telegram') {
+        const result = await this.adapters.collect(source, this.config.rules);
+        return { ok: true, checkedAt: now, feedTitle: source.name, attempts: [], structure: result.structure, rawCount: result.rawCount, checkedCount: result.checkedCount, acceptedCount: result.items.length,
+          samples: result.samples.slice(0, 10).map(sample => ({ ...sample, fallbackVisible: sample.accepted && !!sample.originalPublisher && fallbackDecision({ title: sample.title, summary: sample.summary, url: sample.url || '' }, 'preview', this.config.rules, source.id).visible })) };
+      }
       const result = await fetchSourceFeed(source, (xml, selected) => inspectFeed(xml, selected, now, false, this.config.rules));
       const feed = result.parsed!;
       return { ok: true, checkedAt: now, feedUrl: result.selected.feedUrl, attempts: result.attempts, feedTitle: feed.title,
@@ -423,6 +461,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         samples: feed.samples.slice(0, 10).map(sample => ({ ...sample,
           fallbackVisible: sample.accepted && fallbackDecision({ ...sample, url: sample.url! }, 'preview', this.config.rules, source.id).visible })) };
     } catch (error) {
+      if (source.kind === 'api' || source.kind === 'web' || source.kind === 'telegram') return { ok: false, checkedAt: now, attempts: [], error: error instanceof SourceFetchError ? error.message : '来源连接或解析失败，请核对配置', code: error instanceof SourceFetchError ? error.code : 'adapter-error' };
       if (!(error instanceof FeedFetchError)) throw error;
       return { ok: false, checkedAt: now, attempts: error.attempts, error: '所有 RSS 地址都获取失败，请检查下方逐条结果。' };
     } finally { this.testingSource = false; }

@@ -34,7 +34,7 @@ export class SearchService {
     return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
   }
 
-  async searchBing(query: string): Promise<SearchResult[]> {
+  async searchBing(query: string, strict = false): Promise<SearchResult[]> {
     await this.bingLimiter.wait();
 
     try {
@@ -80,12 +80,13 @@ export class SearchService {
       console.log(`Bing search for "${query}": found ${results.length} results`);
       return results;
     } catch (error) {
+      if (strict) throw new Error('Bing 来源连接或解析失败');
       console.error('Bing search error:', error);
       return [];
     }
   }
 
-  async searchHackerNews(query: string): Promise<SearchResult[]> {
+  async searchHackerNews(query: string, strict = false): Promise<SearchResult[]> {
     await this.hackernewsLimiter.wait();
 
     try {
@@ -120,6 +121,7 @@ export class SearchService {
       console.log(`Hacker News search for "${query}": found ${results.length} results`);
       return results;
     } catch (error) {
+      if (strict) throw new Error('Hacker News 来源连接或解析失败');
       console.error('Hacker News search error:', error);
       return [];
     }

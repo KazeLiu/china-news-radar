@@ -1,81 +1,99 @@
 'use client';
-
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, FlaskConical, Plus, Trash2 } from 'lucide-react';
 import { NewsSourceRow } from '../NewsSourceRow';
-import { adminApi, type SaveSettings, type SourceSettings, type SourceTestResult } from './admin-api';
+import { adminApi, type AiTestResult, type ApiSourceSettings, type WebSourceSettings, type SaveSettings, type SourceSettings, type SourceTestResult } from './admin-api';
 import { SourceTestPanel } from './SourceTestPanel';
+import { AiTestPanel } from './AiTestPanel';
 import styles from './admin.module.css';
 
-const emptySource = (): SourceSettings => ({ id: '', name: '', englishName: '', kind: 'rss', website: '', feedUrls: [''], publisherHosts: [], description: '', pollSeconds: 120 });
-function SourceEditor({ source, token, busy, onSave, onSaved }: { source: SourceSettings; token: string; busy: boolean; onSave: SaveSettings; onSaved: (id: string) => void }) {
+export const newApi = (): ApiSourceSettings => ({ method: 'GET', body: '', auth: { type: 'none', header: 'Authorization', value: '' }, mapping: { items: 'articles', title: 'title', summary: 'description', url: 'url', publishedAt: 'publishedAt', author: 'author', images: 'urlToImage', body: 'content' } });
+export const newWeb = (): WebSourceSettings => ({ rules: { mode: 'metadata', item: '', title: '', summary: '', link: '', date: '', image: '', body: '', author: '', next: '' }, timeoutSeconds: 30, maxItems: 50, maxPages: 3, concurrency: 1 });
+const emptySource = (): SourceSettings => ({ id: '', name: '', englishName: '', kind: 'rss', website: '', feedUrls: [''], publisherHosts: [], description: '', notes: '', logo: '', pollSeconds: 120, adapter: 'generic', target: '', api: newApi(), web: newWeb() });
+function SourceEditor({ source, token, busy, onSave, onSaved, aiKeyConfigured, onAiUsage }: { source: SourceSettings; token: string; busy: boolean; onSave: SaveSettings; onSaved: (id: string) => void; aiKeyConfigured: boolean; onAiUsage: (usage: AiTestResult['usage']) => void }) {
   const form = useRef<HTMLFormElement>(null);
-  const [draft, setDraft] = useState(() => ({ ...source, kind: source.kind === 'reserved' ? 'rss' : source.kind }));
+  const [draft, setDraft] = useState(() => ({ ...emptySource(), ...source, kind: ['google-rss', 'rsshub', 'reserved'].includes(source.kind) ? 'rss' : source.kind }));
   const [feedUrls, setFeedUrls] = useState(() => source.feedUrls?.length ? source.feedUrls : [source.feedUrl || '']);
   const [hosts, setHosts] = useState(() => source.publisherHosts.join('\n'));
-  const [pollSeconds, setPollSeconds] = useState(() => String(source.pollSeconds));
-  const [testing, setTesting] = useState(false);
-  const [result, setResult] = useState<SourceTestResult | null>(null);
-  const [testError, setTestError] = useState('');
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const pending = busy || testing;
-  const change = (key: keyof SourceSettings, value: string | number) => setDraft(old => ({ ...old, [key]: value }));
-  const editFeeds = (update: (previous: string[]) => string[]) => { setFeedUrls(update); setResult(null); setTestError(''); };
-  const body = () => ({ ...draft, feedUrl: feedUrls[0], feedUrls, pollSeconds: Number(pollSeconds), publisherHosts: hosts.split(/[\s,]+/).filter(Boolean) });
+  const [loading, setLoading] = useState(!!source.id); const [testing, setTesting] = useState(false); const [uploading, setUploading] = useState(false);
+  const [privateLoaded, setPrivateLoaded] = useState(!source.id);
+  const [result, setResult] = useState<SourceTestResult | null>(null); const [error, setError] = useState(''); const [confirmDelete, setConfirmDelete] = useState(false); const [showSecret, setShowSecret] = useState(false);
+  const [aiSample, setAiSample] = useState<{ title: string; summary: string } | null>(null);
+  useEffect(() => {
+    if (!source.id) return;
+    let cancelled = false;
+    adminApi<{ notes: string; api?: ApiSourceSettings }>(`admin/sources/${encodeURIComponent(source.id)}/private`, '').then(privateFields => {
+      if (!cancelled) { setDraft(old => ({ ...old, notes: privateFields.notes, api: privateFields.api || old.api })); setPrivateLoaded(true); }
+    }).catch(e => { if (!cancelled) setError(e.message); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [source.id]);
+  const pending = busy || testing || uploading || loading || !privateLoaded;
+  const change = <K extends keyof SourceSettings>(key: K, value: SourceSettings[K]) => setDraft(old => ({ ...old, [key]: value }));
+  const api = draft.api || newApi(); const web = draft.web || newWeb();
+  const editApi = (next: ApiSourceSettings) => change('api', next);
+  const editFeeds = (update: (previous: string[]) => string[]) => { setFeedUrls(update); setResult(null); setError(''); };
+  const body = () => ({ ...draft, feedUrl: feedUrls[0], feedUrls, channel: draft.kind === 'telegram' ? draft.target || draft.channel : undefined, publisherHosts: hosts.split(/[\s,]+/).filter(Boolean) });
   async function test() {
     if (!form.current?.reportValidity()) return;
-    setTesting(true); setResult(null); setTestError('');
+    setTesting(true); setResult(null); setError('');
     try { setResult(await adminApi<SourceTestResult>('admin/sources/test', token, body(), 'POST')); }
-    catch (error) { setTestError(error instanceof Error ? error.message : '测试失败'); }
+    catch (e) { setError(e instanceof Error ? e.message : '来源预览失败'); }
     finally { setTesting(false); }
   }
-  function moveFeed(index: number, offset: number) {
-    editFeeds(old => { const next = [...old]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; return next; });
+  async function upload(file?: File) {
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type) || file.size > 1048576) { setError('Logo 仅支持 PNG、JPEG、WebP，最大 1 MiB'); return; }
+    setUploading(true); setError('');
+    try {
+      const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result as string); reader.onerror = () => reject(new Error('图片读取失败')); reader.readAsDataURL(file); });
+      const result = await adminApi<{ logo: string }>('admin/sources/logo', '', { data }, 'POST'); change('logo', result.logo);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Logo 上传失败'); }
+    finally { setUploading(false); }
   }
-  return <div className={styles.stack}>
-    {source.kind === 'telegram' ? <section className={styles.card}><h2>{source.name}</h2><p>频道关注关系在 Telegram 客户端管理。本站开关只控制是否接收此频道消息。</p></section> : <form ref={form} className={styles.card} onChange={() => { setResult(null); setTestError(''); }} onSubmit={async event => {
-      event.preventDefault();
-      if (await onSave('admin/sources', body())) onSaved(draft.id);
-    }}>
-    <h2>{source.id ? `编辑 ${source.name}` : '添加 RSS 来源'}</h2>
+  function moveFeed(index: number, offset: number) { editFeeds(old => { const next = [...old]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; return next; }); }
+  return <div className={styles.stack}><form ref={form} className={styles.card} onChange={() => setResult(null)} onSubmit={async event => {
+    event.preventDefault(); const saved = await onSave('admin/sources', body()); if (saved) onSaved(saved.savedSourceId || draft.id);
+  }}>
+    <h2>{source.id ? `编辑 ${source.name}` : '新增来源'}</h2>
+    {loading && <p role="status">正在读取私有配置…</p>}
     <fieldset className={styles.fields} disabled={pending} aria-label="来源配置项">
-      <label>来源 ID<input required readOnly={!!source.id} pattern="[a-z][a-z0-9-]*" maxLength={64} value={draft.id} onChange={e => change('id', e.target.value)} /><small>唯一标识，如 france24；保存后不能修改。</small></label>
-      <label>显示名称<input required maxLength={100} value={draft.name} onChange={e => change('name', e.target.value)} /></label>
-      <label>原始发布者名称<input required maxLength={100} value={draft.englishName} onChange={e => change('englishName', e.target.value)} /><small>只填写实际发布者名称，用于标注出处。</small></label>
-      <label>入口类型<input readOnly value={/^https?:\/\/news\.google\.com(?:\/|$)/i.test(feedUrls[0]) ? 'Google News RSS 索引' : 'RSS（包含 RSSHub 地址）'} /><small>系统按 RSS 地址自动识别，无需选择。</small></label>
-      <div className={`${styles.wide} ${styles.feedList}`}>
-        {feedUrls.map((url, index) => <div key={index} className={styles.feedRow}>
-          <label htmlFor={`feed-${index}`}>{index === 0 ? 'RSS 地址（首选）' : `备用 RSS 地址 ${index}`}</label>
-          <div className={styles.feedInput}><input id={`feed-${index}`} type="url" required maxLength={2000} value={url} disabled={pending} onChange={e => editFeeds(old => old.map((value, i) => i === index ? e.target.value : value))} />
-            {index === 0 && <button type="button" disabled={pending || feedUrls.length >= 10} onClick={() => editFeeds(old => [...old, ''])}><Plus size={16} />添加</button>}
-            {index > 0 && <button type="button" disabled={pending} aria-label={`将备用地址 ${index} 上移`} onClick={() => moveFeed(index, -1)}><ArrowUp size={16} /></button>}
-            {index < feedUrls.length - 1 && <button type="button" disabled={pending} aria-label={`将地址 ${index + 1} 下移`} onClick={() => moveFeed(index, 1)}><ArrowDown size={16} /></button>}
-            {feedUrls.length > 1 && <button type="button" disabled={pending} aria-label={`移除地址 ${index + 1}`} onClick={() => editFeeds(old => old.filter((_, i) => i !== index))}><Trash2 size={16} /></button>}
-          </div>
-        </div>)}
-        <small>按顺序获取，前一条连接失败或格式错误时尝试下一条。可填媒体 RSS 或 RSSHub 完整地址，最多 10 条；Google 索引会自动识别并核对发布者域名。</small>
-      </div>
-      <label>媒体网站<input type="url" required value={draft.website} onChange={e => change('website', e.target.value)} /></label>
-      <label>检查间隔（秒）<input type="number" required min={60} max={86400} value={pollSeconds} onChange={e => setPollSeconds(e.target.value)} /></label>
-      <label>允许的原文域名<textarea rows={3} required value={hosts} onChange={e => setHosts(e.target.value)} /><small>每行一个域名，如 apnews.com；自动接受其子域名。</small></label>
-      <label>来源说明<textarea rows={3} maxLength={800} value={draft.description} onChange={e => change('description', e.target.value)} /></label>
-    </fieldset>
-    <div className={styles.actions}><button type="submit" className={styles.primary} disabled={pending}>{busy ? '保存中…' : '保存来源配置'}</button><span>新来源默认暂停，保存后再开启采集。</span></div>
-  </form>}
-  <section className={styles.card} aria-label="来源信息面板"><h2>来源信息</h2>
+      <label>来源名称<input required maxLength={100} value={draft.name} onChange={e => change('name', e.target.value)} /></label>
+      <label>获取方式<select value={draft.kind} onChange={e => { change('kind', e.target.value); if (e.target.value === 'telegram') change('pollSeconds', 0); else if (!draft.pollSeconds) change('pollSeconds', 120); }}><option value="rss">RSS</option><option value="web">网页爬虫</option><option value="api">API / 平台适配器</option><option value="telegram">Telegram 接收</option></select></label>
+      <label>Logo 地址<input value={draft.logo || ''} maxLength={2000} onChange={e => change('logo', e.target.value)} placeholder="https://… 或上传后的本站地址" /></label>
+      <label>上传 Logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => void upload(e.target.files?.[0])} /><small>最大 1 MiB。{draft.logo && <a href={draft.logo} target="_blank" rel="noopener noreferrer">查看 Logo</a>}</small></label>
+      {draft.kind === 'rss' ? <div className={`${styles.wide} ${styles.feedList}`}>
+        {feedUrls.map((url, index) => <div key={index} className={styles.feedRow}><label htmlFor={`feed-${index}`}>{index === 0 ? 'RSS 地址（首选）' : `备用 RSS 地址 ${index}`}</label><div className={styles.feedInput}>
+          <input id={`feed-${index}`} type="url" required maxLength={2000} value={url} onChange={e => editFeeds(old => old.map((value, i) => i === index ? e.target.value : value))} />
+          {index === 0 && <button type="button" disabled={feedUrls.length >= 10} onClick={() => editFeeds(old => [...old, ''])}><Plus size={16} />添加备用</button>}
+          {index > 0 && <button type="button" aria-label={`上移地址 ${index + 1}`} onClick={() => moveFeed(index, -1)}><ArrowUp size={16} /></button>}
+          {index < feedUrls.length - 1 && <button type="button" aria-label={`下移地址 ${index + 1}`} onClick={() => moveFeed(index, 1)}><ArrowDown size={16} /></button>}
+          {feedUrls.length > 1 && <button type="button" aria-label={`移除地址 ${index + 1}`} onClick={() => editFeeds(old => old.filter((_, i) => i !== index))}><Trash2 size={16} /></button>}
+        </div></div>)}<small>连接或解析失败才尝试下一地址，成功但无内容不切换。Google 索引与 RSSHub 仍通过 RSS 接入。</small>
+      </div> : <label className={styles.wide}>{draft.kind === 'telegram' ? '公开频道用户名' : draft.kind === 'api' && draft.adapter !== 'generic' ? '搜索词 / 平台采集目标' : '采集目标 URL'}<input required maxLength={2000} value={draft.target || draft.channel || ''} onChange={e => change('target', e.target.value)} placeholder={draft.kind === 'telegram' ? 'channel_name' : 'https://…'} /></label>}
+      {draft.kind === 'api' && <><label>适配器<select value={draft.adapter || 'generic'} onChange={e => change('adapter', e.target.value)}><option value="generic">通用 JSON API</option><option value="twitter">X（复用上游 Twitter）</option><option value="bing">Bing 搜索（复用上游）</option><option value="hackernews">Hacker News 搜索（复用上游）</option><option value="bilibili">哔哩哔哩（保留，暂不启用）</option><option value="sogou">搜狗（保留，暂不启用）</option></select></label>
+        <label>请求方法<select value={api.method} onChange={e => editApi({ ...api, method: e.target.value as ApiSourceSettings['method'] })}><option>GET</option><option>POST</option></select></label>
+        <label>鉴权方式<select value={api.auth.type} onChange={e => editApi({ ...api, auth: { ...api.auth, type: e.target.value as ApiSourceSettings['auth']['type'] } })}><option value="none">无</option><option value="bearer">Bearer Token</option><option value="header">自定义请求头 / X API Key</option></select></label>
+        {api.auth.type === 'header' && <label>鉴权请求头名称<input required value={api.auth.header} onChange={e => editApi({ ...api, auth: { ...api.auth, header: e.target.value } })} placeholder="X-API-Key" /></label>}
+        {(api.auth.type !== 'none' || draft.adapter === 'twitter') && <label>鉴权值<input type={showSecret ? 'text' : 'password'} autoComplete="new-password" value={api.auth.value} onChange={e => editApi({ ...api, auth: { ...api.auth, value: e.target.value } })} /><button type="button" aria-pressed={showSecret} onClick={() => setShowSecret(value => !value)}>{showSecret ? '隐藏' : '显示'}</button></label>}
+        {api.method === 'POST' && <label className={styles.wide}>JSON 请求内容<textarea rows={5} maxLength={10000} value={api.body} onChange={e => editApi({ ...api, body: e.target.value })} /></label>}
+        {draft.adapter === 'generic' && <details className={styles.wide}><summary>API 字段映射（属性路径，不能填脚本）</summary><div className={styles.fields}>{Object.entries(api.mapping).map(([key, value]) => <label key={key}>{({ items: '新闻数组路径（空表示根数组）', title: '标题', summary: '摘要', url: '原文链接', publishedAt: '发布时间', author: '作者', images: '图片', body: '正文' } as Record<string, string>)[key]}<input value={value} onChange={e => editApi({ ...api, mapping: { ...api.mapping, [key]: e.target.value } })} /></label>)}</div></details>}
+      </>}
+      {draft.kind === 'web' && <details className={styles.wide}><summary>网页解析结构与采集限制</summary><label>解析方式<select value={web.rules.mode} onChange={e => change('web', { ...web, rules: { ...web.rules, mode: e.target.value as 'metadata' | 'css' } })}><option value="metadata">文章元数据</option><option value="css">列表 CSS 选择器</option></select></label><div className={styles.fields}>{Object.entries(web.rules).filter(([key]) => key !== 'mode').map(([key, value]) => <label key={key}>{({ item: '新闻条目', title: '标题', summary: '摘要', link: '链接', date: '发布时间', image: '图片', body: '正文', author: '作者', next: '下一页链接' } as Record<string, string>)[key]}<input maxLength={500} value={value} onChange={e => change('web', { ...web, rules: { ...web.rules, [key]: e.target.value } })} /></label>)}</div><div className={styles.fields}>{(['timeoutSeconds', 'maxItems', 'maxPages', 'concurrency'] as const).map(key => <label key={key}>{({ timeoutSeconds: '页面超时（秒）', maxItems: '单次条数上限', maxPages: '翻页上限', concurrency: '浏览器并发上限' })[key]}<input type="number" min={1} value={web[key]} onChange={e => change('web', { ...web, [key]: Number(e.target.value) })} /></label>)}</div></details>}
+      <label>采集间隔（秒）<input type="number" required min={draft.kind === 'telegram' ? 0 : 60} max={86400} value={draft.pollSeconds} onChange={e => change('pollSeconds', Number(e.target.value))} /><small>与 AI 请求间隔分开；Telegram 按消息接收。</small></label>
+      <label>来源说明<textarea rows={3} maxLength={800} value={draft.description} onChange={e => change('description', e.target.value)} /><small>可公开展示。</small></label>
+      <label>私人备注<textarea rows={3} maxLength={2000} value={draft.notes || ''} onChange={e => change('notes', e.target.value)} /><small>只在登录后的来源详情读取。</small></label>
+      <label>无时区发布时间按此解释<input value={draft.timeZone || 'UTC'} onChange={e => change('timeZone', e.target.value)} placeholder="UTC / Europe/London / Asia/Shanghai" /><small>仅用于来源没有提供时区的时间。</small></label>
+      <details className={styles.wide}><summary>高级出处识别</summary><label>允许的原文发布者域名<textarea rows={3} value={hosts} onChange={e => setHosts(e.target.value)} /><small>每行一个域名，接受子域名。Google 索引和内部 RSSHub 必须明确配置；普通 RSS / 网页默认使用目标域名。</small></label>{result?.samples?.length && <button type="button" onClick={() => { const values = result.samples!.flatMap(sample => { try { return sample.url ? [new URL(sample.url).hostname] : []; } catch { return []; } }); setHosts([...new Set([...hosts.split(/[\s,]+/).filter(Boolean), ...values])].join('\n')); }}>从样例链接补充域名，保存前请核对</button>}</details>
+    </fieldset><div className={styles.actions}><button type="submit" className={styles.primary} disabled={pending}>保存来源配置</button><span>新来源默认暂停，预览并保存后再开启。</span></div>
+  </form><section className={styles.card} aria-label="来源信息面板"><h2>来源状态与预览</h2>
     {source.state && <NewsSourceRow source={source.state} pending={pending} onChange={(s, update) => { void onSave(`sources/${s.id}`, update); }} />}
-    <div className={styles.actions}>
-      {source.kind !== 'telegram' && <button type="button" disabled={pending} onClick={() => { void test(); }}><FlaskConical size={16} />{testing ? '正在按顺序获取…' : '测试获取一次'}</button>}
-      {source.id && <button type="button" className={styles.danger} disabled={pending} onClick={() => setConfirmDelete(true)}><Trash2 size={16} />删除来源</button>}
-    </div>
-    {source.kind !== 'telegram' && <p className={styles.hint}>按上方当前填写的地址测试，无需先保存。不会入库或调用 AI；测试结果只在本页面显示。</p>}
-    {confirmDelete && <div className={styles.deleteConfirm} role="alert"><p>确定删除“{source.name}”？将停止采集并移除来源配置，已有新闻、收藏和针对该来源的排除规则会保留。</p><div className={styles.actions}><button type="button" className={styles.danger} disabled={pending} onClick={async () => { if (await onSave(`admin/sources/${encodeURIComponent(source.id)}`, {}, 'DELETE')) onSaved(''); }}>确定删除</button><button type="button" disabled={pending} onClick={() => setConfirmDelete(false)}>取消</button></div></div>}
-    {testError && <p className={styles.error} role="alert">{testError}</p>}
-    {result && <SourceTestPanel result={result} />}
-  </section></div>;
+    <div className={styles.actions}><button type="button" disabled={pending} onClick={() => void test()}><FlaskConical size={16} />{testing ? '正在连接与解析…' : '测试当前表单'} </button>{source.id && <button type="button" className={styles.danger} disabled={pending} onClick={() => setConfirmDelete(true)}><Trash2 size={16} />删除来源</button>}</div>
+    <p className={styles.hint}>预览不要求保存，不入库、不通知、不调用 AI。Telegram 只检查接收配置，不登录账号或读取私聊。</p>
+    {confirmDelete && <div className={styles.deleteConfirm} role="alert"><p>删除来源会停止采集，保留新闻、收藏、规则和分析缓存。</p><button type="button" className={styles.danger} disabled={pending} onClick={async () => { if (await onSave(`admin/sources/${encodeURIComponent(source.id)}`, {}, 'DELETE')) onSaved(''); }}>确认删除</button><button type="button" onClick={() => setConfirmDelete(false)}>取消</button></div>}
+    {error && <p className={styles.error} role="alert">{error}</p>}{result && <SourceTestPanel result={result} onAnalyze={setAiSample} />}
+  </section>{aiSample && <AiTestPanel key={JSON.stringify(aiSample)} sample={aiSample} token="" busy={pending} keyConfigured={aiKeyConfigured} onUsage={onAiUsage} />}</div>;
 }
-export function SourceSettingsForm({ sources, token, busy, onSave }: { sources: SourceSettings[]; token: string; busy: boolean; onSave: SaveSettings }) {
-  const [selected, setSelected] = useState(sources[0]?.id || '');
-  const source = sources.find(s => s.id === selected) || emptySource();
-  return <div className={styles.sourceLayout}><section className={styles.sourcePicker} aria-label="来源目录"><button disabled={busy} className={styles.add} onClick={() => setSelected('')}><Plus size={16} />添加 RSS 来源</button>{sources.map(s => <button key={s.id} disabled={busy} aria-pressed={selected === s.id} className={selected === s.id ? styles.selected : ''} onClick={() => setSelected(s.id)}><span>{s.name}<small>{s.englishName}</small></span><small>{s.state?.enabled ? '开启' : '暂停'}</small></button>)}</section><SourceEditor key={source.id || 'new-source'} source={source} token={token} busy={busy} onSave={onSave} onSaved={setSelected} /></div>;
+export function SourceSettingsForm({ sources, token, busy, onSave, aiKeyConfigured, onAiUsage }: { sources: SourceSettings[]; token: string; busy: boolean; onSave: SaveSettings; aiKeyConfigured: boolean; onAiUsage: (usage: AiTestResult['usage']) => void }) {
+  const [selected, setSelected] = useState(sources[0]?.id || ''); const source = sources.find(s => s.id === selected) || emptySource();
+  return <div className={styles.sourceLayout}><section className={styles.sourcePicker} aria-label="来源目录"><button disabled={busy} className={styles.add} onClick={() => setSelected('')}><Plus size={16} />新增来源</button>{sources.map(s => <button key={s.id} disabled={busy} aria-pressed={selected === s.id} className={selected === s.id ? styles.selected : ''} onClick={() => setSelected(s.id)}><span>{s.name}<small>{s.kind}</small></span><small>{s.state?.enabled ? '开启' : '暂停'}</small></button>)}</section><SourceEditor key={source.id || 'new-source'} source={source} token={token} busy={busy} onSave={onSave} onSaved={setSelected} aiKeyConfigured={aiKeyConfigured} onAiUsage={onAiUsage} /></div>;
 }

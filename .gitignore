@@ -28,6 +28,7 @@ build/
 *.session
 *.session-journal
 telegram-collector/state/
+server/prisma/media/
 backups/
 __pycache__/
 *.pyc

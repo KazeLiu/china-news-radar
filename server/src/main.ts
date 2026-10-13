@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
 import dotenv from 'dotenv';
 
@@ -7,12 +8,14 @@ dotenv.config();
 
 async function bootstrap() {
   const rootModule = (await import('./app.module')).AppModule;
-  const app = await NestFactory.create(rootModule);
+  const app = await NestFactory.create<NestExpressApplication>(rootModule);
   app.enableShutdownHooks();
+  app.useBodyParser('json', { limit: '2mb' });
 
   app.enableCors({
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    credentials: true,
   });
 
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));

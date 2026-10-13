@@ -157,6 +157,9 @@ model NewsItem {
   titleZh            String?
   summary            String
   summaryZh          String?
+  body               String @default("")
+  images             String @default("[]")
+  acquisitionKind    String @default("rss")
   url                String
   originalPublisher  String?
   originalUrl        String?

@@ -1,12 +1,13 @@
 import { BadRequestException } from '@nestjs/common';
-import { NEWS_SOURCES, NewsSourceConfig } from './sources';
+import { NEWS_SOURCES, NewsSourceConfig, ApiSourceConfig, WebSourceConfig, WebRules } from './sources';
 import { DEFAULT_EXCLUSIONS, FilterRule } from './content-filter';
 import { isDomesticUrl } from './rules';
 import { isLocalFeed } from './transports';
+import { randomUUID } from 'node:crypto';
 
 export const ADMIN_CONFIG_KEY = 'news-admin-config-v1';
 export interface AiConfig { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; apiKey: string; instructions: string; intervalMs: number; autoAnalyzeNew: boolean; newsOutputTokens: number }
-export interface AdminConfig { ai: AiConfig; sources: NewsSourceConfig[]; rules: FilterRule[]; removedSourceIds: string[] }
+export interface AdminConfig { version: 2; ai: AiConfig; sources: NewsSourceConfig[]; rules: FilterRule[]; removedSourceIds: string[] }
 export function readAiUsage(value?: string): number {
   if (value === undefined) return 0;
   const usage = Number(value);
@@ -15,7 +16,7 @@ export function readAiUsage(value?: string): number {
 }
 export function defaultConfig(): AdminConfig {
   const limit = Number(process.env.AI_DAILY_LIMIT || 100);
-  return { ai: { enabled: (process.env.AI_ANALYSIS_ENABLED ?? process.env.AI_TRANSLATION_ENABLED) === 'true',
+  return { version: 2, ai: { enabled: (process.env.AI_ANALYSIS_ENABLED ?? process.env.AI_TRANSLATION_ENABLED) === 'true',
     baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1', model: process.env.OPENAI_MODEL || 'gpt-4o-mini', apiKey: process.env.OPENAI_API_KEY || '',
     dailyLimit: Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0, instructions: '', intervalMs: 500, autoAnalyzeNew: true, newsOutputTokens: 8192 },
     sources: NEWS_SOURCES.map(s => ({ ...s, feedUrls: [...s.feedUrls], publisherHosts: [...s.publisherHosts] })), rules: DEFAULT_EXCLUSIONS.map(r => ({ ...r })), removedSourceIds: [] };
@@ -53,29 +54,85 @@ export function validateAi(value: unknown, previous: AiConfig): AiConfig {
   return { enabled: boolean(body.enabled), baseUrl: publicUrl(body.baseUrl, 'AI 接口地址'), model: string(body.model, '模型', 200),
     dailyLimit: Number(dailyLimit), apiKey, instructions: string(body.instructions ?? '', '额外提示词', 4000, true), intervalMs: Number(intervalMs), newsOutputTokens: Number(newsOutputTokens), autoAnalyzeNew: boolean(body.autoAnalyzeNew ?? previous.autoAnalyzeNew) };
 }
-export function validateSource(value: unknown, previous?: NewsSourceConfig): NewsSourceConfig {
+export const defaultApi = (): ApiSourceConfig => ({ method: 'GET', body: '', auth: { type: 'none', header: 'Authorization', value: '' }, mapping: { items: 'articles', title: 'title', summary: 'description', url: 'url', publishedAt: 'publishedAt', author: 'author', images: 'urlToImage', body: 'content' } });
+export const defaultWeb = (): WebSourceConfig => ({ rules: { mode: 'metadata', item: '', title: '', summary: '', link: '', date: '', image: '', body: '', author: '', next: '' }, timeoutSeconds: 30, maxItems: 50, maxPages: 3, concurrency: 1 });
+export function validateWebRules(value: unknown): WebRules {
+  const input = object(value); const rules = defaultWeb().rules;
+  if (!['metadata', 'css'].includes(String(input.mode))) throw new BadRequestException('解析方式必须是 metadata 或 css');
+  rules.mode = input.mode as WebRules['mode'];
+  for (const key of ['item', 'title', 'summary', 'link', 'date', 'image', 'body', 'author', 'next'] as const) rules[key] = string(input[key] ?? '', 'CSS 选择器', 500, true);
+  if (Object.keys(input).some(key => !Object.hasOwn(rules, key))) throw new BadRequestException('解析规则不能包含脚本或其他字段');
+  if (rules.mode === 'css' && (!rules.item || !rules.title || !rules.link)) throw new BadRequestException('列表解析至少需要条目、标题和链接选择器');
+  return rules;
+}
+export function validateSource(value: unknown, previous?: NewsSourceConfig, restoring = false): NewsSourceConfig {
   const body = object(value);
-  const id = string(body.id, '来源 ID', 64);
-  if (!/^[a-z][a-z0-9-]*$/.test(id) || id.startsWith('tg-')) throw new BadRequestException('RSS 来源 ID 只能使用小写字母、数字和短横线，不能以 tg- 开头');
-  if (previous?.kind === 'telegram') throw new BadRequestException('Telegram 频道在客户端管理，本站只提供开关');
-  if (!['rss', 'google-rss'].includes(String(body.kind))) throw new BadRequestException('入口类型必须是 RSS 或 Google News RSS');
-  if (!Number.isInteger(body.pollSeconds) || Number(body.pollSeconds) < 60 || Number(body.pollSeconds) > 86400) throw new BadRequestException('采集间隔应为 60–86400 秒');
-  if (!Array.isArray(body.publisherHosts) || !body.publisherHosts.length || body.publisherHosts.length > 20) throw new BadRequestException('至少配置一个发布者域名');
-  const publisherHosts = body.publisherHosts.map(h => {
-    const host = string(h, '发布者域名', 253).toLowerCase();
-    if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(host) || isDomesticUrl(`https://${host}`)) throw new BadRequestException('发布者必须是海外媒体域名，不含协议和路径');
+  const id = body.id ? string(body.id, '来源 ID', 64) : `source-${randomUUID()}`;
+  if (!/^[a-z][a-z0-9_-]*$/.test(id)) throw new BadRequestException('来源 ID 格式无效');
+  const rawKind = String(body.kind);
+  if (!['rss', 'google-rss', 'rsshub', 'web', 'api', 'telegram', ...(previous?.kind === 'reserved' ? ['reserved'] : [])].includes(rawKind)) throw new BadRequestException('未知的来源获取方式');
+  const adapter = String(body.adapter || 'generic') as NewsSourceConfig['adapter'];
+  if (!['generic', 'twitter', 'bing', 'hackernews', 'bilibili', 'sogou'].includes(adapter!)) throw new BadRequestException('未知的来源适配器');
+  const pollSeconds = Number(body.pollSeconds);
+  if (!Number.isInteger(body.pollSeconds) || pollSeconds < (rawKind === 'telegram' ? 0 : 60) || pollSeconds > 86400) throw new BadRequestException('采集间隔应为 60–86400 秒；Telegram 接收可为 0');
+  const rss = ['rss', 'google-rss', 'rsshub'].includes(rawKind);
+  const urls = rss ? body.feedUrls ?? [body.feedUrl] : [];
+  if (!Array.isArray(urls) || urls.length > 10 || (rss && !urls.length)) throw new BadRequestException('RSS 需配置 1–10 个地址');
+  const feedUrls = urls.map(value => { const raw = string(value, 'RSS 地址', 2000); return isLocalFeed(raw) ? new URL(raw).href : publicUrl(raw, 'RSS 地址'); });
+  if (new Set(feedUrls).size !== feedUrls.length) throw new BadRequestException('RSS 地址不能重复');
+  const target = rawKind === 'web' || (rawKind === 'api' && adapter === 'generic') ? publicUrl(body.target, '采集目标') : string(body.target ?? body.channel ?? '', '采集目标', 2000, true);
+  const hosts = body.publisherHosts ?? previous?.publisherHosts ?? [];
+  if (!Array.isArray(hosts) || hosts.length > 20) throw new BadRequestException('原文域名最多 20 个');
+  const publisherHosts = hosts.map(h => {
+    const host = string(h, '原文域名', 253).toLowerCase();
+    if (!/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(host) || isDomesticUrl(`https://${host}`)) throw new BadRequestException('原文域名应为海外发布者域名');
     return host;
   });
-  const urls = body.feedUrls === undefined ? [body.feedUrl] : body.feedUrls;
-  if (!Array.isArray(urls) || !urls.length || urls.length > 10) throw new BadRequestException('请配置 1–10 个 RSS 地址');
-  const feedUrls = urls.map(value => {
-    const raw = string(value, 'RSS 地址', 2000);
-    return isLocalFeed(raw) ? new URL(raw).href : publicUrl(raw, 'RSS 地址');
-  });
-  if (new Set(feedUrls).size !== feedUrls.length) throw new BadRequestException('RSS 地址不能重复');
-  return { id, name: string(body.name, '来源名称', 100), englishName: string(body.englishName, '发布者名称', 100),
-    kind: new URL(feedUrls[0]).hostname === 'news.google.com' ? 'google-rss' : 'rss', website: publicUrl(body.website, '媒体网站'), feedUrl: feedUrls[0], feedUrls,
-    publisherHosts: [...new Set(publisherHosts)], description: string(body.description ?? '', '说明', 800, true), pollSeconds: Number(body.pollSeconds), enabled: previous?.enabled ?? false };
+  if (!publisherHosts.length && (rss || rawKind === 'web' || (rawKind === 'api' && adapter === 'generic'))) {
+    const host = new URL(feedUrls[0] || target).hostname;
+    if (!isLocalFeed(feedUrls[0] || target) && host !== 'news.google.com') publisherHosts.push(host);
+  }
+  if (rss && !publisherHosts.length) throw new BadRequestException('Google 索引或内部 RSSHub 需在高级配置中填写原文发布者域名');
+  const logo = string(body.logo ?? previous?.logo ?? '', 'Logo', 2000, true);
+  const timeZone = string(body.timeZone || previous?.timeZone || 'UTC', '发布时间时区', 80);
+  try { new Intl.DateTimeFormat('en', { timeZone }); } catch { throw new BadRequestException('发布时间时区应为有效 IANA 时区，如 UTC 或 Asia/Shanghai'); }
+  if (logo && !/^\/api\/news\/logos\/[a-f0-9-]+\.(png|jpg|webp)$/.test(logo)) publicUrl(logo, 'Logo 地址');
+  const source: NewsSourceConfig = { id, name: string(body.name, '来源名称', 100), englishName: string(body.englishName || previous?.englishName || publisherHosts[0] || body.name, '发布者', 100),
+    kind: rss ? new URL(feedUrls[0]).hostname === 'news.google.com' ? 'google-rss' : 'rss' : rawKind as NewsSourceConfig['kind'],
+    website: body.website ? publicUrl(body.website, '来源链接') : previous?.website || (rss ? new URL(feedUrls[0]).origin : rawKind === 'web' || (rawKind === 'api' && adapter === 'generic') ? new URL(target).origin : ''),
+    feedUrls, feedUrl: feedUrls[0], target, adapter, logo, timeZone, notes: string(body.notes ?? previous?.notes ?? '', '备注', 2000, true), publisherHosts: [...new Set(publisherHosts)],
+    description: string(body.description ?? '', '说明', 800, true), pollSeconds, enabled: previous?.enabled ?? false };
+  if (source.kind === 'telegram') {
+    const channel = string(body.channel || target, 'Telegram 频道', 100).replace(/^@/, '');
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{3,99}$/.test(channel)) throw new BadRequestException('请填写公开 Telegram 频道用户名');
+    source.channel = channel; source.target = channel; source.website = `https://t.me/${channel}`;
+  }
+  if (source.kind === 'api') {
+    const input = object(body.api ?? defaultApi()); const defaults = defaultApi();
+    const auth = object(input.auth ?? defaults.auth); const mapping = object(input.mapping ?? defaults.mapping);
+    if (!['GET', 'POST'].includes(String(input.method)) || !['none', 'bearer', 'header'].includes(String(auth.type))) throw new BadRequestException('API 方法或鉴权方式无效');
+    const header = string(auth.header || 'Authorization', '鉴权头名称', 100);
+    if (!/^[A-Za-z0-9-]+$/.test(header) || /^(host|content-length|connection|transfer-encoding|origin|forwarded|x-forwarded-.*)$/i.test(header)) throw new BadRequestException('不能覆盖网络或代理请求头');
+    const secret = string(auth.value || previous?.api?.auth.value || '', '鉴权值', 4000, true);
+    if (/[\r\n]/.test(secret)) throw new BadRequestException('鉴权值不能包含换行');
+    const requestBody = string(input.body ?? '', 'API 请求内容', 10000, true);
+    if (requestBody) { try { JSON.parse(requestBody); } catch { throw new BadRequestException('API 请求内容必须是有效 JSON'); } }
+    for (const key of Object.keys(defaults.mapping) as Array<keyof ApiSourceConfig['mapping']>) {
+      defaults.mapping[key] = string(mapping[key] ?? '', '字段映射', 200, true);
+      if (defaults.mapping[key] && (!/^[A-Za-z0-9_$.-]+$/.test(defaults.mapping[key]) || defaults.mapping[key].split('.').some(v => ['__proto__', 'prototype', 'constructor'].includes(v)))) throw new BadRequestException('字段映射只能使用属性路径，不支持脚本');
+    }
+    if (!defaults.mapping.title || !defaults.mapping.url) throw new BadRequestException('API 至少需要标题与链接字段映射');
+    source.api = { method: input.method as ApiSourceConfig['method'], body: requestBody, auth: { type: auth.type as ApiSourceConfig['auth']['type'], header, value: secret }, mapping: defaults.mapping };
+  }
+  if (source.kind === 'web') {
+    const input = object(body.web ?? defaultWeb()); const web = defaultWeb();
+    for (const [key, low, high] of [['timeoutSeconds', 5, 120], ['maxItems', 1, 500], ['maxPages', 1, 10], ['concurrency', 1, 3]] as const) {
+      const number = input[key] ?? web[key]; if (!Number.isInteger(number) || Number(number) < low || Number(number) > high) throw new BadRequestException(`网页 ${key} 超出允许范围`); web[key] = Number(number);
+    }
+    web.rules = validateWebRules(input.rules ?? web.rules); web.previousRules = restoring && input.previousRules ? validateWebRules(input.previousRules) : previous?.web?.previousRules;
+    source.web = web;
+  }
+  return source;
 }
 export function validateRules(value: unknown, sources: Pick<NewsSourceConfig, 'id'>[]): FilterRule[] {
   if (!Array.isArray(value) || value.length > 200) throw new BadRequestException('最多配置 200 条规则');
@@ -95,12 +152,11 @@ export function restoreConfig(raw: string): AdminConfig {
   if (!Array.isArray(value.sources) || value.sources.length > 100) throw new BadRequestException('来源配置无效');
   const sources = value.sources.map(input => {
     const source = object(input); const original = NEWS_SOURCES.find(s => s.id === source.id);
-    if (original?.kind === 'telegram' || (original?.kind === 'reserved' && source.kind === 'reserved')) return { ...original };
-    return validateSource(source, original);
+    return validateSource(source, original, true);
   });
   if (new Set(sources.map(s => s.id)).size !== sources.length) throw new BadRequestException('来源 ID 不能重复');
   const removedSourceIds = value.removedSourceIds ?? [];
-  if (!Array.isArray(removedSourceIds) || removedSourceIds.length > 1000 || removedSourceIds.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(id))) throw new BadRequestException('已删除来源记录无效');
-  return { ai: validateAi(value.ai, { ...defaults.ai, apiKey: '' }), sources, removedSourceIds,
+  if (!Array.isArray(removedSourceIds) || removedSourceIds.length > 1000 || removedSourceIds.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9_-]*$/.test(id))) throw new BadRequestException('已删除来源记录无效');
+  return { version: 2, ai: validateAi(value.ai, { ...defaults.ai, apiKey: '' }), sources, removedSourceIds,
     rules: validateRules(value.rules, [...sources, ...removedSourceIds.map(id => ({ id }))]) };
 }

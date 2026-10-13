@@ -6,7 +6,10 @@ import { GatewayModule } from './gateway/gateway.module';
 import { NewsBridgeService } from './news/news-bridge.service';
 import { NewsEditorialService } from './news/news-editorial.service';
 import { EmailService } from './services/email.service';
+import { ServicesModule } from './services/services.module';
+import { SourceAdapterService } from './news/source-adapter.service';
+import { SourceLogoController } from './news/source-logo.controller';
 
 @Global()
-@Module({ imports: [PrismaModule, GatewayModule], controllers: [NewsController], providers: [NewsService, NewsBridgeService, NewsEditorialService, EmailService], exports: [NewsService, NewsBridgeService, NewsEditorialService] })
+@Module({ imports: [PrismaModule, GatewayModule, ServicesModule], controllers: [NewsController, SourceLogoController], providers: [NewsService, NewsBridgeService, NewsEditorialService, EmailService, SourceAdapterService], exports: [NewsService, NewsBridgeService, NewsEditorialService] })
 export class RadarModule {}

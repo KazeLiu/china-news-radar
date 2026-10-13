@@ -1,9 +1,16 @@
 export type NewsTopic = 'policy' | 'economy' | 'diplomacy' | 'technology' | 'security' | 'society';
+export interface ApiSourceConfig {
+  method: 'GET' | 'POST'; body: string;
+  auth: { type: 'none' | 'bearer' | 'header'; header: string; value: string };
+  mapping: { items: string; title: string; summary: string; url: string; publishedAt: string; author: string; images: string; body: string };
+}
+export interface WebRules { mode: 'metadata' | 'css'; item: string; title: string; summary: string; link: string; date: string; image: string; body: string; author: string; next: string }
+export interface WebSourceConfig { rules: WebRules; previousRules?: WebRules; timeoutSeconds: number; maxItems: number; maxPages: number; concurrency: number }
 export interface NewsSourceConfig {
   id: string;
   name: string;
   englishName: string;
-  kind: 'rss' | 'google-rss' | 'rsshub' | 'telegram' | 'reserved';
+  kind: 'rss' | 'google-rss' | 'rsshub' | 'telegram' | 'reserved' | 'api' | 'web';
   website: string;
   feedUrl?: string;
   feedUrls?: string[];
@@ -12,6 +19,13 @@ export interface NewsSourceConfig {
   enabled: boolean;
   pollSeconds: number;
   channel?: string;
+  logo?: string;
+  notes?: string;
+  timeZone?: string;
+  target?: string;
+  adapter?: 'generic' | 'twitter' | 'bing' | 'hackernews' | 'bilibili' | 'sogou';
+  api?: ApiSourceConfig;
+  web?: WebSourceConfig;
 }
 
 function googleFeed(host: string) {

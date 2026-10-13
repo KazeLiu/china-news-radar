@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
-from common import CHANNELS, Outbox, message_payload
+from common import Outbox, message_payload
 
 load_dotenv()
 os.umask(0o077)
@@ -22,6 +22,12 @@ def deliver(url, token, payload):
     request = Request(url, data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {token}'}, method='POST')
     with urlopen(request, timeout=15) as response:
         return json.load(response)
+
+
+def configured_channels(url, token):
+    request = Request(f'{url}/sources', headers={'Authorization': f'Bearer {token}'})
+    with urlopen(request, timeout=15) as response:
+        return [source['channel'] for source in json.load(response)]
 
 
 async def main():
@@ -40,24 +46,33 @@ async def main():
     if not await client.is_user_authorized():
         await client.disconnect()
         raise SystemExit('session 已失效，请重新运行 login.py。')
-    dialogs = {dialog.entity.id: dialog.entity async for dialog in client.iter_dialogs()}
-    subscribed = {}
-    for channel in CHANNELS:
-        entity = next((value for value in dialogs.values() if (getattr(value, 'username', None) or '').lower() == channel.lower()), None)
-        if entity:
-            subscribed[entity.id] = channel
-        else:
-            logging.warning('@%s 尚未订阅，本轮跳过；订阅后重启 worker。', channel)
-    if not subscribed:
-        await client.disconnect()
-        raise SystemExit('没有已订阅的目标频道。')
-    outbox = Outbox(state / 'outbox.db')
     url = os.environ.get('RADAR_INGEST_URL', 'http://server:3001/api/news/telegram')
+    dialogs = {}
+    subscribed = {}
+    async def refresh_sources():
+        channels = await asyncio.to_thread(configured_channels, url, token)
+        refreshed = {dialog.entity.id: dialog.entity async for dialog in client.iter_dialogs()}
+        selected = {}
+        for channel in channels:
+            entity = next((value for value in refreshed.values() if (getattr(value, 'username', None) or '').lower() == channel.lower()), None)
+            if entity:
+                selected[entity.id] = channel
+            else:
+                logging.warning('@%s 尚未订阅，本轮跳过。', channel)
+        dialogs.clear()
+        dialogs.update(refreshed)
+        subscribed.clear()
+        subscribed.update(selected)
+    await refresh_sources()
+    outbox = Outbox(state / 'outbox.db')
 
-    @client.on(events.NewMessage(chats=[dialogs[channel_id] for channel_id in subscribed]))
-    @client.on(events.MessageEdited(chats=[dialogs[channel_id] for channel_id in subscribed]))
+    @client.on(events.NewMessage())
+    @client.on(events.MessageEdited())
     async def receive(event):
-        payload = message_payload(subscribed[event.message.peer_id.channel_id], event.message)
+        channel_id = getattr(event.message.peer_id, 'channel_id', None)
+        if channel_id not in subscribed:
+            return
+        payload = message_payload(subscribed[channel_id], event.message)
         if payload:
             outbox.put(payload)
 
@@ -82,22 +97,34 @@ async def main():
 
     async def backfill():
         cutoff = datetime.now(timezone.utc) - timedelta(days=1)
-        for channel_id, channel in subscribed.items():
+        for channel_id, channel in list(subscribed.items()):
             try:
                 async for message in client.iter_messages(dialogs[channel_id], limit=25):
                     if message.date < cutoff:
                         break
                     payload = message_payload(channel, message)
                     if payload:
+                        payload['backfill'] = True
                         outbox.put(payload)
                 await asyncio.sleep(2)
             except FloodWaitError as error:
                 logging.warning('Telegram 要求等待 %s 秒，已停止补抓。', error.seconds)
                 await asyncio.sleep(error.seconds)
                 break
+    async def source_updates():
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await refresh_sources()
+            except HTTPError as error:
+                if error.code in (401, 403):
+                    raise RuntimeError('来源配置读取被拒绝，请核对内部令牌。') from None
+                logging.warning('来源配置暂时不可读，保留当前监听列表。')
+            except (URLError, TimeoutError, OSError, json.JSONDecodeError):
+                logging.warning('来源配置暂时不可读，保留当前监听列表。')
     logging.info('已监听 %s 个已订阅频道；新闻交给本站统一处理。', len(subscribed))
     try:
-        await asyncio.gather(sender(), backfill(), client.run_until_disconnected())
+        await asyncio.gather(sender(), backfill(), source_updates(), client.run_until_disconnected())
     finally:
         await client.disconnect()
         outbox.db.close()

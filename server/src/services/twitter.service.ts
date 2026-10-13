@@ -105,8 +105,8 @@ export class TwitterService {
     return parts.join(' ');
   }
 
-  private async makeTwitterRequest(endpoint: string, params: Record<string, string> = {}): Promise<any> {
-    const apiKey = process.env.TWITTER_API_KEY;
+  private async makeTwitterRequest(endpoint: string, params: Record<string, string> = {}, configuredKey?: string): Promise<any> {
+    const apiKey = configuredKey ?? process.env.TWITTER_API_KEY;
     if (!apiKey || apiKey.includes('your_') || apiKey === 'placeholder') {
       return { tweets: [] };
     }
@@ -131,12 +131,13 @@ export class TwitterService {
     query: string,
     queryType: 'Top' | 'Latest',
     cursor?: string,
+    apiKey?: string,
   ): Promise<{ tweets: Tweet[]; nextCursor?: string }> {
     const data = (await this.makeTwitterRequest('/twitter/tweet/advanced_search', {
       query,
       queryType,
       ...(cursor ? { cursor } : {}),
-    })) as TwitterSearchResponse;
+    }, apiKey)) as TwitterSearchResponse;
 
     return {
       tweets: data.tweets && Array.isArray(data.tweets) ? data.tweets : [],
@@ -144,7 +145,7 @@ export class TwitterService {
     };
   }
 
-  async searchTwitter(query: string): Promise<SearchResult[]> {
+  async searchTwitter(query: string, options?: { apiKey?: string; strict?: boolean }): Promise<SearchResult[]> {
     try {
       const topQuery = this.buildAdvancedQuery(query, 'Top');
       const latestQuery = this.buildAdvancedQuery(query, 'Latest');
@@ -152,9 +153,10 @@ export class TwitterService {
       console.log(`Twitter advanced queries:\n  Top: ${topQuery}\n  Latest: ${latestQuery}`);
 
       const [topPage1, latestPage1] = await Promise.allSettled([
-        this.fetchTweetPage(topQuery, 'Top'),
-        this.fetchTweetPage(latestQuery, 'Latest'),
+        this.fetchTweetPage(topQuery, 'Top', undefined, options?.apiKey),
+        this.fetchTweetPage(latestQuery, 'Latest', undefined, options?.apiKey),
       ]);
+      if (options?.strict && topPage1.status === 'rejected' && latestPage1.status === 'rejected') throw new Error('X API 两个查询均失败，请核对密钥、权限与服务状态');
 
       const allTweets: Tweet[] = [];
       const seenIds = new Set<string>();
@@ -180,7 +182,7 @@ export class TwitterService {
 
       if (topNextCursor) {
         try {
-          const topPage2 = await this.fetchTweetPage(topQuery, 'Top', topNextCursor);
+          const topPage2 = await this.fetchTweetPage(topQuery, 'Top', topNextCursor, options?.apiKey);
           addTweets(topPage2.tweets);
         } catch (e) {
           console.warn('Twitter Top page 2 failed:', e);
@@ -214,6 +216,7 @@ export class TwitterService {
         },
       }));
     } catch (error) {
+      if (options?.strict) throw new Error('X API 获取失败，请核对已保存的密钥、权限和服务状态');
       console.error('Twitter search error:', error);
       return [];
     }

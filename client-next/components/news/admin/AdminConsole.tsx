@@ -55,15 +55,17 @@ export function AdminConsole() {
   async function save(path: string, body: unknown, method = 'PUT') {
     setBusy(true); setError(''); setNotice('');
     try {
+      let next: AdminSettings;
       if (path.startsWith('sources/')) {
-        await adminApi(path, token, body, 'PATCH'); setConfig(await adminApi<AdminSettings>('admin/config', token));
-      } else setConfig(await adminApi<AdminSettings>(path, token, body, method));
+        await adminApi(path, token, body, 'PATCH'); next = await adminApi<AdminSettings>('admin/config', token);
+      } else next = await adminApi<AdminSettings>(path, token, body, method);
+      setConfig(next);
       if (path === 'admin/ai') {
         const key = (body as { apiKey?: string }).apiKey;
         if (key?.trim()) setSavedApiKey(key.trim());
       }
       setNotice(method === 'DELETE' ? '来源已删除，已停止采集，已有新闻和收藏已保留。' : path === 'admin/rules' ? '规则已保存，已有记录已重新筛选，收藏和时间已保留。' : '配置已保存并生效。');
-      return true;
+      return next;
     } catch (e) { setError(e instanceof Error ? e.message : '保存失败'); return false; }
     finally { setBusy(false); }
   }
@@ -76,7 +78,7 @@ export function AdminConsole() {
       {loading ? <div className={styles.card} role="status">正在读取后台配置…</div> : !config ? <form className={styles.card} onSubmit={event => { event.preventDefault(); void login(); }}><h2>管理员登录</h2>{!initialized ? <p>尚未设置管理员。请在服务器交互终端运行 <code>pnpm --filter ai-hot-radar-server admin:init</code>，预览副本需指定 DATABASE_URL。</p> : <><label className={styles.fullField}>账号<input autoComplete="username" required maxLength={80} value={username} onChange={e => setUsername(e.target.value)} /></label><label className={styles.fullField}>密码<input type="password" autoComplete="current-password" required maxLength={256} value={password} onChange={e => setPassword(e.target.value)} /></label><button className={styles.primary} type="submit">进入后台</button></>}</form> : <>
         <nav className={styles.tabs} aria-label="后台配置导航">{tabs.map(({ id, label, Icon }) => <button key={id} aria-pressed={tab === id} className={tab === id ? styles.activeTab : ''} disabled={busy} onClick={() => { setTab(id); setNotice(''); window.history.replaceState(null, '', `/admin?tab=${id}`); }}><Icon size={18} />{label}</button>)}</nav>
         <div hidden={tab !== 'ai'}><AiSettingsForm initial={config.ai} savedApiKey={savedApiKey} busy={busy} onSave={save} /><AiQueuePanel /><AiTestPanel token={token} busy={busy} keyConfigured={config.ai.keyConfigured} onUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
-        <div hidden={tab !== 'sources'}><SourceSettingsForm sources={config.sources} token={token} busy={busy} onSave={save} /></div>
+        <div hidden={tab !== 'sources'}><SourceSettingsForm sources={config.sources} token={token} busy={busy} onSave={save} aiKeyConfigured={config.ai.keyConfigured} onAiUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
         <div hidden={tab !== 'rules'}><RulesSettingsForm initial={config.rules} sources={config.sources} token={token} busy={busy} onSave={save} /></div>
         <p className={styles.footnote}>配置和会话保存在本站数据库。账号初始化或重置后，旧会话立即失效。</p>
       </>}

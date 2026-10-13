@@ -13,11 +13,15 @@ async function main() {
   try {
     const existing = await db.$queryRawUnsafe("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
     const stored = existing.some(t => t.name === 'Setting') ? await db.setting.findUnique({ where: { key: 'schema-fingerprint' } }) : null;
-    if (existing.length && stored?.value !== fingerprint) {
+    const savedConfig = existing.some(t => t.name === 'Setting') ? await db.setting.findUnique({ where: { key: 'news-admin-config-v1' } }) : null;
+    const config = savedConfig ? JSON.parse(savedConfig.value) : null;
+    if (existing.length && (stored?.value !== fingerprint || (config && config.version !== 2))) {
       const backup = `${target}.backup-${new Date().toISOString().replace(/[:.]/g, '-')}.db`;
       await db.$executeRawUnsafe(`VACUUM INTO '${backup.replaceAll("'", "''")}'`);
+      fs.chmodSync(backup, 0o600);
       console.log('已创建升级前 SQLite 一致性备份');
     }
+    if (config && config.version !== 2) await db.setting.update({ where: { key: 'news-admin-config-v1' }, data: { value: JSON.stringify({ ...config, version: 2 }) } });
     const tables = await db.$queryRawUnsafe("SELECT name FROM sqlite_master WHERE type='table' AND name='Hotspot'");
     if (tables.length) {
       const columns = await db.$queryRawUnsafe('PRAGMA table_info("Hotspot")');
