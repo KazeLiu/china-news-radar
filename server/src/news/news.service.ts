@@ -314,6 +314,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       sources: this.config.sources.map(s => ({ ...s, state: states.find(state => state.id === s.id) })), rules: this.config.rules,
       status: await this.status(), localOnly: !process.env.ADMIN_TOKEN };
   }
+  adminAiKey() { return { apiKey: this.config.ai.apiKey }; }
   private async updateConfig(next: AdminConfig, mutation?: (tx: Prisma.TransactionClient) => Promise<unknown>, afterChange?: () => Promise<unknown>) {
     if (this.configBusy) throw new ConflictException('正在保存配置，请稍后重试');
     this.configBusy = true;

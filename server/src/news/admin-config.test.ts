@@ -5,13 +5,13 @@ import { requireAdmin } from './admin-access';
 
 afterEach(() => vi.unstubAllEnvs());
 describe('administrator configuration', () => {
-  it('preserves a saved secret when blank, supports explicit clearing across restarts, and validates budgets', () => {
+  it('preserves saved keys when blank, replaces keys across restarts, and validates budgets', () => {
     vi.stubEnv('OPENAI_API_KEY', 'environment-fixture');
     const config = defaultConfig();
     expect(validateAi({ ...config.ai, apiKey: '' }, config.ai).apiKey).toBe('environment-fixture');
-    const cleared = validateAi({ ...config.ai, clearKey: true }, config.ai);
-    expect(cleared.apiKey).toBe('');
-    expect(restoreConfig(JSON.stringify({ ...config, ai: cleared })).ai.apiKey).toBe('');
+    expect(validateAi({ ...config.ai, apiKey: '', clearKey: true }, config.ai).apiKey).toBe('environment-fixture');
+    const replaced = validateAi({ ...config.ai, apiKey: 'replacement-fixture' }, config.ai);
+    expect(restoreConfig(JSON.stringify({ ...config, ai: replaced })).ai.apiKey).toBe('replacement-fixture');
     for (const dailyLimit of [-1, 1.5, '100', 100001]) expect(() => validateAi({ ...config.ai, dailyLimit }, config.ai)).toThrow();
   });
   it('validates ordered foreign RSS addresses and removes legacy RSSHub route fields', () => {

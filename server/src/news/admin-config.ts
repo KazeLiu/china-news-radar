@@ -39,7 +39,7 @@ export function validateAi(value: unknown, previous: AiConfig): AiConfig {
   const body = object(value);
   const dailyLimit = body.dailyLimit;
   if (!Number.isInteger(dailyLimit) || Number(dailyLimit) < 0 || Number(dailyLimit) > 100_000) throw new BadRequestException('每日额度应为 0–100000 的整数');
-  const apiKey = body.clearKey === true ? '' : body.apiKey === undefined || body.apiKey === '' ? previous.apiKey : string(body.apiKey, 'API Key', 1000);
+  const apiKey = body.apiKey === undefined || body.apiKey === '' ? previous.apiKey : string(body.apiKey, 'API Key', 1000);
   return { enabled: boolean(body.enabled), baseUrl: publicUrl(body.baseUrl, 'AI 接口地址'), model: string(body.model, '模型', 200),
     dailyLimit: Number(dailyLimit), apiKey, instructions: string(body.instructions ?? '', '额外提示词', 4000, true) };
 }

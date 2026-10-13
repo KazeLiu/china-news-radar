@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Put, Query, UnauthorizedException, ForbiddenException, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Put, Query, UnauthorizedException, ForbiddenException, Req } from '@nestjs/common';
 import { timingSafeEqual } from 'node:crypto';
 import { NewsService } from './news.service';
 import { requireAdmin, AdminRequest } from './admin-access';
@@ -26,6 +26,7 @@ export class NewsController {
   @Patch('items/:id/saved') save(@Param('id') id: string, @Body() body: { saved?: unknown }, @Req() req: Parameters<typeof sameOrigin>[0]) { sameOrigin(req); return this.news.save(id, body.saved); }
   @Patch('sources/:id') source(@Param('id') id: string, @Body() body: { enabled?: unknown }, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.enableSource(id, body.enabled); }
   @Get('admin/config') config(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminConfig(); }
+  @Get('admin/ai/key') @Header('Cache-Control', 'no-store') aiKey(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminAiKey(); }
   @Put('admin/ai') ai(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureAi(body); }
   @Post('admin/ai/test') testAi(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testAi(body); }
   @Put('admin/sources') configureSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureSource(body); }

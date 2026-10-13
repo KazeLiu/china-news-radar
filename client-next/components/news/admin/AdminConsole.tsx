@@ -14,9 +14,14 @@ import styles from './admin.module.css';
 
 type Tab = 'ai' | 'sources' | 'rules';
 const tabs = [{ id: 'ai' as const, label: 'AI 配置', Icon: Bot }, { id: 'sources' as const, label: '来源配置', Icon: Rss }, { id: 'rules' as const, label: '过滤规则', Icon: ListFilter }];
+async function loadAdminSettings(token: string) {
+  const [config, key] = await Promise.all([adminApi<AdminSettings>('admin/config', token), adminApi<{ apiKey: string }>('admin/ai/key', token)]);
+  return { config, apiKey: key.apiKey };
+}
 export function AdminConsole() {
   const { theme, toggleTheme } = useTheme();
   const [config, setConfig] = useState<AdminSettings | null>(null);
+  const [savedApiKey, setSavedApiKey] = useState('');
   const [tab, setTab] = useState<Tab>('ai');
   const [token, setToken] = useState(''); const [tokenDraft, setTokenDraft] = useState('');
   const [error, setError] = useState(''); const [notice, setNotice] = useState('');
@@ -25,12 +30,12 @@ export function AdminConsole() {
     let cancelled = false;
     const selected = new URLSearchParams(window.location.search).get('tab');
     queueMicrotask(() => { if (!cancelled && (selected === 'sources' || selected === 'rules')) setTab(selected); });
-    adminApi<AdminSettings>('admin/config', '').then(data => { if (!cancelled) { setConfig(data); setError(''); } }).catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : '无法读取配置'); }).finally(() => { if (!cancelled) setLoading(false); });
+    loadAdminSettings('').then(data => { if (!cancelled) { setConfig(data.config); setSavedApiKey(data.apiKey); setError(''); } }).catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : '无法读取配置'); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
   async function login() {
     setLoading(true); setError('');
-    try { const data = await adminApi<AdminSettings>('admin/config', tokenDraft); setToken(tokenDraft); setTokenDraft(''); setConfig(data); }
+    try { const data = await loadAdminSettings(tokenDraft); setToken(tokenDraft); setTokenDraft(''); setConfig(data.config); setSavedApiKey(data.apiKey); }
     catch (e) { setError(e instanceof Error ? e.message : '无法读取配置'); }
     finally { setLoading(false); }
   }
@@ -40,6 +45,10 @@ export function AdminConsole() {
       if (path.startsWith('sources/')) {
         await adminApi(path, token, body, 'PATCH'); setConfig(await adminApi<AdminSettings>('admin/config', token));
       } else setConfig(await adminApi<AdminSettings>(path, token, body, method));
+      if (path === 'admin/ai') {
+        const key = (body as { apiKey?: string }).apiKey;
+        if (key?.trim()) setSavedApiKey(key.trim());
+      }
       setNotice(method === 'DELETE' ? '来源已删除，已停止采集，已有新闻和收藏已保留。' : path === 'admin/rules' ? '规则已保存，已有记录已重新筛选，收藏和时间已保留。' : '配置已保存并生效。');
       return true;
     } catch (e) { setError(e instanceof Error ? e.message : '保存失败'); return false; }
@@ -53,7 +62,7 @@ export function AdminConsole() {
       {notice && <div className={styles.notice} role="status">{notice}</div>}
       {loading ? <div className={styles.card} role="status">正在读取后台配置…</div> : !config ? <form className={styles.card} onSubmit={event => { event.preventDefault(); void login(); }}><h2>后台访问</h2><p>本机开发默认直接进入。配置了 ADMIN_TOKEN 时，请输入管理员令牌。</p><label className={styles.fullField}>管理员令牌<input type="password" autoComplete="current-password" required value={tokenDraft} onChange={e => setTokenDraft(e.target.value)} /></label><button className={styles.primary} type="submit">进入后台</button></form> : <>
         <nav className={styles.tabs} aria-label="后台配置导航">{tabs.map(({ id, label, Icon }) => <button key={id} aria-pressed={tab === id} className={tab === id ? styles.activeTab : ''} disabled={busy} onClick={() => { setTab(id); setNotice(''); window.history.replaceState(null, '', `/admin?tab=${id}`); }}><Icon size={18} />{label}</button>)}</nav>
-        <div hidden={tab !== 'ai'}><AiSettingsForm initial={config.ai} busy={busy} onSave={save} /><AiTestPanel token={token} busy={busy} keyConfigured={config.ai.keyConfigured} onUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
+        <div hidden={tab !== 'ai'}><AiSettingsForm initial={config.ai} savedApiKey={savedApiKey} busy={busy} onSave={save} /><AiTestPanel token={token} busy={busy} keyConfigured={config.ai.keyConfigured} onUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
         <div hidden={tab !== 'sources'}><SourceSettingsForm sources={config.sources} token={token} busy={busy} onSave={save} /></div>
         <div hidden={tab !== 'rules'}><RulesSettingsForm initial={config.rules} sources={config.sources} token={token} busy={busy} onSave={save} /></div>
         <p className={styles.footnote}>配置保存在本站数据库，重启后保留。访问统计、IP 黑名单和用户登录尚未接入。</p>
