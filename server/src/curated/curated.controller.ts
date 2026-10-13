@@ -13,6 +13,7 @@ export class CuratedController {
     @Query('category') category?: string,
     @Query('region') region?: string,
     @Query('search') search?: string,
+    @Query('source') source?: string,
   ) {
     return this.curatedService.getCurated({
       period,
@@ -21,6 +22,7 @@ export class CuratedController {
       category,
       region,
       search,
+      source,
     });
   }
 }

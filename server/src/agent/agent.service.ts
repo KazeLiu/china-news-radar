@@ -1,20 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { contentScope, newsInclude, presentHotspot } from '../news/radar-content';
+import { contentScope, newsInclude, newsMode, presentHotspot } from '../news/radar-content';
+import { CuratedFilter, CuratedService } from '../curated/curated.service';
 
 @Injectable()
 export class AgentService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly curated: CuratedService) {}
 
-  async getCurated(limit = 20, offset = 0) {
-    const items = await this.prisma.hotspot.findMany({
-      where: contentScope({ isCurated: true, isClusterMain: true }),
-      include: newsInclude(),
-      orderBy: [{ qualityScore: 'desc' }, { createdAt: 'desc' }],
-      take: limit,
-      skip: offset,
-    });
-    return items.map(presentHotspot);
+  async getCurated(limit = 20, offset = 0, filter: Omit<CuratedFilter, 'limit' | 'offset'> = {}) {
+    if (!newsMode()) return (await this.prisma.hotspot.findMany({ where: contentScope({ isCurated: true, isClusterMain: true }), include: newsInclude(), orderBy: [{ qualityScore: 'desc' }, { createdAt: 'desc' }], take: limit, skip: offset })).map(presentHotspot);
+    return (await this.curated.getCurated({ ...filter, limit, offset })).items;
   }
 
   async search(q: string, limit = 20) {
@@ -33,7 +28,7 @@ export class AgentService {
 
   async getStats() {
     const total = await this.prisma.hotspot.count({ where: contentScope() });
-    const curated = await this.prisma.hotspot.count({ where: contentScope({ isCurated: true }) });
+    const curated = await this.prisma.hotspot.count({ where: contentScope(newsMode() ? {} : { isCurated: true }) });
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayCount = await this.prisma.hotspot.count({ where: contentScope({ createdAt: { gte: today } }) });

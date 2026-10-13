@@ -27,8 +27,8 @@ export default async function CuratedPage() {
       description: item.summary,
     })),
     {
-      name: '精选 AI 资讯',
-      description: '经 AI 五维评分筛选的高质量 AI 行业资讯',
+      name: 'China Radar · 精选资讯',
+      description: '全部通过涉华与展示规则筛选的报道，质量评分只用于排序',
     },
   );
 

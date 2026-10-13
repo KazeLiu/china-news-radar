@@ -34,6 +34,8 @@ export interface Hotspot {
   originalPublisher?: string;
   originalUrl?: string;
   firstSeenAt?: string;
+  updatedAt?: string;
+  distribution?: string;
   aiStatus?: string;
   scoringStatus?: 'scored' | 'unscored' | 'rules';
   decisionBy?: string;

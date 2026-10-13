@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { HotspotGateway } from '../gateway/hotspot.gateway';
 import { computeQualityScore } from '../services/scoring.service';
-import { CURATED_THRESHOLD, SourceTier } from '../rss-feeds/feeds.config';
+import { SourceTier } from '../rss-feeds/feeds.config';
 import { parseAnalysis, AnalysisResult } from './analysis';
 import { presentHotspot, publicNewsScope } from './radar-content';
 import { ORIGINAL_PUBLISHERS } from './sources';
@@ -33,7 +33,7 @@ export class NewsBridgeService {
       publishedAt: item.publishedAt, createdAt: item.firstSeenAt, category: item.topic, region: 'international',
       sourceTier: tier, qualityScore, relevance: score ? score.relevance * 10 : 0, relevanceReason: item.aiReason,
       importance: score?.importance || 'low', tags: JSON.stringify(score?.tags || []), clusterKey: item.eventKey,
-      isCurated: qualityScore !== null && qualityScore >= CURATED_THRESHOLD[tier] && item.aiRelation === 'related', authorName: item.author };
+      isCurated: item.visible && !item.hiddenArticle && item.publicationStatus === 'published', authorName: item.author };
     const previous = await tx.hotspot.findUnique({ where: { newsItemId: id }, select: { clusterKey: true } });
     const hotspot = await tx.hotspot.upsert({ where: { newsItemId: id }, create: { id: `news:${id}`, notifyEligible, ...data }, update: data });
     await this.matchItem(tx, item);

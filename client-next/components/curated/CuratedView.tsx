@@ -14,6 +14,8 @@ import { SkeletonList } from '../common/Loader';
 import { EmptyState } from '../common/EmptyState';
 import type { Hotspot, HotspotTab } from '../../types';
 import { tabFilter } from '../../lib/filterState';
+import { requestJson } from '../../services/http';
+import { HotspotMedia } from '../hotspot/HotspotMedia';
 
 type Period = 'today' | 'week';
 
@@ -26,8 +28,7 @@ const CATEGORY_LABEL: Record<string, string> = {
 /**
  * Curated card — visually unified with HotspotCard but lighter on chrome.
  * Differences from HotspotCard (intentional):
- *   - No importance/urgent/high/low badges (curated items are pre-filtered
- *     by quality score; the score itself is the badge)
+ *   - No importance/urgent/high/low badges
  *   - No 真假/可信/可疑/直接提及 chips
  *   - No AI relevance reason / raw content collapsibles
  *   - Engagement metrics shown as a single trailing row
@@ -35,6 +36,11 @@ const CATEGORY_LABEL: Record<string, string> = {
  */
 function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
   const tags = item.tags ? (JSON.parse(item.tags) as string[]) : [];
+  const [original, setOriginal] = useState(false);
+  const title = original ? item.originalTitle || item.title : item.title;
+  const summary = original ? item.originalSummary ?? item.summary : item.summary;
+  const hasTranslation = !!item.newsItemId && (item.originalTitle !== item.title || item.originalSummary !== item.summary);
+  const fullTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未提供';
 
   // Same heat formula as HotspotCard for visual consistency
   const heatRaw =
@@ -54,11 +60,7 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
   // where one story ends and the next begins — the list is otherwise a flat run
   // of <a> elements with no structural boundary.
   return (
-    <article>
-      <a
-          href={item.url}
-          target="_blank"
-          rel="noopener noreferrer"
+    <article
           style={{ animationDelay: `${index * 30}ms` }}
           className="block p-5 sm:p-6 rounded-3xl border border-[var(--card-border)] bg-[var(--card-bg)] hover:border-[var(--card-border-hover)] hover:-translate-y-0.5 transition duration-200 group"
         >
@@ -90,29 +92,33 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
                 {Math.round(item.qualityScore)}
               </span>
             )}
+            {item.newsItemId && item.qualityScore == null && <span className="text-xs text-[var(--text-muted)]">{item.aiStatus === 'done' ? '未评分' : '规则兜底'}</span>}
           </div>
         </div>
 
         {/* Title — large, semibold, reading-first */}
         <h3 className="text-[17px] font-semibold text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors leading-snug mb-2.5">
-          {item.title}
+          <a href={item.url} target="_blank" rel="noopener noreferrer">{title}
           <ExternalLink className="inline-block w-3.5 h-3.5 ml-1 mb-0.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+          </a>
         </h3>
 
         {/* AI Summary — quote-style block, identical to HotspotCard */}
-        {item.summary && (
+        {summary && (
           <div className="mb-3 pl-3 border-l-2 border-[var(--accent-blue)]/40 dark:border-blue-400/40">
             <div className="flex items-center gap-1.5 mb-0.5">
               <Sparkles className="w-3 h-3 text-[var(--accent-blue)] dark:text-blue-400" />
               <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent-blue)]/80 dark:text-blue-400/70">
-                AI 摘要
+                {item.newsItemId ? '报道摘要' : 'AI 摘要'}
               </span>
             </div>
             <p className="text-[14px] text-[var(--text-secondary)] leading-[1.7] line-clamp-3">
-              {item.summary}
+              {summary}
             </p>
           </div>
         )}
+        {hasTranslation && <button type="button" aria-pressed={original} onClick={() => setOriginal(value => !value)} className="text-sm text-[var(--accent-blue)] min-h-11 px-2 mb-2">{original ? '显示中文' : '显示原文'}</button>}
+        {item.media && item.media.length > 0 && <HotspotMedia media={item.media} />}
 
         {/* Engagement metrics — only when there are any */}
         {(item.likeCount || item.retweetCount || item.commentCount || item.viewCount) && (
@@ -166,7 +172,7 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
             {relativeTime(item.publishedAt || item.createdAt)}
           </time>
         </div>
-      </a>
+      {item.newsItemId && <details className="mt-4 text-sm text-[var(--text-secondary)]"><summary className="cursor-pointer min-h-11 flex items-center text-[var(--accent-blue)]">出处与时间</summary><div className="space-y-2 pt-2"><p>{item.originalPublisher} · {item.distribution}</p><p>发布：{fullTime(item.publishedAt)}</p><p>首次发现：{fullTime(item.firstSeenAt)}</p><p>内容更新：{fullTime(item.updatedAt)}（北京时间）</p>{item.distribution?.includes('Google') && !item.originalUrl && <p>链接为 Google News 索引跳转入口。</p>}</div></details>}
     </article>
   );
 }
@@ -197,6 +203,9 @@ export function CuratedView({
   const [overview, setOverview] = useState<{ today: number; curated: number; keywords: number } | null>(null);
   const [error, setError] = useState('');
   const [overviewError, setOverviewError] = useState('');
+  const [sources, setSources] = useState<Array<{ id: string; name: string }>>([]);
+  const [source, setSource] = useState(''); const [nextOffset, setNextOffset] = useState(initialItems.length); const [loadingMore, setLoadingMore] = useState(false);
+  const generation = useRef(0);
   const searchRef = useRef<HTMLInputElement>(null);
   // Guards the filter effect from re-requesting data the server already sent.
   // Only armed when server data exists, so the empty-state path still fetches.
@@ -211,7 +220,9 @@ export function CuratedView({
     Promise.all([
       hotspotsApi.getStats(),
       keywordsApi.getAll(),
-    ]).then(([stats, kws]) => {
+      requestJson<Array<{ id: string; name: string }>>('/api/news/sources'),
+    ]).then(([stats, kws, sourceRows]) => {
+      setSources(sourceRows);
       const activeKws = kws.filter(k => k.isActive).length;
       setOverview({
         today: stats.today,
@@ -222,26 +233,39 @@ export function CuratedView({
   }, [initialTotal]);
 
   useEffect(() => {
+    const current = ++generation.current;
     // First run with server-provided data: it already matches the default
     // filters, so refetching would duplicate the request. Disarm and let every
     // subsequent filter change fetch normally.
     if (skipInitialFetch.current) {
       skipInitialFetch.current = false;
-      return;
+      return () => { generation.current++; };
     }
 
     setLoading(true);
-    const opts = { ...tabFilter(activeTab), search: appliedSearch };
+    const opts = { ...tabFilter(activeTab), search: appliedSearch, source };
 
     curatedApi.getAll(period, 50, 0, opts)
       .then((res) => {
+        if (current !== generation.current) return;
         setItems(res.items);
         setTotal(res.total);
+        setNextOffset(res.offset + res.items.length);
         setError('');
       })
-      .catch(e => setError(e instanceof Error ? e.message : '精选资讯加载失败'))
-      .finally(() => setLoading(false));
-  }, [period, activeTab, appliedSearch]);
+      .catch(e => { if (current === generation.current) setError(e instanceof Error ? e.message : '精选资讯加载失败'); })
+      .finally(() => { if (current === generation.current) setLoading(false); });
+    return () => { generation.current++; };
+  }, [period, activeTab, appliedSearch, source]);
+  async function loadMore() {
+    const current = generation.current; setLoadingMore(true);
+    try {
+      const result = await curatedApi.getAll(period, 50, nextOffset, { ...tabFilter(activeTab), search: appliedSearch, source });
+      if (current !== generation.current) return;
+      setItems(old => [...new Map([...old, ...result.items].map(item => [item.id, item])).values()]); setTotal(result.total); setNextOffset(result.offset + result.items.length); setError('');
+    } catch (e) { if (current === generation.current) setError(e instanceof Error ? e.message : '更多资讯读取失败'); }
+    finally { setLoadingMore(false); }
+  }
 
   const handleSearch = () => setAppliedSearch(searchInput.trim());
   const handleClearSearch = () => {
@@ -260,7 +284,7 @@ export function CuratedView({
             精选资讯
           </h1>
           <p className="text-sm text-[var(--text-secondary)] mt-1">
-            AI 质量评分筛选，{total} 条精选内容
+            全部通过筛选的报道 · {total} 条 · 质量评分只用于排序
           </p>
         </div>
         <div className="flex gap-1 p-1 bg-[var(--bg-elevated)] rounded-xl border border-[var(--border-subtle)]">
@@ -308,6 +332,7 @@ export function CuratedView({
 
       {/* Tabs + Search row — stacked on mobile, side-by-side on lg+ */}
       <div className="flex flex-col lg:flex-row lg:items-center gap-2 lg:gap-3 mb-4">
+        <select value={source} aria-label="筛选报道来源" onChange={e => setSource(e.target.value)} className="min-h-11 px-3 rounded-xl bg-[var(--input-bg)] border border-[var(--input-border)] text-sm"><option value="">全部来源</option><option value="manual">管理员录入</option>{sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}</select>
         <div className="flex-1 min-w-0">
           <HotspotTabs activeTab={activeTab} onChange={setActiveTab} />
         </div>
@@ -355,6 +380,7 @@ export function CuratedView({
       )}
 
       <CuratedResults loading={loading} items={items} search={appliedSearch} />
+      {!loading && nextOffset < total && <button type="button" disabled={loadingMore} onClick={() => void loadMore()} className="w-full min-h-11 mt-5 rounded-xl border border-[var(--input-border)] text-[var(--accent-blue)]">{loadingMore ? '正在读取…' : '加载更多报道'}</button>}
 
       <BackToTop />
     </div>
@@ -364,7 +390,7 @@ export function CuratedView({
 function CuratedResults({ loading, items, search }: { loading: boolean; items: Hotspot[]; search: string }) {
   if (loading) return <SkeletonList count={5} itemClassName="h-28 rounded-3xl" />;
   if (!items.length) return <EmptyState variant={search ? 'search' : 'star'} title={search ? '没有匹配的精选内容' : '暂无精选内容'}
-    description={search ? '换个词试试，或者清空搜索看全部精选' : '新报道完成质量评分后会进入精选；未评分记录可在快讯和热点中阅读。'} />;
+    description={search ? '换个词试试，或者清空搜索看全部精选' : '所选时间和筛选条件下暂无公开报道，可以切换本周或清除来源与主题筛选。'} />;
   return <div className="space-y-3">{items.map((item, index) => <CuratedCard key={item.id} item={item} index={index} />)}</div>;
 }
 

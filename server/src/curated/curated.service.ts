@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { contentScope, newsInclude, newsMode, presentHotspot } from '../news/radar-content';
 
@@ -14,6 +14,7 @@ export interface CuratedFilter {
   region?: string;
   /** Free-text search across title / summary / content */
   search?: string;
+  source?: string;
 }
 
 @Injectable()
@@ -21,7 +22,8 @@ export class CuratedService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getCurated(filter: CuratedFilter = {}) {
-    const { period = 'today', limit = 20, offset = 0, category, region, search } = filter;
+    const { period = 'today', limit = 20, offset = 0, category, region, search, source } = filter;
+    if (!['today', 'week'].includes(period) || !Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 100000) throw new BadRequestException('精选日期或分页参数无效');
     const now = new Date();
     // Beijing time offset = UTC+8
     const beijingNow = new Date(now.getTime() + 8 * 60 * 60 * 1000);
@@ -37,7 +39,7 @@ export class CuratedService {
     }
 
     const where: any = {
-      isCurated: true,
+      ...(newsMode() ? {} : { isCurated: true }),
       isClusterMain: true,
       // Filter by actual publish time, not DB ingestion time. An old article
       // scraped today by Bing would otherwise leak into "今日精选" — its createdAt
@@ -53,6 +55,7 @@ export class CuratedService {
       else where.category = category;
     }
     if (region) where.region = region;
+    if (source) where.AND = [...(where.AND || []), newsMode() ? { newsItem: { is: { sourceId: source } } } : { source }];
     if (search?.trim()) {
       // Search adds a second OR — combine into AND so both date and text constraints apply.
       const dateOr = where.OR;
@@ -65,6 +68,7 @@ export class CuratedService {
             { title:   { contains: search.trim() } },
             { summary: { contains: search.trim() } },
             { content: { contains: search.trim() } },
+            ...(newsMode() ? [{ newsItem: { is: { OR: [{ title: { contains: search.trim() } }, { summary: { contains: search.trim() } }] } } }] : []),
           ],
         },
       ];
@@ -73,13 +77,12 @@ export class CuratedService {
     const [items, total] = await Promise.all([
       this.prisma.hotspot.findMany({
         where: contentScope(where),
-        orderBy: [
-          // Time-first ordering: newest publications appear at the top.
-          // Quality score acts as tiebreaker for items published at the same minute.
+        orderBy: newsMode() ? [
+          { qualityScore: 'desc' },
           { publishedAt: 'desc' },
           { createdAt: 'desc' },
-          { qualityScore: 'desc' },
-        ],
+          { id: 'desc' },
+        ] : [{ publishedAt: 'desc' }, { createdAt: 'desc' }, { qualityScore: 'desc' }],
         take: limit,
         skip: offset,
         include: { keyword: true, ...newsInclude() },

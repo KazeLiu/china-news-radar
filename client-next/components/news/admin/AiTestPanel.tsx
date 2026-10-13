@@ -67,7 +67,7 @@ export function AiTestPanel({ token, busy, keyConfigured, onUsage, sample }: {
           <div><dt>原文语言</dt><dd>{languageLabels[result.result.language]}</dd></div>
         </dl>
         <p>判断理由：{result.result.reason}</p>
-        <p>{result.preview?.visible ? '此样例符合主快讯的内容条件。' : '此样例不符合主快讯的内容条件。'}{result.preview?.decisionBy === 'ai-uncertain-rules' ? '涉华信息不足，展示判断采用关键词兜底。' : ''}实际采集还会检查来源、发布时间和排除规则。</p>
+        <p>{result.preview?.visible ? '此样例符合精选资讯的内容条件。' : '此样例不符合精选资讯的内容条件。'}{result.preview?.decisionBy === 'ai-uncertain-rules' ? '涉华信息不足，展示判断采用关键词兜底。' : ''}实际采集还会检查来源、发布时间和排除规则。</p>
         {result.result.translation ? <article className={styles.sample}><h4>{result.result.translation.title}</h4><p>{result.result.translation.summary || '原文摘要为空，无摘要译文。'}</p></article> : <p>原文是简体中文，直接保留原文，不重复翻译。</p>}
         <details className={styles.details}><summary>查看模型结果 JSON</summary><pre>{JSON.stringify(result.result, null, 2)}</pre></details>
       </>}

@@ -1,6 +1,6 @@
 # China Radar · 海外涉华快讯
 
-当前本地改造版基于 [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar)，保留上游主要模块和页面，通过涉华扩展接入 RSS 与可选 Telegram 新闻。首页为快讯，热点雷达、精选、日报、我的关注及 Agent 接入读取同一套涉华数据。管理员统一配置 AI，分类、翻译与质量评分共用一次请求；日报与关注档案共享每日额度。结果持久缓存，阅读不调用模型，无密钥/失败/超额时规则兜底。详见 [模块接入说明](docs/UPSTREAM-INTEGRATION.md)及 [AI 处理说明](docs/AI-ANALYSIS.md)。
+本项目由蓝芷怡维护，基于 [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar)，保留上游主要模块和页面。首页进入精选，全部通过内容与展示规则筛选的海外涉华报道均可进入，质量评分只用于排序；热点、日报、我的关注和 Agent/RSS 使用统一公共范围。管理员统一配置来源和 AI，新增内容按周期合批分析，分类、翻译与评分在同一请求内完成；结果持久缓存，阅读不调用模型。详见 [开发计划与进度](docs/DEVELOPMENT-PLAN.md)。
 
 来源支持配置多个 RSS 地址，按顺序尝试备用，可在后台测试获取或删除来源。RSSHub 作为完整 RSS 地址填写；彭博/CNBC/卫报/BBC 使用媒体公开 RSS，路透/美联/日经亚洲默认使用 Google 索引。详见 [RSSHub 接入与实测](docs/RSSHUB.md)。
 
@@ -8,7 +8,9 @@
 
 本地源码使用 Node 22、pnpm 9.12.1、Next.js 16。无需 GitHub 登录即可开发此公开仓库。
 
-管理入口为 `/admin`（当前本机：http://localhost:3410/admin），支持持久化编辑来源、排除规则与统一 AI 参数。规则可先预览，保存后重筛旧记录并保留收藏与时间。详见 [后台使用说明](docs/ADMIN.md)。
+管理入口为 `/admin`，账号通过本地交互命令初始化，见 [管理员登录](docs/ADMIN-ACCESS.md)。后台包含来源、排除规则、AI 队列、手动新闻与人工隐藏、日志统计。手动新闻先保存草稿，主动分析后预览，再点击发布；隐藏与恢复保留原文、图片 URL、收藏和时间。日志保留 30 天，统计不调用模型。网页与 URL 提取需按 [网页采集说明](docs/WEB-CRAWLER.md)安装独立 Chromium。
+
+当前开发电脑不启动预览、不爬数据、不调用模型，Chromium 下载已暂缓；最终测试在其他电脑进行。目标电脑接续、初始化与待验收项见 [接续说明](docs/CONTINUE-ON-ANOTHER-PC.md)。
 
 ---
 

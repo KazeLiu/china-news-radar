@@ -31,7 +31,7 @@ export function AiSettingsForm({ initial, savedApiKey, busy, onSave }: { initial
     <label className={styles.fullField}>额外筛选指令<textarea rows={5} maxLength={4000} value={draft.instructions} onChange={e => change('instructions', e.target.value)} placeholder="例如：优先关注政策动向和突发事件；区分已证实消息与媒体援引的传闻。" /><small>补充关注范围、分类和措辞要求。固定 JSON 协议与翻译要求仍会附在请求中。</small></label>
     <details className={styles.details}><summary>查看完整基础提示词与 JSON 协议</summary><pre>{initial.protocolPrompt}</pre></details>
     <p className={styles.hint}>RSS 和启用的 Telegram 新闻都使用此配置。模型只接收标题和有限摘要；更换模型或提示词不会自动重翻已完成的内容。</p>
-    <details className={styles.ruleGuide}><summary>AI 会做什么，怎样决定展示？</summary><ul><li>判断是否与中国大陆、香港、台湾及相关政策、企业、社会事件有实质关系。</li><li>归入政策、经济、外交、科技、安全、社会主题，可同时属于多个主题。</li><li>区分突发快讯、新闻报道、分析、评论、专题、体育和娱乐。主快讯展示涉华的突发快讯与新闻报道。</li><li>识别语言，将非简体中文的标题和所提供摘要一次翻译为简体中文；保留原文里的消息来源、传闻和不确定措辞。</li><li>AI 无法确定是否涉华时使用关键词兜底；关闭 AI、缺少密钥、额度用尽或调用失败时也使用规则。排除规则仍优先执行。</li><li>不会打开原文链接、读取全文或核实新闻真假。下方可以用样例测试实际结果。</li></ul></details>
+    <details className={styles.ruleGuide}><summary>AI 会做什么，怎样决定展示？</summary><ul><li>判断是否与中国大陆、香港、台湾及相关政策、企业、社会事件有实质关系。</li><li>归入政策、经济、外交、科技、安全、社会主题，可同时属于多个主题。</li><li>区分突发快讯、新闻报道、分析、评论、专题、体育和娱乐。精选资讯展示涉华的突发快讯与新闻报道。</li><li>识别语言，将非简体中文的标题和所提供摘要一次翻译为简体中文；保留原文里的消息来源、传闻和不确定措辞。</li><li>AI 无法确定是否涉华时使用关键词兜底；关闭 AI、缺少密钥、额度用尽或调用失败时也使用规则。排除规则仍优先执行。</li><li>不会打开原文链接、读取全文或核实新闻真假。下方可以用样例测试实际结果。</li></ul></details>
     <div className={styles.actions}><button className={styles.primary} disabled={busy} type="submit">{busy ? '保存中…' : '保存 AI 配置'}</button><span>保存不会启动历史积压或重分析有效缓存。</span></div>
   </form>;
 }

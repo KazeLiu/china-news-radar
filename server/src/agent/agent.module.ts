@@ -3,9 +3,10 @@ import { AgentController } from './agent.controller';
 import { AgentService } from './agent.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { DigestModule } from '../digest/digest.module';
+import { CuratedModule } from '../curated/curated.module';
 
 @Module({
-  imports: [PrismaModule, DigestModule],
+  imports: [PrismaModule, DigestModule, CuratedModule],
   controllers: [AgentController],
   providers: [AgentService],
 })

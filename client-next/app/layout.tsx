@@ -4,8 +4,9 @@ import { ThemeProvider } from '@/providers/ThemeProvider';
 import { AppLayout } from '@/components/layout/AppLayout';
 
 export const metadata: Metadata = {
-  title: 'China Radar · 海外涉华快讯',
-  description: '从海外媒体的公开 RSS 追踪中国相关报道，保留原始出处与发现时间。',
+  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL || 'https://china-news.951211.xyz'),
+  title: 'China Radar · 海外涉华资讯',
+  description: '追踪海外涉华报道，提供精选、热点、日报与关注档案，保留原始出处与时间。',
   robots: { index: false, follow: false },
   icons: { icon: '/radar-icon.svg' },
 };

@@ -13,7 +13,7 @@ const getRssFeeds = (baseUrl: string) => [
   {
     label: '精选资讯 RSS',
     url: `${baseUrl}/api/agent/rss/curated.xml`,
-    desc: '经 AI 五维评分筛选的高质量内容，每条都值得读',
+    desc: '通过内容与展示规则筛选的涉华报道，质量评分只用于排序',
   },
   {
     label: '全部资讯 RSS',
@@ -28,7 +28,7 @@ const getRssFeeds = (baseUrl: string) => [
 ];
 
 const API_DOCS = [
-  { method: 'GET', path: '/api/agent/curated', desc: '获取精选资讯 JSON 列表', params: 'limit, offset' },
+  { method: 'GET', path: '/api/agent/curated', desc: '获取精选资讯 JSON 列表，与精选页使用同一查询', params: 'limit, offset, period, source, category, region, search' },
   { method: 'GET', path: '/api/agent/digest',  desc: '获取指定日期的 AI 日报',  params: 'date (YYYY-MM-DD)' },
   { method: 'GET', path: '/api/agent/search',  desc: '按关键词搜索资讯',         params: 'q, limit' },
   { method: 'GET', path: '/api/agent/stats',   desc: '系统统计数据',             params: '—' },
@@ -47,7 +47,7 @@ const SKILL_CAPABILITIES = [
   {
     icon: Newspaper,
     title: '精选资讯',
-    desc: '获取经质量评分精选的 涉华资讯，按重要度排序',
+    desc: '获取全部通过筛选的涉华报道，按质量分排序，包含未评分旧记录',
     example: '看看最新的精选 涉华资讯',
     accent: 'text-emerald-400',
     bg: 'bg-emerald-500/10',

@@ -6,30 +6,25 @@
 import { safeJsonLd } from '../../lib/structured-data';
 
 // Static schemas live at module scope so they are never rebuilt on re-render.
-const organizationSchema = {
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://china-news.951211.xyz';
+const projectSchema = {
   '@context': 'https://schema.org',
-  '@type': 'Organization',
-  name: 'AI Hot Radar',
-  alternateName: 'AI 热点雷达',
-  url: 'https://aihotradar.com',
-  logo: 'https://aihotradar.com/radar.svg',
-  description: '实时聚合 AI 资讯，AI 评分精选，自动生成日报',
-  foundingDate: '2026',
+  '@type': 'SoftwareApplication',
+  name: 'China Radar',
+  url: siteUrl,
+  applicationCategory: 'NewsApplication',
+  description: '聚合海外涉华报道，提供精选、热点、日报与关注档案',
   sameAs: [
-    'https://github.com/zenitlab/ai-hot-radar',
+    'https://github.com/KazeLiu/china-news-radar',
   ],
-  contactPoint: {
-    '@type': 'ContactPoint',
-    email: 'gundam_zzc@126.com',
-    contactType: 'Customer Service',
-  },
+  author: { '@type': 'Person', name: '蓝芷怡', url: 'https://github.com/KazeLiu', email: 'kaze.liu@qq.com' },
 };
 
-export function OrganizationSchema() {
+export function ProjectSchema() {
   return (
     <script
       type="application/ld+json"
-      dangerouslySetInnerHTML={{ __html: safeJsonLd(organizationSchema) }}
+      dangerouslySetInnerHTML={{ __html: safeJsonLd(projectSchema) }}
     />
   );
 }
@@ -37,18 +32,9 @@ export function OrganizationSchema() {
 const webSiteSchema = {
   '@context': 'https://schema.org',
   '@type': 'WebSite',
-  name: 'AI Hot Radar',
-  alternateName: 'AI 热点雷达',
-  url: 'https://aihotradar.com',
-  description: '实时聚合 AI 资讯，AI 评分精选，自动生成日报',
-  potentialAction: {
-    '@type': 'SearchAction',
-    target: {
-      '@type': 'EntryPoint',
-      urlTemplate: 'https://aihotradar.com/keywords?q={search_term_string}',
-    },
-    'query-input': 'required name=search_term_string',
-  },
+  name: 'China Radar',
+  url: siteUrl,
+  description: '聚合海外涉华报道，提供精选、热点、日报与关注档案',
 };
 
 export function WebSiteSchema() {

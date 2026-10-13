@@ -2,7 +2,7 @@ import { MetadataRoute } from 'next';
 
 import { fetchRecentDigestsSSR } from '@/lib/server-api';
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://aihotradar.com';
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://china-news.951211.xyz';
 
 /**
  * Generated per request so newly published digests appear without a rebuild —

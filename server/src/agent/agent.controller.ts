@@ -3,6 +3,7 @@ import { AgentService } from './agent.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { contentScope, presentHotspot } from '../news/radar-content';
 import { DigestService } from '../digest/digest.service';
+import { CuratedPeriod } from '../curated/curated.service';
 
 @Controller()
 export class AgentController {
@@ -18,8 +19,13 @@ export class AgentController {
   getCurated(
     @Query('limit') limit = '20',
     @Query('offset') offset = '0',
+    @Query('period') period: CuratedPeriod = 'today',
+    @Query('source') source?: string,
+    @Query('category') category?: string,
+    @Query('region') region?: string,
+    @Query('search') search?: string,
   ) {
-    return this.agentService.getCurated(Number(limit), Number(offset));
+    return this.agentService.getCurated(Number(limit), Number(offset), { period, source, category, region, search });
   }
 
   @Get('api/agent/search')
@@ -46,7 +52,7 @@ export class AgentController {
     const items = await this.agentService.getCurated(50, 0);
     const xml = this.agentService.buildRssXml(
       'China Radar · 精选资讯',
-      '经过 AI 质量评分精选的海外涉华资讯',
+      '全部通过涉华与展示规则筛选的报道，质量评分仅用于排序',
       items,
     );
     res.type('application/xml').send(xml);
@@ -101,8 +107,8 @@ export class AgentController {
         {
           path: '/api/agent/curated',
           method: 'GET',
-          description: '获取精选涉华资讯（经质量评分筛选）',
-          params: { limit: '条数（默认20）', offset: '偏移（默认0）' },
+          description: '获取通过内容筛选的涉华资讯，质量评分只用于排序',
+          params: { limit: '条数（默认20，最多100）', offset: '偏移（默认0）', period: 'today 或 week（默认today）', source: '来源 ID（可选）', category: '主题（可选）', region: '地区（可选）', search: '标题与摘要搜索（可选）' },
         },
         {
           path: '/api/agent/digest',

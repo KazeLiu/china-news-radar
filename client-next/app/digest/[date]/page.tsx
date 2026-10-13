@@ -42,16 +42,16 @@ export async function generateMetadata({
 
   // Per-day title and description give each date a distinct snippet in search
   // and AI results, instead of every day sharing the generic /digest metadata.
-  const title = `${date} AI 日报`;
+  const title = `${date} 涉华日报`;
   const description = summary
     ? summary.slice(0, 160)
-    : `${date} 的 AI 资讯日报，涵盖国内外动态、模型情报、产品发布、社区讨论与论文研究。`;
+    : `${date} 的海外涉华日报，涵盖政策、经济、外交、科技、安全与社会报道。`;
 
   return {
     title,
     description,
-    openGraph: { title: `${title} | AI Hot Radar`, description, type: 'article' },
-    twitter: { title: `${title} | AI Hot Radar`, description },
+    openGraph: { title: `${title} | China Radar`, description, type: 'article' },
+    twitter: { title: `${title} | China Radar`, description },
     alternates: { canonical: `/digest/${date}` },
   };
 }
@@ -84,9 +84,11 @@ export default async function DigestDatePage({
   // Article schema marks this as a dated, attributable report rather than a
   // generic page — the shape AI search engines look for when deciding what to
   // cite. Only emitted when the digest exists.
-  const sections = record?.data
-    ? SECTION_LABELS.filter(([key]) => {
-        const value = record.data[key];
+  const data = record?.data;
+  const sections = data?.sections
+    ? data.sections.filter(section => section.items.length > 0).map(section => section.title)
+    : data ? SECTION_LABELS.filter(([key]) => {
+        const value = data[key];
         return Array.isArray(value) ? value.length > 0 : Boolean(value);
       }).map(([, label]) => label)
     : [];

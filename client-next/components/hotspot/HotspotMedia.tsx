@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Play, X } from 'lucide-react';
 import { cn } from '../../lib/utils';
@@ -83,6 +83,7 @@ function MediaTile({
   return (
     <button
       type="button"
+      aria-label={isVideo ? '播放报道视频' : '放大报道配图'}
       onClick={isVideo ? onPlayVideo : onOpenImage}
       className={cn(
         'relative overflow-hidden',
@@ -95,9 +96,10 @@ function MediaTile({
     >
       <Image
         src={src}
+        unoptimized
         fill
         loading="lazy"
-        alt=""
+        alt={isVideo ? '报道视频预览' : '报道配图'}
         sizes="(max-width: 768px) 50vw, 25vw"
         className="object-contain transition-transform group-hover/media:scale-[1.02]"
         onError={(e) => {
@@ -122,10 +124,12 @@ function MediaTile({
 }
 
 function VideoModal({ item, onClose }: { item: MediaItem; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-      onClick={onClose}
+    <dialog ref={dialog} aria-label="报道视频" onCancel={onClose}
+      className="fixed inset-0 z-50 w-full h-full max-w-none max-h-none m-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={event => { if (event.target === event.currentTarget) onClose(); }}
     >
       <button
         type="button"
@@ -145,14 +149,16 @@ function VideoModal({ item, onClose }: { item: MediaItem; onClose: () => void })
         className="max-w-full max-h-[85vh] rounded-lg shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       />
-    </div>
+    </dialog>
   );
 }
 
 function ImageLightbox({ item, onClose }: { item: MediaItem; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out"
+    <dialog ref={dialog} aria-label="报道配图" onCancel={onClose}
+      className="fixed inset-0 z-50 w-full h-full max-w-none max-h-none m-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out"
       onClick={onClose}
     >
       <button
@@ -165,13 +171,14 @@ function ImageLightbox({ item, onClose }: { item: MediaItem; onClose: () => void
       </button>
       <Image
         src={item.url}
-        alt=""
+        alt="报道配图"
+        unoptimized
         width={0}
         height={0}
         sizes="100vw"
         className="max-w-full max-h-[90vh] w-auto h-auto rounded-lg shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       />
-    </div>
+    </dialog>
   );
 }

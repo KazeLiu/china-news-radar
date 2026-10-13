@@ -27,8 +27,8 @@ export default async function HotspotPage() {
       description: item.summary,
     })),
     {
-      name: 'AI 热点雷达',
-      description: '实时聚合国内外 AI 资讯，含跨源热度与关键词命中标记',
+      name: 'China Radar · 热点雷达',
+      description: '海外涉华报道与关键词相关动态',
     },
   );
 

@@ -1,2 +1,2 @@
-import { NewsReader } from '@/components/news/NewsReader';
-export default function Page() { return <NewsReader initialSaved />; }
+import { redirect } from 'next/navigation';
+export default function Page() { redirect('/keywords'); }

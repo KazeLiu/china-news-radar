@@ -1,16 +1,17 @@
-# AI Hot Radar - Robots.txt
-# https://aihotradar.com/robots.txt
+# China Radar - Robots.txt
+# https://china-news.951211.xyz/robots.txt
 
 User-agent: *
 Allow: /
 Allow: /sitemap.xml
 
-# Disallow admin/internal paths (if any in future)
+# 管理与内部入口
+Disallow: /admin
 Disallow: /api/
 Disallow: /_next/static/
 
 # Sitemap
-Sitemap: https://aihotradar.com/sitemap.xml
+Sitemap: https://china-news.951211.xyz/sitemap.xml
 
 # 内容地图与 AI 使用条款（非 robots.txt 标准字段，供支持的抓取方参考）
 # llms.txt: 站点结构与接口清单

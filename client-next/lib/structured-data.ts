@@ -3,7 +3,7 @@
  * 为 AI 搜索引擎（Perplexity、ChatGPT Search、Claude）提供明确的语义标记
  */
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://aihotradar.com';
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://china-news.951211.xyz';
 
 /**
  * HTML-safe JSON serialization for `<script type="application/ld+json">`.
@@ -30,22 +30,15 @@ export function generateDigestSchema(date: string, sections: string[]) {
   return {
     '@context': 'https://schema.org',
     '@type': 'Article',
-    headline: `AI 日报 ${date}`,
+    headline: `China Radar · 涉华日报 ${date}`,
     datePublished: `${date}T08:00:00+08:00`,
     dateModified: `${date}T08:00:00+08:00`,
-    author: {
-      '@type': 'Organization',
-      name: 'AI Hot Radar',
-    },
     publisher: {
-      '@type': 'Organization',
-      name: 'AI Hot Radar',
-      logo: {
-        '@type': 'ImageObject',
-        url: `${SITE_URL}/og-image.png`,
-      },
+      '@type': 'Person',
+      name: '蓝芷怡',
+      url: 'https://github.com/KazeLiu',
     },
-    description: `每日 AI 行业动态精选：${sections.slice(0, 3).join('、')}等 ${sections.length} 个板块`,
+    description: `每日海外涉华报道：${sections.slice(0, 3).join('、')}等 ${sections.length} 个主题`,
     articleSection: sections,
     inLanguage: 'zh-CN',
     url: `${SITE_URL}/digest/${date}`,
@@ -67,8 +60,8 @@ export function generateHotspotListSchema(
     description?: string;
   }>,
   meta: { name: string; description: string } = {
-    name: 'AI 热点资讯',
-    description: 'AI 评分筛选后的高质量 AI 行业资讯',
+    name: '海外涉华资讯',
+    description: '通过内容与展示规则筛选的海外涉华报道',
   },
 ) {
   return {
@@ -83,7 +76,7 @@ export function generateHotspotListSchema(
       item: {
         '@type': 'Article',
         headline: item.title,
-        url: item.url,
+        url: new URL(item.url, SITE_URL).href,
         datePublished: item.publishedAt,
         description: item.description,
       },

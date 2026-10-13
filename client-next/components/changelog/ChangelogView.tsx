@@ -11,9 +11,17 @@ interface ChangelogEntry {
   version?: string;
   tag?: "feature" | "fix" | "tweak";
   items: string[];
+  upstream?: boolean;
 }
 
-const CHANGELOG: ChangelogEntry[] = [
+const PROJECT_CHANGELOG: ChangelogEntry[] = [{ date: '2026-10-13', tag: 'feature', items: [
+  '后台接入单管理员登录、统一 AI 持久队列、新闻批处理与共享额度，历史积压由管理员手动启动。',
+  '来源统一管理 RSS、网页、API 与 Telegram；网页解析候选先预览再应用，浏览器需要独立安装。',
+  '新增手动草稿、主动分析、展示文案、发布与全站人工隐藏，保留原文和历史收藏数据。',
+  '新增北京时间每日统计与操作时间线，实际 AI 请求次数与处理条数分开统计，日志保留 30 天。',
+  '首页进入精选，全部通过筛选的报道可见；移除快讯和收藏入口，统一 Agent/RSS 范围，更新项目与作者信息。',
+] }];
+const UPSTREAM_CHANGELOG: ChangelogEntry[] = [
   {
     date: "2026-08-07",
     version: "v0.9.1",
@@ -385,7 +393,7 @@ const CHANGELOG: ChangelogEntry[] = [
       "新增 Docker 一键部署：docker-compose.yml + 前后端 Dockerfile + nginx.conf + 自带 SQLite 备份的 update.sh 脚本",
       "新增生产环境模板 server/.env.production.example",
       "新增 docs/DEPLOY.md 部署文档（含反向代理 / Certbot / 故障排查）",
-      "在线域名 aihotradar.com 写入 README、关于页、文章",
+      "上游部署域名写入 README、关于页、文章",
     ],
   },
   {
@@ -659,7 +667,7 @@ export function ChangelogView() {
         </h1>
       </div>
       <p className="text-xs text-[var(--text-muted)] mb-6">
-        AI Hot Radar 的产品迭代记录，按时间顺序倒排
+        China Radar 更新与 ai-hot-radar 上游历史记录，按日期倒序
       </p>
 
       <div className="relative">
@@ -667,7 +675,7 @@ export function ChangelogView() {
         <div className="absolute left-2 top-2 bottom-2 w-px bg-[var(--card-border)]" />
 
         <ul className="space-y-6">
-          {CHANGELOG.map((entry) => (
+          {[...PROJECT_CHANGELOG, ...UPSTREAM_CHANGELOG.map(entry => ({ ...entry, upstream: true }))].map((entry) => (
             <li key={`${entry.date}-${entry.version || ''}-${entry.items[0]}`} className="relative pl-8">
               {/* dot */}
               <span className="absolute left-[3px] top-2 w-2.5 h-2.5 rounded-full bg-[var(--accent-blue)] dark:bg-blue-500 ring-4 ring-[var(--bg-base)]" />
@@ -677,6 +685,7 @@ export function ChangelogView() {
                   <span className="text-sm font-semibold text-[var(--text-primary)]">
                     {entry.date}
                   </span>
+                  {entry.upstream && <span className="text-xs text-[var(--text-muted)]">上游 ai-hot-radar</span>}
                   {entry.version && (
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-[var(--input-bg)] text-[var(--text-muted)] border border-[var(--input-border)]">
                       {entry.version}

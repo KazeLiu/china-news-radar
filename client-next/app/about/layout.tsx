@@ -2,14 +2,14 @@ import { Metadata } from 'next';
 
 export const metadata: Metadata = {
   title: '关于',
-  description: 'AI Hot Radar 是开源的 AI 资讯聚合工具，每 10 分钟从 20+ 信息源抓取最新资讯，通过两阶段 AI 评分筛掉噪音，沉淀到精选、热点雷达、AI 日报三个视图。',
+  description: 'China Radar 由蓝芷怡维护，基于 ai-hot-radar 聚合海外涉华报道，提供精选、热点、日报与关注档案。',
   openGraph: {
-    title: '关于 AI Hot Radar',
-    description: '开源的 AI 资讯聚合工具，AI 评分精选，自动生成日报',
+    title: '关于 China Radar',
+    description: '海外涉华报道聚合 · 作者蓝芷怡 · 基于 ai-hot-radar',
   },
   twitter: {
-    title: '关于 AI Hot Radar',
-    description: '开源的 AI 资讯聚合工具，AI 评分精选，自动生成日报',
+    title: '关于 China Radar',
+    description: '海外涉华报道聚合 · 作者蓝芷怡 · 基于 ai-hot-radar',
   },
   alternates: {
     canonical: '/about',

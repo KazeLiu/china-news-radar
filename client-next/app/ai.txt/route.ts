@@ -10,7 +10,7 @@ export async function GET(request: Request) {
 # About
 Site-Name: China Radar
 Site-URL: ${siteUrl}
-Description: 聚合海外涉华报道，提供快讯、热点、精选、日报与关注档案。
+Description: 聚合海外涉华报道，提供精选、热点、日报与关注档案。
 Language: zh-CN
 Purpose: news-aggregation, news-curation
 Topics: china, policy, economy, diplomacy, technology, security, society
@@ -35,9 +35,10 @@ Citation-Format: cite the identified publisher and original article URL
 Attribution-Required: yes
 
 # Additional Context
-Data-Sources: configured overseas media RSS, Google News indexes, and enabled Telegram news channels
-AI-Scoring: classification, translation and quality scoring in one article request; reading uses saved results
+Data-Sources: configured overseas RSS, Google News indexes, public web pages, APIs, enabled Telegram channels, and administrator-published reports
+AI-Scoring: batched classification, translation and quality scoring; reading uses saved results; scores rank reports without an admission threshold
 Deduplication: unique URLs; identical titles are folded for display
+Visibility: drafts and hidden reports are excluded; hidden images are not returned
 `;
 
   return new NextResponse(content, {

@@ -114,12 +114,13 @@ export const curatedApi = {
     period: 'today' | 'week' = 'today',
     limit = 20,
     offset = 0,
-    opts: { category?: string; region?: string; search?: string } = {},
+    opts: { category?: string; region?: string; search?: string; source?: string } = {},
   ) => {
     const params = new URLSearchParams({ period, limit: String(limit), offset: String(offset) });
     if (opts.category) params.set('category', opts.category);
     if (opts.region) params.set('region', opts.region);
     if (opts.search) params.set('search', opts.search);
+    if (opts.source) params.set('source', opts.source);
     return request<CuratedResponse>(`/curated?${params}`);
   },
 };

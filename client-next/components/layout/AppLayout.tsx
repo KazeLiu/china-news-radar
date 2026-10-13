@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { m, AnimatePresence, LazyMotion, domAnimation, MotionConfig } from 'framer-motion';
-import { X, Star, Radio, Bookmark, CalendarDays, Activity } from 'lucide-react';
+import { X, Star, Radio, Bookmark, CalendarDays } from 'lucide-react';
 import { Sidebar } from './Sidebar';
 import { TopBar } from './TopBar';
 import { useTheme } from '@/providers/ThemeProvider';
@@ -13,7 +13,6 @@ interface AppLayoutProps {
 }
 
 const MOBILE_NAV = [
-  { path: '/news', label: '快讯', Icon: Activity },
   { path: '/curated',  label: '精选', Icon: Star },
   { path: '/hotspot',  label: '热点', Icon: Radio },
   { path: '/keywords', label: '关注', Icon: Bookmark },
