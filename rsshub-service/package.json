@@ -1,0 +1,9 @@
+{
+  "name": "radar-rsshub",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node main.mjs", "test": "node --test *.test.mjs" },
+  "engines": { "node": "^22.22.2 || ^24.15.0" },
+  "dependencies": { "rsshub": "1.0.0-master.5d857e3" },
+  "devDependencies": { "node": "22.22.2" }
+}

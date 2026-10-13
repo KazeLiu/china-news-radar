@@ -23,6 +23,14 @@ build/
 *.db-journal
 *.sqlite
 *.sqlite3
+*.db-wal
+*.db-shm
+*.session
+*.session-journal
+telegram-collector/state/
+backups/
+__pycache__/
+*.pyc
 
 # Prisma generated client
 **/generated/prisma/

@@ -25,6 +25,8 @@ export function AppLayout({ unreadCount, children }: AppLayoutProps) {
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
 
+  if (pathname === '/' || pathname === '/admin') return <>{children}</>;
+
   return (
     <LazyMotion features={domAnimation} strict>
     {/* MotionConfig automatically disables all Framer Motion animations when

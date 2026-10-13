@@ -1,3 +1,19 @@
+# China Radar · 海外涉华快讯
+
+当前本地改造版基于 [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar)，默认启动独立新闻模块。免费 RSS 与可选 Telegram 新闻由管理员统一配置 AI，一次返回涉华关系、主题、类型及非简体中文译文；结果持久缓存，阅读不调用模型，无密钥/失败/超额时规则兜底。Telegram 接入默认关闭。详见 [AI 处理说明](docs/AI-ANALYSIS.md)。
+
+来源支持配置多个 RSS 地址，按顺序尝试备用，可在后台测试获取或删除来源。RSSHub 作为完整 RSS 地址填写；彭博/CNBC/卫报/BBC 使用媒体公开 RSS，路透/美联/日经亚洲默认使用 Google 索引。详见 [RSSHub 接入与实测](docs/RSSHUB.md)。
+
+部署目标为 Ubuntu ARM64 + Docker，预定域名 `china-news.951211.xyz`。请先阅读 [部署与使用说明](docs/DEPLOY-RADAR.md)，使用 `compose.arm64.yml` 及 `Dockerfile.radar`，不要照下方原项目配置启动旧采集任务。
+
+本地源码使用 Node 22、pnpm 9.12.1、Next.js 16。无需 GitHub 登录即可开发此公开仓库。
+
+管理入口为 `/admin`（当前本机：http://localhost:3410/admin），支持持久化编辑来源、排除规则与统一 AI 参数。规则可先预览，保存后重筛旧记录并保留收藏与时间。详见 [后台使用说明](docs/ADMIN.md)。
+
+---
+
+以下保留上游 README，描述的是原 AI 行业雷达和 `RADAR_MODE=legacy` 模式，供参考。
+
 # 🛰️ AI Hot Radar
 
 <p align="center">

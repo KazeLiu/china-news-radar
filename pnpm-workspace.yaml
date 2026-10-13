@@ -2,6 +2,7 @@
 packages:
   - 'server'
   - 'client-next'
+  - 'rsshub-service'
 
 # Dependencies allowed to run install/postinstall build scripts
 allowBuilds:

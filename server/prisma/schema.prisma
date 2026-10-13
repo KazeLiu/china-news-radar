@@ -124,3 +124,77 @@ model DailyDigest {
   data      String   // JSON string with categorized digest
   createdAt DateTime @default(now())
 }
+
+model NewsSource {
+  id             String    @id
+  enabled        Boolean   @default(true)
+  lastCheckedAt  DateTime?
+  lastSuccessAt  DateTime?
+  nextCheckAt    DateTime?
+  error          String?
+  etag           String?
+  lastModified   String?
+  lastItemCount  Int       @default(0)
+  preferRsshub   Boolean   @default(false)
+  activeKind     String?
+  activeFeedUrl  String?
+  feedFailures   String    @default("{}")
+  rsshubError    String?
+  rsshubRetryAt  DateTime?
+  items          NewsItem[]
+}
+
+model NewsItem {
+  id                 String     @id @default(uuid())
+  sourceId           String
+  source             NewsSource @relation(fields: [sourceId], references: [id])
+  title              String
+  titleZh            String?
+  summary            String
+  summaryZh          String?
+  url                String
+  originalPublisher  String?
+  originalUrl        String?
+  author             String?
+  topic              String
+  eventKey           String
+  contentHash        String
+  publishedAt        DateTime?
+  firstSeenAt        DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  saved              Boolean    @default(false)
+  visible            Boolean    @default(true)
+  aiStatus           String     @default("disabled")
+  analysisKey        String?
+  decisionBy         String     @default("rules")
+  aiRelation         String?
+  aiTopics           String     @default("[]")
+  aiType             String?
+  aiLanguage         String?
+  aiReason           String?
+  aiInputTruncated   Boolean    @default(false)
+  analyzedAt         DateTime?
+
+  @@unique([sourceId, url])
+  @@index([publishedAt, firstSeenAt])
+  @@index([eventKey])
+  @@index([topic, sourceId])
+  @@index([analysisKey])
+}
+
+model NewsAnalysis {
+  key         String   @id
+  inputJson   String
+  resultJson  String?
+  status      String   @default("pending")
+  attempts    Int      @default(0)
+  retryAt     DateTime?
+  leaseUntil  DateTime?
+  model       String?
+  error       String?
+  analyzedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, retryAt])
+}

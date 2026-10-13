@@ -1,0 +1,7 @@
+{
+  "reuters": "/reuters/world/china?limit=20",
+  "ap": "/apnews/topics/china?limit=20",
+  "bloomberg": "/bloomberg/economics?limit=20",
+  "cnbc": "/cnbc/rss/100003114?limit=20",
+  "nikkei": "/nikkei/asia?limit=20"
+}
