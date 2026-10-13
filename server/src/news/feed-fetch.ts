@@ -3,6 +3,7 @@ import { NewsSourceConfig } from './sources';
 import { requestFeed } from './collector';
 import { feedSource, feedUrlsFor } from './transports';
 import { retryAfterMs } from './rules';
+import { SourceFetchError } from './public-network';
 
 export interface FeedAttempt { url: string; status: number | null; error: string | null; skipped?: boolean }
 export type FeedFailures = Record<string, { retryAt: string; error: string; status: number | null }>;
@@ -39,9 +40,9 @@ export async function fetchSourceFeed<T>(source: NewsSourceConfig, parse: (xml: 
       delete failures[url];
       return { selected, response, parsed, attempts, failures };
     } catch (error) {
-      const status = axios.isAxiosError(error) ? error.response?.status ?? null : null;
-      const message = status ? `HTTP ${status}` : stage === 'parse' ? 'RSS 格式无法解析' : '连接失败或请求超时';
-      const delay = status === 429 && axios.isAxiosError(error) ? retryAfterMs(error.response?.headers['retry-after']) : 300_000;
+      const status = error instanceof SourceFetchError ? error.status ?? null : axios.isAxiosError(error) ? error.response?.status ?? null : null;
+      const message = error instanceof SourceFetchError ? error.message : status ? `HTTP ${status}` : stage === 'parse' ? 'RSS 格式无法解析' : '连接失败或请求超时';
+      const delay = status === 429 ? retryAfterMs(error instanceof SourceFetchError ? error.retryAfter : axios.isAxiosError(error) ? error.response?.headers['retry-after'] : undefined) : 300_000;
       failures[url] = { retryAt: new Date(Date.now() + delay).toISOString(), status, error: message };
       attempts.push({ url, status, error: message });
     }

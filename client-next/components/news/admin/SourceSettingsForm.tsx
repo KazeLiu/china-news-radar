@@ -5,6 +5,7 @@ import { NewsSourceRow } from '../NewsSourceRow';
 import { adminApi, type AiTestResult, type ApiSourceSettings, type WebSourceSettings, type SaveSettings, type SourceSettings, type SourceTestResult } from './admin-api';
 import { SourceTestPanel } from './SourceTestPanel';
 import { AiTestPanel } from './AiTestPanel';
+import { ParserAssistantPanel } from './ParserAssistantPanel';
 import styles from './admin.module.css';
 
 export const newApi = (): ApiSourceSettings => ({ method: 'GET', body: '', auth: { type: 'none', header: 'Authorization', value: '' }, mapping: { items: 'articles', title: 'title', summary: 'description', url: 'url', publishedAt: 'publishedAt', author: 'author', images: 'urlToImage', body: 'content' } });
@@ -91,7 +92,9 @@ function SourceEditor({ source, token, busy, onSave, onSaved, aiKeyConfigured, o
     <p className={styles.hint}>预览不要求保存，不入库、不通知、不调用 AI。Telegram 只检查接收配置，不登录账号或读取私聊。</p>
     {confirmDelete && <div className={styles.deleteConfirm} role="alert"><p>删除来源会停止采集，保留新闻、收藏、规则和分析缓存。</p><button type="button" className={styles.danger} disabled={pending} onClick={async () => { if (await onSave(`admin/sources/${encodeURIComponent(source.id)}`, {}, 'DELETE')) onSaved(''); }}>确认删除</button><button type="button" onClick={() => setConfirmDelete(false)}>取消</button></div>}
     {error && <p className={styles.error} role="alert">{error}</p>}{result && <SourceTestPanel result={result} onAnalyze={setAiSample} />}
-  </section>{aiSample && <AiTestPanel key={JSON.stringify(aiSample)} sample={aiSample} token="" busy={pending} keyConfigured={aiKeyConfigured} onUsage={onAiUsage} />}</div>;
+  </section>{draft.kind === 'web' && <ParserAssistantPanel getSource={body} source={source} disabled={pending} keyConfigured={aiKeyConfigured} onSave={onSave} onApplied={saved => {
+    const id = saved.savedSourceId || draft.id; const next = saved.sources.find(s => s.id === id); if (next) setDraft(old => ({ ...old, web: next.web, target: next.target })); onSaved(id);
+  }} />}{aiSample && <AiTestPanel key={JSON.stringify(aiSample)} sample={aiSample} token="" busy={pending} keyConfigured={aiKeyConfigured} onUsage={onAiUsage} />}</div>;
 }
 export function SourceSettingsForm({ sources, token, busy, onSave, aiKeyConfigured, onAiUsage }: { sources: SourceSettings[]; token: string; busy: boolean; onSave: SaveSettings; aiKeyConfigured: boolean; onAiUsage: (usage: AiTestResult['usage']) => void }) {
   const [selected, setSelected] = useState(sources[0]?.id || ''); const source = sources.find(s => s.id === selected) || emptySource();

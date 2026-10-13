@@ -34,6 +34,9 @@ export class NewsController {
   @Get('admin/sources/:id/private') @Header('Cache-Control', 'no-store') privateSource(@Param('id') id: string, @Req() req: AdminRequest) { requireAdmin(req); return this.news.privateSource(id); }
   @Delete('admin/sources/:id') deleteSource(@Param('id') id: string, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.deleteSource(id); }
   @Post('admin/sources/test') testSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testSource(body); }
+  @Post('admin/sources/rules/assist') assistRules(@Body() body: unknown) { return this.news.generateParserRules(body); }
+  @Post('admin/sources/rules/apply') applyRules(@Body() body: Parameters<NewsService['applyParserRules']>[0]) { return this.news.applyParserRules(body); }
+  @Post('admin/sources/:id/rules/restore') restoreRules(@Param('id') id: string) { return this.news.restoreParserRules(id); }
   @Put('admin/rules') rules(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureRules(body); }
   @Post('admin/rules/preview') preview(@Body() body: Parameters<NewsService['previewRules']>[0], @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.previewRules(body); }
   @Post('telegram') ingest(@Headers('authorization') auth: string | undefined, @Body() body: Parameters<NewsService['ingest']>[0]) {

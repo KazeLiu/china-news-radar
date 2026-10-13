@@ -6,7 +6,7 @@ import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import { isLocalFeed } from './transports';
 
 export class SourceFetchError extends Error {
-  constructor(readonly code: string, message: string, readonly status?: number) { super(message); }
+  constructor(readonly code: string, message: string, readonly status?: number, readonly retryAfter?: string) { super(message); }
 }
 export function isPublicAddress(address: string) {
   if (isIP(address) === 4) {
@@ -31,7 +31,7 @@ export async function resolvePublicTarget(raw: string, allowRsshub = false) {
   return { url, address: addresses[0].address };
 }
 export interface PublicResponse { status: number; headers: http.IncomingHttpHeaders; body: Buffer; url: string }
-export async function requestPublic(raw: string, options: { method?: string; headers?: Record<string, string>; body?: string | Buffer; timeoutMs?: number; maxBytes?: number; allowRsshub?: boolean; signal?: AbortSignal } = {}, redirects = 0, initialOrigin?: string): Promise<PublicResponse> {
+export async function requestPublic(raw: string, options: { method?: string; headers?: Record<string, string>; body?: string | Buffer; timeoutMs?: number; maxBytes?: number; allowRsshub?: boolean; signal?: AbortSignal; followRedirects?: boolean; agent?: http.Agent } = {}, redirects = 0, initialOrigin?: string): Promise<PublicResponse> {
   const { url, address } = await resolvePublicTarget(raw, options.allowRsshub);
   const origin = initialOrigin || url.origin;
   const maxBytes = options.maxBytes ?? 3_000_000;
@@ -40,7 +40,7 @@ export async function requestPublic(raw: string, options: { method?: string; hea
     const transport = url.protocol === 'https:' ? https : http;
     // Resolve and validate once, then connect to that address to prevent DNS rebinding.
     const settings: https.RequestOptions = { protocol: url.protocol, hostname: address, servername: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search,
-      method: options.method || 'GET', signal: options.signal, headers: { ...headers, Host: url.host, 'Accept-Encoding': 'identity', 'User-Agent': 'ChinaRadar/1.0' } };
+      method: options.method || 'GET', signal: options.signal, agent: url.protocol === 'https:' ? options.agent : undefined, headers: { 'User-Agent': 'ChinaRadar/1.0', ...headers, Host: url.host, 'Accept-Encoding': 'identity' } };
     const request = transport.request(settings, response => {
       const chunks: Buffer[] = []; let length = 0;
       response.on('data', chunk => { length += chunk.length; if (length > maxBytes) request.destroy(new SourceFetchError('response-too-large', '来源响应超过大小上限')); else chunks.push(chunk); });
@@ -63,7 +63,7 @@ export async function requestPublic(raw: string, options: { method?: string; hea
     if (options.body) request.write(options.body);
     request.end();
   });
-  if ([301, 302, 303, 307, 308].includes(result.status) && result.headers.location) {
+  if (options.followRedirects !== false && [301, 302, 303, 307, 308].includes(result.status) && result.headers.location) {
     if (redirects >= 3) throw new SourceFetchError('redirect-limit', '来源重定向超过三次');
     const next = new URL(result.headers.location, url).href;
     if (new URL(next).origin !== origin && options.body) throw new SourceFetchError('redirect-origin', '跨域重定向不能转发 API 请求内容');

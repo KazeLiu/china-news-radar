@@ -6,6 +6,9 @@ services:
       dockerfile: server/Dockerfile.radar
     restart: unless-stopped
     init: true
+    shm_size: 256m
+    security_opt:
+      - seccomp=./chromium-seccomp.json
     environment:
       DATABASE_URL: file:/data/radar.db
       RADAR_MODE: news

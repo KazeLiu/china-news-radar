@@ -5,6 +5,7 @@ import OpenAI, { APIConnectionError, APIError } from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { ADMIN_CONFIG_KEY, AiConfig, defaultConfig, readAiUsage, restoreConfig } from './admin-config';
 import { AI_TIMEOUT_MS, InvalidAnalysisResponse, aiTestError } from './ai-errors';
+import { SourceFetchError } from './public-network';
 
 export async function reserveAiUsage(tx: Prisma.TransactionClient, limit: number, now = new Date()) {
   const key = `news-ai-usage-${now.toISOString().slice(0, 10)}`;
@@ -129,7 +130,7 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
     const task = this.current;
     if (!task) throw new Error('模型请求必须在持久任务中执行');
     const config = await this.config();
-    if ((!config.enabled && task.kind !== 'test') || !config.apiKey) throw new BadRequestException('AI 未启用或未配置密钥，请在后台保存配置');
+    if ((!config.enabled && !['test', 'parser'].includes(task.kind)) || !config.apiKey) throw new BadRequestException('AI 未启用或未配置密钥，请在后台保存配置');
     if (task.attempts >= task.maxAttempts) throw new BadRequestException('当前任务尝试次数已用尽');
     const client = createAiClient(config);
     const start = new Date();
@@ -202,10 +203,13 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
         await this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { status: 'done', resultJson: JSON.stringify(result ?? null), activeKey: null, owner: null, leaseUntil: null, finishedAt: new Date(), errorJson: null } });
       } catch (problem) {
         const protocolFailure = problem instanceof BadRequestException && !!this.lastRequest && ['digest', 'profile'].includes(job.kind);
-        const recoverable = protocolFailure || problem instanceof InvalidAnalysisResponse || problem instanceof APIConnectionError || (problem instanceof APIError && (problem.status === 429 || (problem.status || 0) >= 500));
+        const diagnostic = aiTestError(problem, config.apiKey);
+        const certificateFailure = 'networkCode' in diagnostic && /CERT|VERIFY|SELF_SIGNED|TLS/.test(diagnostic.networkCode || '');
+        const recoverable = protocolFailure || problem instanceof InvalidAnalysisResponse || (problem instanceof APIConnectionError && !certificateFailure) || (problem instanceof APIError && (problem.status === 429 || (problem.status || 0) >= 500));
         const retry = recoverable && job.attempts > 0 && job.attempts < job.maxAttempts;
-        const safe = problem instanceof BadRequestException || problem instanceof ConflictException
-          ? { code: 'task-rejected', message: typeof problem.getResponse() === 'string' ? problem.getResponse() : '任务未能完成，已有有效结果保留' }
+        const response = problem instanceof BadRequestException || problem instanceof ConflictException ? problem.getResponse() : null;
+        const safe = problem instanceof SourceFetchError ? { code: problem.code, message: problem.message, status: problem.status }
+          : response ? { code: 'task-rejected', message: typeof response === 'string' ? response : typeof (response as { message?: unknown }).message === 'string' ? (response as { message: string }).message : '任务未能完成，已有有效结果保留' }
           : aiTestError(problem, config.apiKey);
         await this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { status: retry ? 'queued' : 'failed', availableAt: new Date(Date.now() + (retry ? 30_000 * 2 ** (job.attempts - 1) : 0)), errorJson: JSON.stringify(safe), activeKey: retry ? job.activeKey : null, owner: null, leaseUntil: null, finishedAt: retry ? null : new Date() } });
       }

@@ -146,6 +146,7 @@ model NewsSource {
   feedFailures   String    @default("{}")
   rsshubError    String?
   rsshubRetryAt  DateTime?
+  lastParseJson String?
   items          NewsItem[]
 }
 

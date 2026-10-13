@@ -8,6 +8,7 @@ export interface Source {
   nextCheckAt: string | null; error: string | null; lastItemCount: number; pollSeconds: number;
   activeFeedUrl: string | null; feedWarning?: string;
   logo?: string;
+  parse?: Record<string, unknown>;
 }
 export function NewsSourceRow({ source: s, pending, onChange }: { source: Source; pending: boolean; onChange: (s: Source, change: { enabled: boolean }) => void }) {
   const state = !s.configured ? '待配置' : !s.enabled ? '已暂停' : s.error || (s.lastSuccessAt ? '正常' : '等待首次采集');

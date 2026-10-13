@@ -1,4 +1,3 @@
-import axios from 'axios';
 import Parser from 'rss-parser';
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { createHash } from 'node:crypto';
@@ -8,6 +7,7 @@ import { DEFAULT_EXCLUSIONS, FilterRule, matchingExclusions } from './content-fi
 import { isLocalFeed } from './transports';
 import { load } from 'cheerio';
 import { sourcePublishedAt } from './source-date';
+import { requestPublic, SourceFetchError } from './public-network';
 
 export interface CollectedItem {
   title: string; summary: string; url: string; originalPublisher: string | null;
@@ -59,11 +59,11 @@ export async function parseFeed(xml: string, source: NewsSourceConfig, now = new
 }
 export async function requestFeed(source: NewsSourceConfig, etag?: string | null, lastModified?: string | null) {
   const proxy = process.env.RSS_PROXY_URL || process.env.HTTPS_PROXY || process.env.https_proxy;
-  return axios.get<string>(source.feedUrl!, {
-    ...(isLocalFeed(source.feedUrl!) ? { proxy: false } : proxy ? { proxy: false, httpsAgent: new HttpsProxyAgent(proxy) } : {}),
-    responseType: 'text', timeout: 15_000, maxContentLength: 3_000_000, maxRedirects: 3,
-    validateStatus: status => status === 200 || status === 304,
+  const response = await requestPublic(source.feedUrl!, {
+    ...(proxy && !isLocalFeed(source.feedUrl!) ? { agent: new HttpsProxyAgent(proxy) } : {}), allowRsshub: true,
     headers: { 'User-Agent': 'ChinaNewsRadar/1.0 (personal RSS reader)', Accept: 'application/rss+xml, application/xml, text/xml',
       ...(etag ? { 'If-None-Match': etag } : {}), ...(lastModified ? { 'If-Modified-Since': lastModified } : {}) },
   });
+  if (![200, 304].includes(response.status)) throw new SourceFetchError('http-error', `RSS 返回 HTTP ${response.status}`, response.status, response.headers['retry-after']);
+  return { status: response.status, data: response.body.toString('utf8'), headers: Object.fromEntries(Object.entries(response.headers).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) };
 }
