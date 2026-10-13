@@ -6,12 +6,7 @@
 
 type Listener = () => void;
 
-interface JobState {
-  promise: Promise<void>;
-  date: string;
-}
-
-const jobs = new Map<string, JobState>();
+const jobs = new Map<string, Promise<void>>();
 const listeners = new Set<Listener>();
 
 function notify() {
@@ -29,13 +24,13 @@ export const digestJobs = {
    */
   start(date: string, runner: () => Promise<void>): Promise<void> {
     const existing = jobs.get(date);
-    if (existing) return existing.promise;
+    if (existing) return existing;
 
     const promise = runner().finally(() => {
       jobs.delete(date);
       notify();
     });
-    jobs.set(date, { promise, date });
+    jobs.set(date, promise);
     notify();
     return promise;
   },

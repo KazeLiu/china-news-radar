@@ -193,6 +193,8 @@ export function CuratedView({
   // Server already rendered the list — skip the skeleton on first paint.
   const [loading, setLoading] = useState(initialItems.length === 0);
   const [overview, setOverview] = useState<{ today: number; curated: number; keywords: number } | null>(null);
+  const [error, setError] = useState('');
+  const [overviewError, setOverviewError] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   // Guards the filter effect from re-requesting data the server already sent.
   // Only armed when server data exists, so the empty-state path still fetches.
@@ -205,19 +207,17 @@ export function CuratedView({
   // "关注的关键词" = active keywords count.
   useEffect(() => {
     Promise.all([
-      hotspotsApi.getStats().catch(() => null),
-      keywordsApi.getAll().catch(() => []),
-      curatedApi.getAll('today', 1, 0, {}).catch(() => null),
-    ]).then(([stats, kws, todayCurated]) => {
-      if (!stats) return;
-      const activeKws = (kws as { isActive: boolean }[]).filter(k => k.isActive).length;
+      hotspotsApi.getStats(),
+      keywordsApi.getAll(),
+    ]).then(([stats, kws]) => {
+      const activeKws = kws.filter(k => k.isActive).length;
       setOverview({
         today: stats.today,
-        curated: todayCurated?.total ?? 0,
+        curated: initialTotal,
         keywords: activeKws,
       });
-    });
-  }, []);
+    }).catch(e => setOverviewError(e instanceof Error ? e.message : '概览数据加载失败'));
+  }, [initialTotal]);
 
   useEffect(() => {
     // First run with server-provided data: it already matches the default
@@ -240,9 +240,11 @@ export function CuratedView({
 
     curatedApi.getAll(period, 50, 0, opts)
       .then((res) => {
-        setItems(res.items || []);
-        setTotal(res.total || 0);
+        setItems(res.items);
+        setTotal(res.total);
+        setError('');
       })
+      .catch(e => setError(e instanceof Error ? e.message : '精选资讯加载失败'))
       .finally(() => setLoading(false));
   }, [period, activeTab, appliedSearch]);
 
@@ -255,6 +257,7 @@ export function CuratedView({
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
+      {(error || overviewError) && <p role="alert" className="mb-4 text-red-500">{error || overviewError}</p>}
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="flex items-center gap-2.5 text-2xl font-bold text-[var(--text-primary)] tracking-tight">
@@ -349,7 +352,7 @@ export function CuratedView({
 
       {appliedSearch && (
         <div className="mb-3 text-xs text-[var(--text-muted)]">
-          搜索: <span className="text-[var(--accent-blue)] dark:text-blue-400">"{appliedSearch}"</span>
+          搜索: <span className="text-[var(--accent-blue)] dark:text-blue-400">&quot;{appliedSearch}&quot;</span>
           <button type="button" onClick={handleClearSearch} className="ml-2 text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             清除
           </button>

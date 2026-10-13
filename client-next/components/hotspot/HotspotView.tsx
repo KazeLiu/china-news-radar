@@ -16,7 +16,6 @@ import {
 } from "../../services/api";
 import {
   onNewHotspot,
-  onNotification,
   onScanStatus,
   onScanProgress,
   subscribeToKeywords,
@@ -56,6 +55,7 @@ export function HotspotView({
     initialHotspots.length > 0 ? { total: initialTotal } : null,
   );
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
   // Guards the load effect from re-requesting data the server already sent.
   // Only armed when server data exists, so the empty-state path still fetches.
   const skipInitialLoad = useRef(initialHotspots.length > 0);
@@ -108,18 +108,16 @@ export function HotspotView({
         filterParams.category = activeTab;
       }
 
-      const [hotspotsData, statsData, keywordsData] = await Promise.all([
+      const [hotspotsData, keywordsData] = await Promise.all([
         hotspotsApi.getAll(
           filterParams as Parameters<typeof hotspotsApi.getAll>[0],
         ),
-        hotspotsApi.getStats(),
         keywordsApi.getAll(),
       ]);
       setHotspots(hotspotsData.data as unknown as Hotspot[]);
       setTotalPages(hotspotsData.pagination.totalPages);
       // Show count for the current tab/filter, not global total
       setStats({ total: hotspotsData.pagination.total });
-      void statsData; // global stats kept for potential future use
       setKeywords(keywordsData as unknown as Keyword[]);
 
       const activeKeywords = (keywordsData as unknown as Keyword[]).reduce<string[]>(
@@ -128,7 +126,7 @@ export function HotspotView({
       );
       if (activeKeywords.length > 0) subscribeToKeywords(activeKeywords);
     } catch (err) {
-      console.error("Failed to load hotspots:", err);
+      setError(err instanceof Error ? err.message : '热点加载失败');
     } finally {
       setIsLoading(false);
     }
@@ -153,7 +151,7 @@ export function HotspotView({
           }, []);
           if (active.length > 0) subscribeToKeywords(active);
         })
-        .catch((err) => console.error('Failed to load keywords:', err));
+        .catch((err) => setError(err instanceof Error ? err.message : '关注关键词加载失败'));
       return;
     }
 
@@ -168,9 +166,9 @@ export function HotspotView({
         ...prev.slice(0, 19),
       ]);
     });
-    const unsubNotif = onNotification(() => {});
     const unsubScan = onScanStatus((status) => {
       setIsChecking(status.isScanning);
+      if (status.error) setError(status.error);
       if (!status.isScanning) {
         setScanProgress("");
         setLastCheckTime(new Date());
@@ -203,7 +201,6 @@ export function HotspotView({
     });
     return () => {
       unsubHotspot();
-      unsubNotif();
       unsubScan();
       unsubProgress();
     };
@@ -217,7 +214,7 @@ export function HotspotView({
         if (s.lastScanFinishedAt)
           setLastCheckTime(new Date(s.lastScanFinishedAt));
       })
-      .catch(() => {});
+      .catch((err) => setError(err instanceof Error ? err.message : '采集状态加载失败'));
   }, []);
 
   const handleSearch = () => {
@@ -234,10 +231,12 @@ export function HotspotView({
 
   const handleManualCheck = async () => {
     setIsChecking(true);
+    setError('');
     try {
       await triggerHotspotCheck();
       // Scan now runs in the background; UI will update via onScanStatus.
-    } catch {
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '检查更新失败');
       setIsChecking(false);
     }
   };
@@ -262,6 +261,7 @@ export function HotspotView({
 
   return (
     <div className="px-4 py-6 max-w-4xl mx-auto">
+      {error && <p role="alert" className="mb-4 text-red-500">{error}</p>}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="flex items-center gap-2.5 text-2xl font-bold text-[var(--text-primary)] tracking-tight">
@@ -357,7 +357,7 @@ export function HotspotView({
           <span>
             搜索：
             <span className="text-[var(--accent-blue)] dark:text-blue-400 font-medium">
-              "{appliedSearch}"
+              &quot;{appliedSearch}&quot;
             </span>
           </span>
           <button

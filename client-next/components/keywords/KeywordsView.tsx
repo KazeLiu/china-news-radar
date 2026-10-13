@@ -24,6 +24,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
   const [isAdding, setIsAdding] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [error, setError] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadEntities = useCallback(async () => {
@@ -33,7 +34,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
       const activeNames = data.reduce<string[]>((acc, e) => { if (e.keyword.isActive) acc.push(e.keyword.text); return acc; }, []);
       if (activeNames.length > 0) subscribeToKeywords(activeNames);
     } catch (err) {
-      console.error('Failed to load entities:', err);
+      setError(err instanceof Error ? err.message : '关注列表加载失败');
     }
   }, []);  const startPolling = useCallback(() => {
     if (pollRef.current) {
@@ -41,7 +42,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
       pollRef.current = null;
     }
     pollRef.current = setInterval(async () => {
-      const data = await entitiesApi.getAll().catch(() => null);
+      const data = await entitiesApi.getAll().catch(err => { setError(err instanceof Error ? err.message : '关注列表刷新失败'); return null; });
       if (!data) return;
       setEntities(data);
       const stillLoading = data.some((e) => !e.relatedData);
@@ -53,6 +54,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- State updates follow the awaited request.
     loadEntities();
     startPolling();
     return () => {
@@ -68,7 +70,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
     try {
       const d = await entitiesApi.getOne(id);
       setDetail(d);
-    } catch {}
+    } catch (err) { setError(err instanceof Error ? err.message : '关注详情加载失败'); }
     finally { setLoadingDetail(false); }
   }, []);
 
@@ -83,6 +85,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
     const isDesktop = typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
     if (isDesktop) {
       const firstId = entities[0].id;
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Select once after the async list arrives on desktop.
       setSelectedId(firstId);
       loadDetail(firstId);
     }
@@ -108,8 +111,8 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
       onToast?.('关键词添加成功，正在生成知识卡片...', 'success');
       await loadEntities();
       startPolling();
-    } catch (err: any) {
-      onToast?.(err.message ?? '添加失败', 'error');
+    } catch (err) {
+      onToast?.(err instanceof Error ? err.message : '添加失败', 'error');
     } finally {
       setIsAdding(false);
     }
@@ -145,7 +148,9 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
   const selectedEntity = entities.find((e) => e.id === selectedId) ?? null;
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden">
+      {error && <p role="alert" className="p-4 text-red-500">{error}</p>}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       {/* ── Left panel: cards ───────────────────────────────────
           Desktop: always visible at fixed width.
           Mobile: full-width when no entity selected; hidden once one is. */}
@@ -252,6 +257,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
           ) : null}
         </div>
       </div>
+      </div>
     </div>
   );
 }
@@ -261,6 +267,7 @@ function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: En
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [nodeNews, setNodeNews] = useState<NewsItem[] | null>(null);
   const [loadingNodeNews, setLoadingNodeNews] = useState(false);
+  const [newsError, setNewsError] = useState('');
 
   const relData: RelatedData | null = (() => {
     try { return detail.relatedData ? JSON.parse(detail.relatedData) : null; } catch { return null; }
@@ -271,13 +278,14 @@ function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: En
   const handleNodeClick = useCallback(async (name: string | null) => {
     setSelectedNode(name);
     setNodeNews(null);
+    setNewsError('');
     if (!name) return;
     setLoadingNodeNews(true);
     try {
       const news = await entitiesApi.getNewsForName(name, 6);
       setNodeNews(news);
-    } catch {
-      setNodeNews([]);
+    } catch (err) {
+      setNewsError(err instanceof Error ? err.message : '关联资讯加载失败');
     } finally {
       setLoadingNodeNews(false);
     }
@@ -367,6 +375,7 @@ function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: En
       {/* News section */}
       <div>
         <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2">{newsTitle}</h3>
+        {newsError && <p role="alert" className="mb-2 text-red-500">{newsError}</p>}
         {loadingNodeNews ? (
           <SkeletonList count={3} itemClassName="h-24" />
         ) : displayNews.length > 0 ? (

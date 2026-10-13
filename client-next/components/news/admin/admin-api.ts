@@ -1,4 +1,5 @@
 import type { Source } from '../NewsSourceRow';
+import { requestJson } from '@/services/http';
 
 export interface AiSettings { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; instructions: string; keyConfigured: boolean; protocolPrompt: string }
 export interface AiTestResult {
@@ -23,16 +24,7 @@ export interface SourceTestResult {
 export interface FilterRule { id: string; enabled: boolean; sourceId: string; field: 'titleExact' | 'titleContains' | 'textContains' | 'urlPrefix' | 'urlExact'; value: string }
 export interface AdminSettings { ai: AiSettings; sources: SourceSettings[]; rules: FilterRule[]; localOnly: boolean; status: { aiMode: string; aiDailyUsed: number; aiDailyLimit: number; aiPending: number; aiFailed: number }; changed?: number }
 export async function adminApi<T>(path: string, token: string, body?: unknown, method = 'PUT'): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`/api/news/${path}`, { cache: 'no-store', method: body === undefined ? 'GET' : method,
-      headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Admin-Token': token } : {}) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  } catch { throw new Error('浏览器未收到后台响应，请检查本地服务和网络连接。'); }
-  if (!response.ok) {
-    const result = await response.json().catch(() => ({}));
-    const detail = typeof result.message === 'string' ? result.message : [502, 504].includes(response.status) ? '前端代理没有收到后台的完整响应，请检查后台运行状态和代理等待时间。' : '后台请求失败。';
-    throw new Error(`HTTP ${response.status}：${detail}`);
-  }
-  return response.json().catch(() => { throw new Error(`HTTP ${response.status}：后台返回的响应不是 JSON，请检查后台服务和代理配置。`); });
+  return requestJson<T>(`/api/news/${path}`, { method: body === undefined ? 'GET' : method,
+    headers: token ? { 'X-Admin-Token': token } : {}, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
 export type SaveSettings = (path: string, body: unknown, method?: string) => Promise<boolean>;

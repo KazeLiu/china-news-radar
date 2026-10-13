@@ -13,6 +13,7 @@
  */
 
 import type { DigestData, Hotspot } from '../types';
+import { requestJson } from '../services/http';
 
 const API_ORIGIN =
   process.env.INTERNAL_API_URL ||
@@ -50,59 +51,14 @@ export interface DigestRecord {
   createdAt: string;
 }
 
-/**
- * Shared fetch wrapper. Never throws — callers get `null` and decide the
- * fallback, so a backend outage degrades to an empty page rather than a 500.
- */
-async function getJson<T>(path: string): Promise<T | null> {
-  try {
-    const res = await fetch(`${API_ORIGIN}${path}`, {
-      // Paired with `dynamic = 'force-dynamic'`: fetch fresh on every request.
-      // Note Next 16 no longer caches fetch by default, so this is explicit
-      // rather than load-bearing.
-      cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-
-    if (!res.ok) {
-      console.error(`[server-api] ${path} returned HTTP ${res.status}`);
-      return null;
-    }
-
-    // A 200 with an *empty* body is how the backend says "no such record":
-    // Nest serialises a `null` return as zero bytes, not the literal `null`.
-    // `res.json()` throws on empty input, so read text and guard first.
-    const text = await res.text();
-    if (!text.trim()) return null;
-
-    return JSON.parse(text) as T;
-  } catch (err) {
-    // Covers connection refused (backend down), DNS failure, and timeout.
-    console.error(`[server-api] failed to fetch ${path}:`, err);
-    return null;
-  }
+async function getJson<T>(path: string, allowEmpty = false): Promise<T> {
+  return requestJson<T>(`${API_ORIGIN}${path}`, { signal: AbortSignal.timeout(TIMEOUT_MS) }, allowEmpty);
 }
-
-const EMPTY: CuratedResponse = {
-  period: 'today',
-  total: 0,
-  limit: 0,
-  offset: 0,
-  items: [],
-};
-
-const EMPTY_HOTSPOTS: HotspotsResponse = {
-  data: [],
-  pagination: { page: 1, limit: 0, total: 0, totalPages: 1 },
-};
 
 /**
  * Fetch curated hotspots for the default view (no category/region/search).
  *
- * Never throws: on any failure it returns an empty result so the page still
- * renders and the client-side effect in CuratedView can take over. Returning
- * empty is preferable to a 500 — the shell, metadata, and JSON-LD still reach
- * the crawler even when the backend is down.
+ * Service failures reach the route's error boundary instead of appearing empty.
  */
 export async function fetchCuratedSSR(
   period: 'today' | 'week' = 'today',
@@ -114,14 +70,7 @@ export async function fetchCuratedSSR(
     offset: '0',
   });
 
-  const data = await getJson<CuratedResponse>(`/api/curated?${params}`);
-  if (!data) return EMPTY;
-
-  return {
-    ...EMPTY,
-    ...data,
-    items: Array.isArray(data.items) ? data.items : [],
-  };
+  return getJson<CuratedResponse>(`/api/curated?${params}`);
 }
 
 /**
@@ -133,13 +82,7 @@ export async function fetchCuratedSSR(
 export async function fetchHotspotsSSR(limit = 20): Promise<HotspotsResponse> {
   const params = new URLSearchParams({ limit: String(limit), page: '1' });
 
-  const data = await getJson<HotspotsResponse>(`/api/hotspots?${params}`);
-  if (!data) return EMPTY_HOTSPOTS;
-
-  return {
-    data: Array.isArray(data.data) ? data.data : [],
-    pagination: data.pagination ?? EMPTY_HOTSPOTS.pagination,
-  };
+  return getJson<HotspotsResponse>(`/api/hotspots?${params}`);
 }
 
 /**
@@ -149,17 +92,14 @@ export async function fetchHotspotsSSR(limit = 20): Promise<HotspotsResponse> {
  * state (or trigger `notFound()`).
  */
 export async function fetchDigestSSR(date: string): Promise<DigestRecord | null> {
-  return getJson<DigestRecord>(`/api/digest/${date}`);
+  return getJson<DigestRecord | null>(`/api/digest/${date}`, true);
 }
 
 /**
  * Fetch the list of dates that have a digest, newest first.
  *
- * Used both for the sidebar and for `generateStaticParams` / `sitemap.ts`, so
- * it returns `[]` rather than `null` on failure — a build must not break just
- * because the backend is unreachable.
+ * Used by the sidebar and the dynamic sitemap; neither runs during the build.
  */
 export async function fetchRecentDigestsSSR(): Promise<DigestSummary[]> {
-  const data = await getJson<DigestSummary[]>('/api/digest/recent');
-  return Array.isArray(data) ? data : [];
+  return getJson<DigestSummary[]>('/api/digest/recent');
 }

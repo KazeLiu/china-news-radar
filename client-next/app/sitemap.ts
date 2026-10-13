@@ -32,7 +32,6 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   }));
 
   // Each published digest is its own citable URL, so list them individually.
-  // Returns [] when the backend is unreachable, leaving the static entries intact.
   const recent = await fetchRecentDigestsSSR();
   const digestEntries: MetadataRoute.Sitemap = recent.map(({ date, createdAt }) => ({
     url: `${siteUrl}/digest/${date}`,

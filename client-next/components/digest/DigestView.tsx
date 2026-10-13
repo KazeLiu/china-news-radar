@@ -330,19 +330,19 @@ function PaperItem({ item }: { item: DigestPaperItem }) {
  */
 export function DigestView({
   date,
-  initialDigest = null,
-  initialRecent = [],
+  initialDigest,
+  initialRecent,
 }: {
-  date?: string;
-  initialDigest?: DailyDigest | null;
-  initialRecent?: { date: string; summary?: string }[];
-} = {}) {
+  date: string;
+  initialDigest: DailyDigest | null;
+  initialRecent: { date: string; summary?: string }[];
+}) {
   const today = getBeijingToday();
   const allDates = lastThreeMonths();
 
-  // Route-driven when `date` is provided; falls back to today otherwise.
-  const selectedDate = date ?? today;
+  const selectedDate = date;
   const [digest, setDigest] = useState<DailyDigest | null>(initialDigest);
+  const [error, setError] = useState('');
   // Map: date → one-line summary (empty string if no digest)
   const [dateMap, setDateMap] = useState<Map<string, string>>(() => {
     const m = new Map<string, string>();
@@ -350,10 +350,10 @@ export function DigestView({
     return m;
   });
   // Server already rendered this date's digest — skip the loading state.
-  const [loading, setLoading] = useState(initialDigest === null);
+  const [loading, setLoading] = useState(false);
   // Guards the per-date fetch from re-requesting what the server already sent.
   // Keyed by date so navigating to another day still fetches on the client.
-  const skipInitialFetch = useRef(initialDigest !== null ? selectedDate : null);
+  const skipInitialFetch = useRef<string | null>(selectedDate);
   // Reactive read of the module-level job singleton — survives remount,
   // so generation state persists when the user switches tabs and returns.
   const generating = useSyncExternalStore(
@@ -383,23 +383,6 @@ export function DigestView({
     });
   };
 
-  // Load sidebar date list (dates that have digests + their summaries).
-  // Skipped when the server already supplied it.
-  useEffect(() => {
-    if (initialRecent.length > 0) return;
-    digestApi
-      .getRecent()
-      .then((list: { date: string; summary?: string }[]) => {
-        const m = new Map<string, string>();
-        for (const d of list) m.set(d.date, d.summary ?? '');
-        setDateMap(m);
-      })
-      .catch(() => {});
-    // `initialRecent` is a server-render constant; re-running on identity
-    // change would refetch on every navigation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Scroll selected date into view on mount
   useEffect(() => {
     selectedRef.current?.scrollIntoView({ block: 'nearest' });
@@ -419,8 +402,9 @@ export function DigestView({
     return () => window.removeEventListener('nav:reset', handler);
   }, [today, selectedDate, router]);
 
-  // Load digest for selected date
+  // Refresh on date changes and completed jobs, including jobs started before mounting.
   useEffect(() => {
+    if (generating) { skipInitialFetch.current = null; return; }
     // Server already rendered this exact date — don't refetch it. Cleared on
     // first run so navigating to another date fetches normally.
     if (skipInitialFetch.current === selectedDate) {
@@ -430,42 +414,29 @@ export function DigestView({
 
     setLoading(true);
     setDigest(null);
+    let active = true;
     digestApi
       .getByDate(selectedDate)
-      .then(setDigest)
-      .catch(() => setDigest(null))
-      .finally(() => setLoading(false));
-  }, [selectedDate]);
-
-  // Re-fetch digest when generation finishes (so the UI updates even if the
-  // user switched away during the job and the start() callback couldn't see them)
-  useEffect(() => {
-    if (generating) return;
-    digestApi.getByDate(selectedDate).then((d) => {
-      if (d) {
+      .then(d => {
+        if (!active) return;
         setDigest(d);
-        if (d.data?.summary !== undefined) {
-          setDateMap((prev) => new Map(prev).set(selectedDate, d.data.summary ?? ''));
+        if (d) {
+          setDateMap(prev => new Map(prev).set(selectedDate, d.data.summary));
         }
-      }
-    }).catch(() => {});
-    // We intentionally only run this when `generating` flips, not on date change.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [generating]);
+      })
+      .catch(e => { if (active) setError(e instanceof Error ? e.message : '日报加载失败'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [selectedDate, generating]);
 
   const handleGenerate = async () => {
     const targetDate = selectedDate;
-    await digestJobs.start(targetDate, async () => {
-      try {
+    setError('');
+    try {
+      await digestJobs.start(targetDate, async () => {
         await digestApi.generate(targetDate);
-        const d = await digestApi.getByDate(targetDate).catch(() => null);
-        // Only update view if the user is still looking at this date
-        if (selectedDate === targetDate) setDigest(d);
-        if (d?.data?.summary !== undefined) {
-          setDateMap((prev) => new Map(prev).set(targetDate, d!.data.summary ?? ''));
-        }
-      } catch {}
-    });
+      });
+    } catch (e) { setError(e instanceof Error ? e.message : '日报生成失败'); }
   };
 
   // Group all 60 days by YYYY-MM
@@ -627,6 +598,7 @@ export function DigestView({
         </div>
 
         <div className="flex-1 flex flex-col px-6 py-6 max-w-3xl">
+          {error && <p role="alert" className="mb-4 text-red-500">{error}</p>}
           {loading ? (
             <LoadingSkeleton />
           ) : !hasContent ? (

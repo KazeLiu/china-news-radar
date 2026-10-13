@@ -30,11 +30,6 @@ export function subscribeToKeywords(keywords: string[]): void {
   s.emit('subscribe', keywords);
 }
 
-function unsubscribeFromKeywords(keywords: string[]): void {
-  const s = getSocket();
-  s.emit('unsubscribe', keywords);
-}
-
 export interface HotspotEvent {
   id: string;
   title: string;
@@ -46,24 +41,10 @@ export interface HotspotEvent {
   keyword?: { text: string } | null;
 }
 
-export interface NotificationEvent {
-  type: string;
-  title: string;
-  content: string;
-  hotspotId?: string;
-  importance?: string;
-}
-
 export function onNewHotspot(callback: (hotspot: HotspotEvent) => void): () => void {
   const s = getSocket();
   s.on('hotspot:new', callback);
   return () => s.off('hotspot:new', callback);
-}
-
-export function onNotification(callback: (notification: NotificationEvent) => void): () => void {
-  const s = getSocket();
-  s.on('notification', callback);
-  return () => s.off('notification', callback);
 }
 
 export interface ScanStatusEvent {
@@ -99,11 +80,4 @@ export function onScanProgress(callback: (progress: ScanProgressEvent) => void):
   const s = getSocket();
   s.on('scan:progress', callback);
   return () => s.off('scan:progress', callback);
-}
-
-function disconnectSocket(): void {
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
 }
