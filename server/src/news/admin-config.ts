@@ -5,7 +5,7 @@ import { isDomesticUrl } from './rules';
 import { isLocalFeed } from './transports';
 
 export const ADMIN_CONFIG_KEY = 'news-admin-config-v1';
-export interface AiConfig { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; apiKey: string; instructions: string }
+export interface AiConfig { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; apiKey: string; instructions: string; intervalMs: number; autoAnalyzeNew: boolean; newsOutputTokens: number }
 export interface AdminConfig { ai: AiConfig; sources: NewsSourceConfig[]; rules: FilterRule[]; removedSourceIds: string[] }
 export function readAiUsage(value?: string): number {
   if (value === undefined) return 0;
@@ -17,7 +17,7 @@ export function defaultConfig(): AdminConfig {
   const limit = Number(process.env.AI_DAILY_LIMIT || 100);
   return { ai: { enabled: (process.env.AI_ANALYSIS_ENABLED ?? process.env.AI_TRANSLATION_ENABLED) === 'true',
     baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1', model: process.env.OPENAI_MODEL || 'gpt-4o-mini', apiKey: process.env.OPENAI_API_KEY || '',
-    dailyLimit: Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0, instructions: '' },
+    dailyLimit: Number.isFinite(limit) ? Math.max(0, Math.floor(limit)) : 0, instructions: '', intervalMs: 500, autoAnalyzeNew: true, newsOutputTokens: 8192 },
     sources: NEWS_SOURCES.map(s => ({ ...s, feedUrls: [...s.feedUrls], publisherHosts: [...s.publisherHosts] })), rules: DEFAULT_EXCLUSIONS.map(r => ({ ...r })), removedSourceIds: [] };
 }
 function object(value: unknown): Record<string, unknown> {
@@ -46,8 +46,12 @@ export function validateAi(value: unknown, previous: AiConfig): AiConfig {
   const dailyLimit = body.dailyLimit;
   if (!Number.isInteger(dailyLimit) || Number(dailyLimit) < 0 || Number(dailyLimit) > 100_000) throw new BadRequestException('每日额度应为 0–100000 的整数');
   const apiKey = body.apiKey === undefined || body.apiKey === '' ? previous.apiKey : string(body.apiKey, 'API Key', 1000);
+  const intervalMs = body.intervalMs ?? previous.intervalMs;
+  const newsOutputTokens = body.newsOutputTokens ?? previous.newsOutputTokens;
+  if (!Number.isInteger(intervalMs) || Number(intervalMs) < 0 || Number(intervalMs) > 60000) throw new BadRequestException('请求间隔应为 0–60000 毫秒');
+  if (!Number.isInteger(newsOutputTokens) || Number(newsOutputTokens) < 1024 || Number(newsOutputTokens) > 32768) throw new BadRequestException('新闻输出预算应为 1024–32768 tokens');
   return { enabled: boolean(body.enabled), baseUrl: publicUrl(body.baseUrl, 'AI 接口地址'), model: string(body.model, '模型', 200),
-    dailyLimit: Number(dailyLimit), apiKey, instructions: string(body.instructions ?? '', '额外提示词', 4000, true) };
+    dailyLimit: Number(dailyLimit), apiKey, instructions: string(body.instructions ?? '', '额外提示词', 4000, true), intervalMs: Number(intervalMs), newsOutputTokens: Number(newsOutputTokens), autoAnalyzeNew: boolean(body.autoAnalyzeNew ?? previous.autoAnalyzeNew) };
 }
 export function validateSource(value: unknown, previous?: NewsSourceConfig): NewsSourceConfig {
   const body = object(value);

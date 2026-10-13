@@ -1,18 +1,17 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, NotFoundException, ConflictException, Optional } from '@nestjs/common';
-import { Prisma, NewsAnalysis } from '@prisma/client';
-import OpenAI from 'openai';
+import { AiTask, Prisma, NewsAnalysis } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { NewsSourceConfig } from './sources';
 import { CollectedItem, inspectFeed, parseFeed } from './collector';
-import { retryAfterMs } from './rules';
 import { telegramItem } from './telegram';
 import { analysisKey, analysisInput, parseAnalysis, analysisDecision, fallbackDecision, ANALYSIS_PROMPT } from './analysis';
 import { feedUrlsFor, distributionFor } from './transports';
 import { fetchSourceFeed, FeedFetchError, restoreFailures } from './feed-fetch';
 import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, restoreConfig, validateAi, validateRules, validateSource, readAiUsage } from './admin-config';
 import { matchingExclusions } from './content-filter';
-import { AI_TIMEOUT_MS, InvalidAnalysisResponse, aiTestError, analysisErrorDetail } from './ai-errors';
-import { createAiClient, reserveAiUsage } from './ai-runtime.service';
+import { InvalidAnalysisResponse, aiTestError, analysisErrorDetail } from './ai-errors';
+import { AiRuntimeService } from './ai-runtime.service';
 import { NewsBridgeService } from './news-bridge.service';
 
 @Injectable()
@@ -21,43 +20,37 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private timer?: ReturnType<typeof setInterval>;
   private analysisTimer?: ReturnType<typeof setInterval>;
   private busy = false;
-  private analyzing = false;
   private stopped = false;
   private config = defaultConfig();
   private configBusy = false;
   private testingSource = false;
-  private testingAi = false;
   private get aiRequested() { return this.config.ai.enabled; }
   private get aiEnabled() { return this.aiRequested && !!this.config.ai.apiKey; }
   private get dailyLimit() { return this.config.ai.dailyLimit; }
-  private ai = this.makeAi();
-  constructor(private readonly prisma: PrismaService, @Optional() private readonly bridge?: NewsBridgeService) {}
+  constructor(private readonly prisma: PrismaService, private readonly runtime: AiRuntimeService, @Optional() private readonly bridge?: NewsBridgeService) {}
 
-  private makeAi() { return this.aiEnabled ? createAiClient(this.config.ai) : null; }
   private startAnalysisTimer() {
     if (!this.analysisTimer) this.analysisTimer = setInterval(() => {
-      if (this.aiEnabled) void Promise.all([this.showOverdueFallbacks(), this.drainAnalysis()]).catch(() => this.logger.warn('AI 队列异常，原文已保留'));
-    }, 1000);
+      void this.prepareAnalysis().catch(() => this.logger.warn('AI 队列异常，原文已保留'));
+    }, 60_000);
   }
 
   async onModuleInit() {
     const stored = await this.prisma.setting.findUnique({ where: { key: ADMIN_CONFIG_KEY } });
     if (stored) this.config = restoreConfig(stored.value);
-    this.ai = this.makeAi();
+    this.runtime.register('news', (payload, task) => this.analyzeBatch(payload, task), async (_payload, task) => {
+      const unfinished = await this.prisma.newsAnalysis.findMany({ where: { queuedTaskId: task.id, status: { not: 'done' } } });
+      for (const cache of unfinished) {
+        const updated = await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'failed', queuedTaskId: null, error: task.errorJson } });
+        await this.prisma.$transaction(tx => this.applyCache(tx, updated));
+        await this.announceAnalysis(cache.key);
+      }
+    });
+    this.runtime.register('test', payload => this.runAiTest(payload));
     for (const source of this.config.sources) await this.prisma.newsSource.upsert({ where: { id: source.id }, create: { id: source.id, enabled: source.enabled }, update: {} });
     await this.reapplyFilters();
-    // Bootstrap recent candidates, preserving cached AI decisions and content timestamps.
-    const recent = await this.prisma.newsItem.findMany({ where: { firstSeenAt: { gte: new Date(Date.now() - 7 * 86_400_000) } } });
-    for (const record of recent) {
-      if (!this.config.sources.some(s => s.id === record.sourceId)) continue;
-      const { title, summary, url, originalPublisher, originalUrl, author, topic, eventKey, contentHash, publishedAt } = record;
-      await this.store(record.sourceId, { title, summary, url, originalPublisher, originalUrl, author, topic, eventKey, contentHash, publishedAt }, record.firstSeenAt, true);
-    }
     await this.bridge?.rebuild();
-    if (this.aiEnabled) {
-      this.startAnalysisTimer();
-      void this.drainAnalysis().catch(() => this.logger.warn('AI 队列异常，原文已保留'));
-    }
+    this.startAnalysisTimer();
     if (process.env.COLLECTOR_ENABLED !== 'false') {
       this.timer = setInterval(() => { void this.tick(); }, 15_000);
       void this.tick();
@@ -164,10 +157,9 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     let key = analysisKey(item);
     let cache = await this.findCached(item);
     if (cache?.key) key = cache.key;
-    if (!cache && this.aiEnabled) cache = await this.prisma.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)) }, update: {} });
-    if (cache?.status === 'obsolete' && this.aiEnabled) cache = await this.prisma.newsAnalysis.update({ where: { key }, data: { status: 'pending', retryAt: null, leaseUntil: null } });
-    const decision = await this.cachedDecision(item, sourceId, cache, this.aiEnabled ? cache?.status || 'pending' : 'disabled');
-    if (this.aiEnabled && (!cache || ['pending', 'processing'].includes(cache.status))) decision.visible = false;
+    if (!cache) cache = await this.prisma.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: !this.config.ai.autoAnalyzeNew }, update: {} });
+    const decision = await this.cachedDecision(item, sourceId, cache, this.aiEnabled && this.config.ai.autoAnalyzeNew ? cache?.status || 'pending' : 'disabled');
+    if (this.aiEnabled && this.config.ai.autoAnalyzeNew && !cache.historical && ['pending', 'processing'].includes(cache.status)) decision.visible = false;
     const data = { ...item, analysisKey: key, ...decision };
     const args = { where, create: { ...data, sourceId, firstSeenAt: discoveredAt }, update: { ...data, ...(existing?.contentHash === item.contentHash ? { updatedAt: existing.updatedAt } : {}) } };
     if (this.bridge) {
@@ -191,11 +183,15 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     await this.prisma.newsSource.update({ where: { id: parsed.sourceId }, data: { lastCheckedAt: new Date(), lastSuccessAt: new Date(), error: null } });
     return { accepted: true, changed };
   }
-  private async drainAnalysis() {
-    if (!this.ai || this.analyzing || this.stopped) return;
-    this.analyzing = true;
-    try { for (let count = 0; count < 20 && !this.stopped; count++) if (!await this.analyzeNext()) break; }
-    finally { this.analyzing = false; }
+  private async prepareAnalysis() {
+    if (this.stopped || this.configBusy) return;
+    const abandoned = await this.prisma.$queryRaw<Array<{ key: string }>>`SELECT a.key FROM NewsAnalysis a JOIN AiTask t ON a.queuedTaskId = t.id WHERE t.status IN ('failed', 'done') AND a.status != 'done'`;
+    for (const cache of abandoned) {
+      const updated = await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'failed', queuedTaskId: null, error: '任务失败，已有原文保留，请在任务列表查看安全原因' } });
+      await this.prisma.$transaction(tx => this.applyCache(tx, updated));
+    }
+    await this.showOverdueFallbacks();
+    if (this.config.ai.autoAnalyzeNew) await this.enqueueAnalysis();
   }
   private async showOverdueFallbacks() {
     // Slow providers or a long queue must not hide timely rule-matched news indefinitely.
@@ -249,70 +245,94 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     }
     return fallbackDecision(item, status, this.config.rules, sourceId);
   }
-  private async analyzeNext(): Promise<boolean> {
-    const ai = this.ai; const model = this.config.ai.model; const instructions = this.config.ai.instructions;
-    if (!ai || !this.aiEnabled || this.configBusy) return false;
-    const now = new Date(); const day = now.toISOString().slice(0, 10); const usageKey = `news-ai-usage-${day}`;
-    const nextDay = new Date(`${day}T00:00:00.000Z`); nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-    const claimed = await this.prisma.$transaction(async tx => {
-      const job = await tx.newsAnalysis.findFirst({ where: { OR: [
-        { status: { in: ['pending', 'limited'] }, OR: [{ retryAt: null }, { retryAt: { lte: now } }] },
-        { status: 'failed', attempts: { lt: 3 }, retryAt: { lte: now } },
-        { status: 'processing', leaseUntil: { lte: now } },
-      ] }, orderBy: { createdAt: 'desc' } });
-      if (!job) return null;
-      if (!await tx.newsItem.count({ where: { analysisKey: job.key } })) {
-        await tx.newsAnalysis.update({ where: { key: job.key }, data: { status: 'obsolete', leaseUntil: null, retryAt: null } });
-        return { job, call: false };
-      }
-      const usage = readAiUsage((await tx.setting.findUnique({ where: { key: usageKey } }))?.value);
-      if (job.attempts >= 3 || usage >= this.dailyLimit) {
-        const updated = await tx.newsAnalysis.update({ where: { key: job.key }, data: { status: job.attempts >= 3 ? 'failed' : 'limited',
-          error: job.attempts >= 3 ? '尝试次数已用尽，采用规则兜底' : '今日调用额度已用尽，采用规则兜底', retryAt: job.attempts >= 3 ? null : nextDay, leaseUntil: null } });
-        await this.applyCache(tx, updated);
-        return { job: updated, call: false };
-      }
-      // A single SQLite transaction reserves budget before the paid request and claims the job.
-      await reserveAiUsage(tx, this.dailyLimit, now);
-      const updated = await tx.newsAnalysis.update({ where: { key: job.key }, data: { status: 'processing', attempts: { increment: 1 }, leaseUntil: new Date(now.getTime() + AI_TIMEOUT_MS + 30_000), retryAt: null } });
-      return { job: updated, call: true };
-    });
-    if (!claimed) return false;
-    if (!claimed.call) { await this.announceAnalysis(claimed.job.key); return true; }
-    const { job } = claimed;
-    let resultJson: string | null = null; let error: string | null = null; let retryDelay = 30_000 * 2 ** (job.attempts - 1);
-    try {
-      resultJson = JSON.stringify(await this.requestAnalysis(ai, model, instructions, job.inputJson));
-    } catch (problem) {
-      error = 'AI 调用失败或 JSON 不符合约定，采用规则兜底';
-      const failure = problem as { status?: number; headers?: Record<string, unknown> | Headers };
-      if (failure?.status === 429) retryDelay = retryAfterMs(failure.headers instanceof Headers ? failure.headers.get('retry-after') : failure.headers?.['retry-after']);
-    }
-    await this.prisma.$transaction(async tx => {
-      const changed = await tx.newsAnalysis.updateMany({ where: { key: job.key, status: 'processing', attempts: job.attempts }, data: {
-        status: resultJson ? 'done' : 'failed', resultJson, model, error,
-        analyzedAt: resultJson ? new Date() : null, leaseUntil: null, retryAt: !resultJson && job.attempts < 3 ? new Date(Date.now() + retryDelay) : null,
-      } });
-      if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: job.key } }));
-    });
-    await this.announceAnalysis(job.key);
-    return true;
+  private async queueBatch(keys: string[], chunkSize = 20, previousTaskId?: string) {
+    const activeKey = `news:${createHash('sha256').update([...keys].sort().join(',')).digest('hex')}`;
+    const ticket = await this.runtime.enqueue('news', { keys, chunkSize }, { activeKey });
+    await this.prisma.newsAnalysis.updateMany({ where: { key: { in: keys }, status: { not: 'done' }, OR: [{ queuedTaskId: null }, ...(previousTaskId ? [{ queuedTaskId: previousTaskId }] : [])] }, data: { queuedTaskId: ticket.taskId } });
+    return ticket;
   }
-
-  private prompt(instructions = this.config.ai.instructions) { return `${ANALYSIS_PROMPT}\nAdministrator editorial instructions:\n${instructions || '(none)'}\nKeep the required JSON schema and translation rules unchanged.`; }
-  private async requestAnalysis(ai: OpenAI, model: string, instructions: string, inputJson: string) {
-    const response = await ai.chat.completions.create({ model, temperature: 0, max_tokens: 3000,
-      response_format: { type: 'json_object' }, messages: [{ role: 'system', content: this.prompt(instructions) }, { role: 'user', content: inputJson }] });
-    const choice = response.choices?.[0];
-    if (choice?.finish_reason === 'length') throw new InvalidAnalysisResponse('模型达到输出长度上限，返回内容被截断。请使用支持当前输出长度的模型。', response._request_id);
-    if (choice?.finish_reason === 'content_filter') throw new InvalidAnalysisResponse('提供商的内容过滤阻止了模型输出。', response._request_id);
-    if (!choice?.message?.content) throw new InvalidAnalysisResponse('接口响应缺少 choices[0].message.content，无法读取模型结果。', response._request_id);
+  private async enqueueAnalysis() {
+    if (!this.aiEnabled || this.configBusy) return;
+    const caches = await this.prisma.newsAnalysis.findMany({ where: { historical: false, queuedTaskId: null, status: 'pending', attempts: { lt: 3 } }, orderBy: { createdAt: 'asc' } });
+    let keys: string[] = []; let inputs: unknown[] = [];
+    for (const cache of caches) {
+      const linked = await this.prisma.newsItem.findMany({ where: { analysisKey: cache.key } });
+      if (!linked.some(item => item.originalPublisher && !matchingExclusions(item, this.config.rules, item.sourceId).length)) continue;
+      const input = { id: cache.key, ...JSON.parse(cache.inputJson) };
+      if (keys.length && (keys.length >= 20 || JSON.stringify({ items: [...inputs, input] }).length > 6000)) { await this.queueBatch(keys); keys = []; inputs = []; }
+      keys.push(cache.key); inputs.push(input);
+    }
+    if (keys.length) await this.queueBatch(keys);
+  }
+  async startHistory() {
+    if (!this.aiEnabled) throw new BadRequestException('请先保存并启用 AI 配置');
+    const records = await this.prisma.newsItem.findMany({ where: { aiStatus: { notIn: ['done', 'excluded'] } } });
+    let prepared = 0;
+    for (const item of records) {
+      if (!item.originalPublisher || matchingExclusions(item, this.config.rules, item.sourceId).length) continue;
+      const cache = await this.findCached(item);
+      if (cache?.status === 'done' || cache?.queuedTaskId) continue;
+      const key = analysisKey(item);
+      await this.prisma.$transaction(async tx => {
+        await tx.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: false }, update: { historical: false, status: 'pending', attempts: 0, error: null, retryAt: null, leaseUntil: null } });
+        await tx.newsItem.updateMany({ where: { id: item.id, contentHash: item.contentHash }, data: { analysisKey: key, aiStatus: 'pending', updatedAt: item.updatedAt } });
+        await this.bridge?.sync(tx, item.id);
+      });
+      prepared++;
+    }
+    await this.enqueueAnalysis();
+    return { prepared, ...await this.runtime.queueStatus() };
+  }
+  private async analyzeBatch(payload: { keys: string[]; chunkSize: number }, task: AiTask) {
+    const caches = await this.prisma.newsAnalysis.findMany({ where: { key: { in: payload.keys }, queuedTaskId: task.id, status: { not: 'done' }, attempts: { lt: 3 } } });
+    const eligible: NewsAnalysis[] = [];
+    for (const cache of caches) {
+      const linked = await this.prisma.newsItem.findMany({ where: { analysisKey: cache.key } });
+      if (linked.some(item => item.originalPublisher && !matchingExclusions(item, this.config.rules, item.sourceId).length)) eligible.push(cache);
+      else await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'obsolete', queuedTaskId: null } });
+    }
+    const selected = eligible.slice(0, payload.chunkSize);
+    if (!selected.length) return { analyzed: 0 };
+    const items = selected.map(cache => ({ id: cache.key, ...JSON.parse(cache.inputJson) }));
+    const success = new Set<string>();
+    let translated = 0;
     try {
-      const result = parseAnalysis(choice.message.content);
-      if (result.version !== 2) throw new Error('AI JSON enum invalid');
-      if (JSON.parse(inputJson).summary && result.translation && !result.translation.summary) throw new Error('Translation summary missing');
-      return result;
-    } catch (problem) { throw new InvalidAnalysisResponse(analysisErrorDetail(problem), response._request_id); }
+      const response = await this.runtime.performJson(`${ANALYSIS_PROMPT}\n批次输入为 items 数组。逐条遵守上述单条协议，返回 {"results":[{"id":"原输入id",...单条结果}]}。id 必须完整照抄，不以数组顺序关联，不输出其他字段。`, { items }, this.config.ai.newsOutputTokens, async tx => {
+        for (const cache of selected) await tx.newsAnalysis.update({ where: { key: cache.key }, data: { attempts: { increment: 1 }, status: 'processing' } });
+      });
+      if (!Array.isArray(response.results)) throw new InvalidAnalysisResponse('批次缺少 results 数组。');
+      const entries = response.results as Array<Record<string, unknown>>;
+      for (const cache of selected) {
+        const matches = entries.filter(entry => entry && entry.id === cache.key);
+        if (matches.length !== 1) continue;
+        const { id, ...value } = matches[0];
+        let result;
+        try {
+          result = parseAnalysis(JSON.stringify(value));
+          if (result.version !== 2 || (JSON.parse(cache.inputJson).summary && result.translation && !result.translation.summary)) throw new Error();
+        } catch { continue; }
+        await this.prisma.$transaction(async tx => {
+          const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: task.id, status: 'processing' }, data: { resultJson: JSON.stringify(result), status: 'done', analyzedAt: new Date(), model: this.runtime.requestInfo()?.model, error: null, queuedTaskId: null, retryAt: null, leaseUntil: null } });
+          if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: cache.key } }));
+        });
+        success.add(cache.key); if (result.translation) translated++; await this.announceAnalysis(cache.key);
+      }
+      await this.runtime.noteNewsResults(success.size, translated);
+      if (selected.some(cache => !success.has(cache.key)) || entries.some(entry => !entry || !selected.some(cache => cache.key === entry.id))) throw new InvalidAnalysisResponse('批次存在重复、未知、缺失 ID 或无效结果；已成功条目保存，不会重复请求。');
+      const remaining = eligible.filter(cache => !success.has(cache.key)).map(cache => cache.key);
+      if (remaining.length) await this.queueBatch(remaining, payload.chunkSize, task.id);
+      return { analyzed: success.size };
+    } catch (problem) {
+      if (problem instanceof InvalidAnalysisResponse) await this.runtime.noteProtocolError(problem.detail);
+      const remaining = eligible.filter(cache => !success.has(cache.key)).map(cache => cache.key);
+      const chunkSize = problem instanceof InvalidAnalysisResponse && problem.detail.includes('截断') ? Math.max(1, Math.floor(selected.length / 2)) : payload.chunkSize;
+      await this.runtime.replacePayload(task.id, { keys: remaining, chunkSize });
+      for (const cache of selected.filter(cache => !success.has(cache.key))) {
+        const updated = await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'pending' } });
+        await this.prisma.$transaction(tx => this.applyCache(tx, updated));
+      }
+      throw problem;
+    }
   }
   async testAi(body: unknown) {
     const sample = body as { title?: unknown; summary?: unknown } | null;
@@ -320,25 +340,25 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('测试标题最多 600 字符，摘要最多 1600 字符');
     const input = analysisInput({ title: sample.title, summary: sample.summary });
     if (!input.title) throw new BadRequestException('请填写测试标题');
-    const config = { ...this.config.ai };
-    const savedClient = this.ai;
-    if (!config.apiKey) throw new BadRequestException('请先保存 API Key，再测试调用');
-    if (this.configBusy || this.testingAi) throw new ConflictException('正在保存配置或测试 AI，请稍后重试');
-    this.testingAi = true;
+    if (!this.config.ai.apiKey) throw new BadRequestException('请先保存 API Key，再测试调用');
+    return this.runtime.enqueue('test', input, { maxAttempts: 1 });
+  }
+  private async runAiTest(input: ReturnType<typeof analysisInput>) {
     const checkedAt = new Date(); const start = Date.now();
     try {
-      const usageKey = `news-ai-usage-${checkedAt.toISOString().slice(0, 10)}`;
-      const usage = await this.prisma.$transaction(tx => reserveAiUsage(tx, config.dailyLimit, checkedAt));
-      const metadata = { checkedAt, model: config.model, input, usage };
+      const json = await this.runtime.performJson(ANALYSIS_PROMPT, input, this.config.ai.newsOutputTokens);
+      let result;
       try {
-        const ai = savedClient || createAiClient(config);
-        const result = await this.requestAnalysis(ai, config.model, config.instructions, JSON.stringify(input));
-        const decision = analysisDecision(result, { ...input, url: 'https://example.invalid/ai-test' }, []);
-        return { ...metadata, ok: true, elapsedMs: Date.now() - start, result, preview: { visible: decision.visible, decisionBy: decision.decisionBy } };
-      } catch (problem) {
-        return { ...metadata, ok: false, elapsedMs: Date.now() - start, error: aiTestError(problem, config.apiKey) };
-      }
-    } finally { this.testingAi = false; }
+        result = parseAnalysis(JSON.stringify(json));
+        if (result.version !== 2 || (input.summary && result.translation && !result.translation.summary)) throw new Error();
+      } catch (problem) { await this.runtime.noteProtocolError(analysisErrorDetail(problem)); throw new InvalidAnalysisResponse(analysisErrorDetail(problem), this.runtime.requestInfo()?.requestId); }
+      const decision = analysisDecision(result, { ...input, url: 'https://example.invalid/ai-test' }, []);
+      return { ...this.runtime.requestInfo(), input, ok: true, result, preview: { visible: decision.visible, decisionBy: decision.decisionBy } };
+    } catch (problem) {
+      const day = new Date().toISOString().slice(0, 10);
+      const usage = readAiUsage((await this.prisma.setting.findUnique({ where: { key: `news-ai-usage-${day}` } }))?.value);
+      return { checkedAt, model: this.config.ai.model, input, elapsedMs: Date.now() - start, usage: { used: usage, limit: this.dailyLimit }, ok: false, error: aiTestError(problem, this.config.ai.apiKey) };
+    }
   }
   async adminConfig() {
     const { apiKey, ...ai } = this.config.ai;
@@ -357,7 +377,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         await tx.setting.upsert({ where: { key: ADMIN_CONFIG_KEY }, create: { key: ADMIN_CONFIG_KEY, value: JSON.stringify(next) }, update: { value: JSON.stringify(next) } });
         if (mutation) await mutation(tx);
       });
-      this.config = next; this.ai = this.makeAi();
+      this.config = next;
       if (afterChange) await afterChange();
       if (this.aiEnabled) this.startAnalysisTimer();
     } finally { this.configBusy = false; }

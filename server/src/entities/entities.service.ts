@@ -1,21 +1,12 @@
 import { HttpException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import OpenAI from 'openai';
+import { AiRuntimeService } from '../news/ai-runtime.service';
 import { NewsEditorialService } from '../news/news-editorial.service';
 import { contentScope, newsInclude, newsMode, presentHotspot } from '../news/radar-content';
 
 @Injectable()
 export class EntitiesService {
-  private readonly client: OpenAI;
-  private readonly model: string;
-
-  constructor(private prisma: PrismaService, @Optional() private readonly editorial?: NewsEditorialService) {
-    this.client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY ?? '',
-      baseURL: process.env.OPENAI_BASE_URL ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    });
-    this.model = process.env.MODEL_NAME ?? 'qwen-coder-turbo';
-  }
+  constructor(private prisma: PrismaService, private readonly runtime: AiRuntimeService, @Optional() private readonly editorial?: NewsEditorialService) {}
 
   async findAll() {
     const cards = await this.prisma.entityCard.findMany({
@@ -95,7 +86,7 @@ export class EntitiesService {
     return { nodes, edges };
   }
 
-  async createForKeyword(keywordId: string, name: string): Promise<void> {
+  async createForKeyword(keywordId: string, name: string) {
     const existing = await this.prisma.entityCard.findUnique({ where: { keywordId } });
     if (existing && !this.editorial) return;
 
@@ -106,7 +97,7 @@ export class EntitiesService {
     if (this.editorial) {
       if (await this.prisma.newsEntityProfile.findUnique({ where: { keywordId } })) return;
       await this.prisma.newsEntityProfile.upsert({ where: { keywordId }, create: { keywordId, data: JSON.stringify({ generationStatus: 'pending' }) }, update: {} });
-      try { await this.editorial.profile(keywordId); }
+      try { return await this.editorial.profile(keywordId); }
       catch (error) {
         const response = error instanceof HttpException ? error.getResponse() : null;
         const safe = typeof response === 'string' ? response : (response as { detail?: string; message?: string } | null)?.detail || (response as { message?: string } | null)?.message;
@@ -140,7 +131,7 @@ export class EntitiesService {
     const card = await this.prisma.entityCard.findUnique({ where: { id } });
     if (!card) throw new NotFoundException('Entity not found');
 
-    if (this.editorial) { await this.editorial.profile(card.keywordId); return this.findOne(id); }
+    if (this.editorial) return this.editorial.profile(card.keywordId);
 
     const entityData = await this.generateProfile(card.name);
 
@@ -179,11 +170,10 @@ export class EntitiesService {
       tags: [],
     };
 
-    if (!process.env.OPENAI_API_KEY) return fallback;
+    if (!await this.runtime.isEnabled()) return fallback;
 
     try {
-      const result = await this.client.chat.completions.create({
-        model: this.model,
+      const result = await this.runtime.completion({
         messages: [
           {
             role: 'system',

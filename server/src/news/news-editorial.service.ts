@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiRuntimeService } from './ai-runtime.service';
 import { NewsBridgeService } from './news-bridge.service';
@@ -16,8 +16,20 @@ function names(value: unknown): string[] {
 }
 
 @Injectable()
-export class NewsEditorialService {
+export class NewsEditorialService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService, private readonly ai: AiRuntimeService, private readonly bridge: NewsBridgeService) {}
+  onModuleInit() {
+    this.ai.register('digest', payload => this.generateDigestNow(payload.date, payload.force));
+    this.ai.register('profile', payload => this.profileNow(payload.keywordId), async (payload, task) => {
+      const error = task.errorJson ? JSON.parse(task.errorJson) : { message: '任务未完成' };
+      await this.prisma.newsEntityProfile.updateMany({ where: { keywordId: payload.keywordId, data: JSON.stringify({ generationStatus: 'pending' }) }, data: { data: JSON.stringify({ type: 'topic', summary: `关注档案生成失败：${error.message} ${error.detail || ''}`, generationStatus: 'failed' }) } });
+    });
+  }
+  async generateDigest(date: string, force = true) {
+    if (!force && await this.prisma.newsDigest.findUnique({ where: { date } })) return;
+    return this.ai.enqueue('digest', { date, force }, { activeKey: `digest:${date}` });
+  }
+  profile(keywordId: string) { return this.ai.enqueue('profile', { keywordId }, { activeKey: `profile:${keywordId}` }); }
 
   async getDigest(date: string) {
     const record = await this.prisma.newsDigest.findUnique({ where: { date } });
@@ -34,7 +46,7 @@ export class NewsEditorialService {
     return Promise.all(records.map(async record => ({ date: record.date, summary: (await this.getDigest(record.date))?.data.summary || '', createdAt: record.createdAt })));
   }
 
-  async generateDigest(date: string, force = true) {
+  private async generateDigestNow(date: string, force = true) {
     const parsedDate = new Date(`${date}T00:00:00Z`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) throw new BadRequestException('日报日期无效');
     return this.ai.withLease(`digest:${date}`, async () => {
@@ -54,7 +66,7 @@ export class NewsEditorialService {
         generatedAt: new Date().toISOString(), itemCount: items.length, generationStatus: 'rules' };
       const config = await this.ai.config();
       if (items.length && config.enabled && config.apiKey) {
-        const result = await this.ai.requestJson(`你是涉华新闻编辑。生成前一日简体中文日报，保留归属与不确定性。
+        const result = await this.ai.performJson(`你是涉华新闻编辑。生成前一日简体中文日报，保留归属与不确定性。
 返回 JSON：{"summary":"一段概述","highlights":[{"newsId":"提供的id","summary":"摘要","whyImportant":"依据原文解释影响","affects":["受影响对象"]}],"sections":[{"key":"policy|economy|diplomacy|technology|security|society","items":[{"newsId":"提供的id","summary":"摘要"}]}]}。
 重点最多5条，每个主题最多10条；只能引用提供的 newsId，不生成链接。没有依据的内容返回空数组。`,
           { date, items: items.map(item => ({ id: item.id, title: item.title.slice(0, 600), summary: (item.summary || '').slice(0, 1600), topic: item.category })) });
@@ -75,7 +87,7 @@ export class NewsEditorialService {
     });
   }
 
-  async profile(keywordId: string) {
+  private async profileNow(keywordId: string) {
     return this.ai.withLease(`profile:${keywordId}`, async () => {
       const keyword = await this.prisma.keyword.findUniqueOrThrow({ where: { id: keywordId } });
       const existing = await this.prisma.newsEntityProfile.findUnique({ where: { keywordId } });
@@ -85,7 +97,7 @@ export class NewsEditorialService {
         relatedModels: [], relatedProducts: [], competesWith: [], tags: [] as string[], generationStatus: 'rules' };
       if (config.enabled && config.apiKey) {
         const news = await this.prisma.hotspot.findMany({ where: contentScope({ OR: [{ title: { contains: keyword.text } }, { content: { contains: keyword.text } }, { newsItem: { is: { OR: [{ title: { contains: keyword.text } }, { summary: { contains: keyword.text } }] } } }] }), take: 8, orderBy: { createdAt: 'desc' } });
-        const result = await this.ai.requestJson(`为关注词创建涉华档案，返回 JSON：{"type":"country|organization|company|person|topic","summary":"简体中文简介","aliases":[],"relatedCountries":[],"relatedOrganizations":[],"relatedCompanies":[],"relatedPeople":[],"tags":[]}。
+        const result = await this.ai.performJson(`为关注词创建涉华档案，返回 JSON：{"type":"country|organization|company|person|topic","summary":"简体中文简介","aliases":[],"relatedCountries":[],"relatedOrganizations":[],"relatedCompanies":[],"relatedPeople":[],"tags":[]}。
 简介与关联必须有给定报道支持；没有材料时只解释关注词，不臆测关联。每个列表最多8项；别名仅提供明确的中英文称呼。`,
           { keyword: keyword.text, reports: news.map(item => ({ title: item.title.slice(0, 600), summary: item.content.slice(0, 1600) })) });
         if (!['country', 'organization', 'company', 'person', 'topic'].includes(String(result.type))) throw new BadRequestException('关注档案的实体类型无效，已有结果已保留');

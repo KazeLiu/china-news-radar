@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { adminApi, type AiTestResult } from './admin-api';
 import styles from './admin.module.css';
+import { waitForAiTask, type AiTicket } from '@/services/ai-tasks';
 
 const relationLabels = { related: '涉华', unrelated: '不涉华', uncertain: '信息不足，采用关键词兜底' };
 const topicLabels = { policy: '政策', economy: '经济', diplomacy: '外交', technology: '科技', security: '安全', society: '社会' };
@@ -29,7 +30,8 @@ export function AiTestPanel({ token, busy, keyConfigured, onUsage }: {
   async function test() {
     setTesting(true); setResult(null); setError(''); setElapsedSeconds(0);
     try {
-      const response = await adminApi<AiTestResult>('admin/ai/test', token, { title, summary }, 'POST');
+      const ticket = await adminApi<AiTicket>('admin/ai/test', token, { title, summary }, 'POST');
+      const response = await waitForAiTask<AiTestResult>(ticket);
       setResult(response); onUsage(response.usage);
     } catch (problem) { setError(problem instanceof Error ? problem.message : '测试调用失败'); }
     finally { setTesting(false); }
@@ -44,7 +46,7 @@ export function AiTestPanel({ token, busy, keyConfigured, onUsage }: {
     </div>
     <div className={styles.actions}><button className={styles.primary} type="submit" disabled={busy || testing || !keyConfigured || !title.trim()}>{testing ? '正在调用 AI…' : '测试已保存配置'}</button><span>每次点击调用一次，失败也计入每日额度；测试结果不保存为新闻。</span></div>
     {!keyConfigured && <p className={styles.hint}>请先在上方填写并保存 API Key。</p>}
-    {testing && <p role="status">正在等待模型返回，已等待 {elapsedSeconds} 秒，最多等待约 120 秒。提供商收到请求后仍需要生成结果，请稍候。</p>}
+    {testing && <p role="status">任务已排队，已等待 {elapsedSeconds} 秒；开始调用后最多等待模型 120 秒。暂停队列时请先继续队列。</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
     {result && <div className={styles.testResult} role="status">
       <h3>{result.ok ? '调用成功，结果符合项目要求' : '测试未通过'}</h3>

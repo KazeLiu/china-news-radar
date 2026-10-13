@@ -1,20 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import OpenAI from 'openai';
+import { AiRuntimeService } from '../news/ai-runtime.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ChatService {
   private readonly logger = new Logger(ChatService.name);
-  private readonly client: OpenAI;
-  private readonly model: string;
-
-  constructor(private readonly prisma: PrismaService) {
-    this.client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY ?? '',
-      baseURL: process.env.OPENAI_BASE_URL ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    });
-    this.model = process.env.MODEL_NAME ?? 'qwen-coder-turbo';
-  }
+  constructor(private readonly prisma: PrismaService, private readonly runtime: AiRuntimeService) {}
 
   async createSession(title?: string) {
     return this.prisma.chatSession.create({
@@ -99,7 +90,7 @@ export class ChatService {
 
 ${contextText ? `=== 相关资讯 ===\n${contextText}\n=== 资讯结束 ===` : '（暂无相关资讯，请基于你的知识回答）'}`;
 
-    const messages: OpenAI.ChatCompletionMessageParam[] = [
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: systemPrompt },
       ...history.slice(0, -1).map((m) => ({
         role: m.role as 'user' | 'assistant',
@@ -111,21 +102,10 @@ ${contextText ? `=== 相关资讯 ===\n${contextText}\n=== 资讯结束 ===` : '
     let fullResponse = '';
 
     try {
-      const stream = await this.client.chat.completions.create({
-        model: this.model,
-        messages,
-        temperature: 0.7,
-        max_tokens: 1000,
-        stream: true,
-      });
-
-      for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta?.content || '';
-        if (delta) {
-          fullResponse += delta;
-          yield JSON.stringify({ delta }) + '\n';
-        }
-      }
+      const ticket = await this.runtime.enqueue('raw', { messages, maxTokens: 1000 });
+      yield JSON.stringify({ taskId: ticket.taskId, status: ticket.status }) + '\n';
+      fullResponse = await this.runtime.awaitTask(ticket.taskId) as string;
+      yield JSON.stringify({ delta: fullResponse }) + '\n';
 
       // Yield sources at the end
       if (contextItems.length > 0) {
@@ -152,7 +132,7 @@ ${contextText ? `=== 相关资讯 ===\n${contextText}\n=== 资讯结束 ===` : '
         });
       }
     } catch (err) {
-      this.logger.error('Chat stream error:', err);
+      this.logger.error('对话任务未完成，请通过任务 ID 查看安全原因');
       yield JSON.stringify({ error: 'AI 服务暂时不可用，请稍后重试' }) + '\n';
     }
   }

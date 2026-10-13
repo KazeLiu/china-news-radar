@@ -17,8 +17,8 @@ export class DigestController {
   async generate(@Req() req: AdminRequest, @Query('date') date?: string) {
     if (newsMode()) requireAdminMutation(req);
     const target = date || this.digestService.getBeijingDatePublic();
-    await this.digestService.generateDigest(target);
-    return { message: `Digest generated for ${target}` };
+    const task = await this.digestService.generateDigest(target);
+    return { message: `日报任务已提交：${target}`, ...(task || {}) };
   }
 
   @Get('recent')

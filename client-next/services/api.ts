@@ -2,6 +2,7 @@ import { requestJson } from './http';
 import type { CuratedResponse, DigestRecord } from '../lib/server-api';
 import type { Stats } from '../types';
 import { adminHeaders } from './admin-session';
+import { waitForAiTask, type AiTicket } from './ai-tasks';
 
 export interface Keyword {
   id: string;
@@ -128,8 +129,11 @@ export const digestApi = {
   // Nest serializes an absent digest as a successful empty response.
   getByDate: (date: string) =>
     requestJson<DigestRecord | null>(`/api/digest/${date}`, {}, true),
-  generate: (date?: string) =>
-    request<{ message: string }>(`/digest/generate${date ? `?date=${date}` : ''}`, { method: 'POST' }),
+  generate: async (date?: string) => {
+    const ticket = await request<AiTicket & { message: string }>(`/digest/generate${date ? `?date=${date}` : ''}`, { method: 'POST' });
+    if (ticket.taskId) await waitForAiTask(ticket);
+    return ticket;
+  },
 };
 
 // Entities (My Follows knowledge cards)
@@ -196,8 +200,11 @@ export interface EntityCardDetail extends EntityCardSummary {
 export const entitiesApi = {
   getAll: () => request<EntityCardSummary[]>('/entities'),
   getOne: (id: string) => request<EntityCardDetail>(`/entities/${id}`),
-  refresh: (id: string) =>
-    request<EntityCardSummary>(`/entities/${id}/refresh`, { method: 'POST' }),
+  refresh: async (id: string) => {
+    const result = await request<EntityCardSummary | AiTicket>(`/entities/${id}/refresh`, { method: 'POST' });
+    if ('taskId' in result) { await waitForAiTask(result); return request<EntityCardSummary>(`/entities/${id}`); }
+    return result;
+  },
   getNewsForName: (name: string, limit = 6) =>
     request<NewsItem[]>(`/entities/news?name=${encodeURIComponent(name)}&limit=${limit}`),
 };

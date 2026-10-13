@@ -29,6 +29,7 @@ export class NewsController {
   @Get('admin/ai/key') @Header('Cache-Control', 'no-store') aiKey(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminAiKey(); }
   @Put('admin/ai') ai(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureAi(body); }
   @Post('admin/ai/test') testAi(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testAi(body); }
+  @Post('admin/ai/history') history(@Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.startHistory(); }
   @Put('admin/sources') configureSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureSource(body); }
   @Delete('admin/sources/:id') deleteSource(@Param('id') id: string, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.deleteSource(id); }
   @Post('admin/sources/test') testSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testSource(body); }

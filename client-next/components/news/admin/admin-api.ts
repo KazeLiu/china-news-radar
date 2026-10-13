@@ -1,7 +1,7 @@
 import type { Source } from '../NewsSourceRow';
 import { requestJson } from '@/services/http';
 
-export interface AiSettings { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; instructions: string; keyConfigured: boolean; protocolPrompt: string }
+export interface AiSettings { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; instructions: string; keyConfigured: boolean; protocolPrompt: string; intervalMs: number; autoAnalyzeNew: boolean; newsOutputTokens: number }
 export interface AiTestResult {
   ok: boolean; checkedAt: string; model: string; elapsedMs: number;
   input: { title: string; summary: string; truncated: boolean }; usage: { used: number; limit: number };

@@ -1,47 +1,16 @@
 import { Injectable } from '@nestjs/common';
-import OpenAI from 'openai';
+import { AiRuntimeService } from '../news/ai-runtime.service';
 import type { AIAnalysis } from '../types';
 
 @Injectable()
 export class AiService {
-  private readonly client: OpenAI;
-  private readonly model: string;
   private readonly expansionCache = new Map<string, string[]>();
 
   private stats = { calls: 0, latencyMs: 0, promptTokens: 0, completionTokens: 0, errors: 0, retries: 0 };
   private callsByKind: Record<string, number> = {};
 
-  // ── Global concurrency throttle ─────────────────────────────────────────
-  // The provider determines how aggressive we can be:
-  //   - DashScope/SiliconFlow/DeepSeek: usually fine at 10-15 concurrent
-  //   - Xiaomi MiMo / smaller providers: 429 above ~3-5 concurrent
-  // AI_MAX_CONCURRENT env var lets the user tune without code changes.
-  private readonly maxConcurrent: number;
-  private inFlight = 0;
-  private waitQueue: Array<() => void> = [];
-
-  // ── Token budget ────────────────────────────────────────────────────────
-  // Reasoning models (MiMo / R1) burn through max_tokens inside <think>
-  // before emitting the actual JSON. 1500-2000 is a safer floor than the
-  // pre-reasoning-era 400-800. AI_MAX_TOKENS env var lets the user dial up
-  // further for chains of thought that are particularly verbose.
-  private readonly maxTokens: number;
-
-  // ── 429 retry config ────────────────────────────────────────────────────
-  private readonly maxRetries429: number;
-
-  constructor() {
-    this.client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY ?? '',
-      baseURL: process.env.OPENAI_BASE_URL ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-      timeout: 60000, // 60s — reasoning models routinely sit on the connection for 15s+
-      maxRetries: 0,  // we do our own 429-aware retry below
-    });
-    this.model = process.env.MODEL_NAME ?? 'qwen-coder-turbo';
-    this.maxConcurrent = Math.max(1, Number(process.env.AI_MAX_CONCURRENT ?? 5));
-    this.maxRetries429 = Math.max(0, Number(process.env.AI_MAX_RETRIES_429 ?? 3));
-    this.maxTokens = Math.max(400, Number(process.env.AI_MAX_TOKENS ?? 1500));
-  }
+  private readonly maxTokens = 4000;
+  constructor(private readonly runtime: AiRuntimeService) {}
 
   resetStats(): void {
     this.stats = { calls: 0, latencyMs: 0, promptTokens: 0, completionTokens: 0, errors: 0, retries: 0 };
@@ -54,31 +23,6 @@ export class AiService {
       totalTokens: this.stats.promptTokens + this.stats.completionTokens,
       byKind: { ...this.callsByKind },
     };
-  }
-
-  /** Acquire one slot from the global AI request semaphore. Blocks if at limit. */
-  private async acquire(): Promise<void> {
-    if (this.inFlight < this.maxConcurrent) {
-      this.inFlight++;
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      this.waitQueue.push(() => {
-        this.inFlight++;
-        resolve();
-      });
-    });
-  }
-
-  private release(): void {
-    this.inFlight--;
-    const next = this.waitQueue.shift();
-    if (next) next();
-  }
-
-  /** Sleep for `ms` ms, optionally with random jitter [0, jitter). */
-  private sleep(ms: number, jitter = 500): Promise<void> {
-    return new Promise((r) => setTimeout(r, ms + Math.floor(Math.random() * jitter)));
   }
 
   /**
@@ -108,65 +52,20 @@ export class AiService {
     return s.trim();
   }
 
-  /** Pull a wait time from a 429 error: prefer Retry-After header, else
-   *  exponential backoff capped at 8s. attempt is 1-indexed. */
-  private compute429Backoff(err: unknown, attempt: number): number {
-    const retryAfter = Number(
-      ((err as { headers?: Record<string, string> })?.headers?.['retry-after']) ?? NaN,
-    );
-    if (!isNaN(retryAfter) && retryAfter > 0) return Math.min(retryAfter * 1000, 30000);
-    return Math.min(2000 * 2 ** (attempt - 1), 8000);
-  }
-
-  private isRateLimitError(err: unknown): boolean {
-    const e = err as { status?: number; response?: { status?: number } };
-    return e?.status === 429 || e?.response?.status === 429;
-  }
-
   private async tracked<T extends { usage?: { prompt_tokens?: number; completion_tokens?: number } | null }>(
     kind: string,
     fn: () => Promise<T>,
   ): Promise<T> {
-    await this.acquire();
     const start = Date.now();
     this.callsByKind[kind] = (this.callsByKind[kind] || 0) + 1;
     try {
-      let attempt = 0;
-      while (true) {
-        try {
-          const result = await fn();
-          this.stats.calls++;
-          this.stats.latencyMs += Date.now() - start;
-          this.stats.promptTokens += result.usage?.prompt_tokens || 0;
-          this.stats.completionTokens += result.usage?.completion_tokens || 0;
-          return result;
-        } catch (err) {
-          // Retry on 429 with backoff. Hold the semaphore slot during the
-          // wait — that's the whole point: it naturally throttles the next
-          // wave of requests too.
-          if (this.isRateLimitError(err) && attempt < this.maxRetries429) {
-            attempt++;
-            this.stats.retries++;
-            const wait = this.compute429Backoff(err, attempt);
-            console.warn(
-              `[AI ${kind}] 429 rate-limited, retry ${attempt}/${this.maxRetries429} after ${wait}ms`,
-            );
-            await this.sleep(wait);
-            continue;
-          }
-          // Final failure
-          this.stats.calls++;
-          this.stats.errors++;
-          this.stats.latencyMs += Date.now() - start;
-          if (this.stats.errors <= 3) {
-            const msg = err instanceof Error ? err.message : String(err);
-            console.error(`[AI ${kind}] error #${this.stats.errors}:`, msg);
-          }
-          throw err;
-        }
-      }
+      return await fn();
+    } catch (error) {
+      this.stats.errors++;
+      throw error;
     } finally {
-      this.release();
+      this.stats.calls++;
+      this.stats.latencyMs += Date.now() - start;
     }
   }
 
@@ -177,15 +76,14 @@ export class AiService {
 
     const coreTerms = this.extractCoreTerms(keyword);
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!await this.runtime.isEnabled()) {
       const result = [keyword, ...coreTerms];
       this.expansionCache.set(keyword, result);
       return result;
     }
 
     try {
-      const result = await this.tracked('expandKeyword', () => this.client.chat.completions.create({
-        model: this.model,
+      const result = await this.tracked('expandKeyword', () => this.runtime.completion({
         messages: [
           {
             role: 'system',
@@ -323,7 +221,7 @@ ${matchHint}
   ): Promise<AIAnalysis> {
     const matchResult = preMatchResult ?? { matched: false, matchedTerms: [] };
 
-    if (!process.env.OPENAI_API_KEY) {
+    if (!await this.runtime.isEnabled()) {
       console.warn('OPENAI_API_KEY not configured, using fallback analysis');
       return {
         isReal: true,
@@ -338,8 +236,7 @@ ${matchHint}
     try {
       const prompt = this.buildAnalysisPrompt(keyword, matchResult);
 
-      const result = await this.tracked('analyzeContent', () => this.client.chat.completions.create({
-        model: this.model,
+      const result = await this.tracked('analyzeContent', () => this.runtime.completion({
         messages: [
           { role: 'system', content: prompt },
           { role: 'user', content: content.slice(0, 2000) },
@@ -412,16 +309,14 @@ ${matchHint}
     messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     maxTokens = 400,
     kind = 'callRaw',
-    timeoutMs?: number,
+    _timeoutMs?: number,
   ): Promise<string> {
-    const response = await this.tracked(kind, () => this.client.chat.completions.create(
+    const response = await this.tracked(kind, () => this.runtime.completion(
       {
-        model: this.model,
         messages,
         temperature: 0.1,
         max_tokens: maxTokens,
       },
-      timeoutMs ? { timeout: timeoutMs } : undefined,
     ));
     const msg = response.choices?.[0]?.message;
     // MiMo/reasoning models: prefer content; fallback to reasoning_content if content is null
@@ -440,7 +335,7 @@ ${matchHint}
    * the benefit since they're less likely to mislead users anyway.
    */
   async checkSummaryGrounded(originalContent: string, summary: string): Promise<boolean> {
-    if (!process.env.OPENAI_API_KEY) return true; // Can't check, trust it
+    if (!await this.runtime.isEnabled()) return true; // Can't check, trust it
     if (!summary || summary.length < 5) return true; // Empty summary won't mislead
 
     try {
@@ -472,18 +367,10 @@ ${matchHint}
   }
 
   async batchAnalyze(contents: string[], keyword: string, expandedKeywords?: string[]): Promise<AIAnalysis[]> {
-    const batchSize = 3;
     const results: AIAnalysis[] = [];
-
-    for (let i = 0; i < contents.length; i += batchSize) {
-      const batch = contents.slice(i, i + batchSize);
-      const batchResults = await Promise.all(
-        batch.map(content => {
-          const preMatch = expandedKeywords ? this.preMatchKeyword(content, expandedKeywords) : undefined;
-          return this.analyzeContent(content, keyword, preMatch);
-        }),
-      );
-      results.push(...batchResults);
+    for (const content of contents) {
+      const preMatch = expandedKeywords ? this.preMatchKeyword(content, expandedKeywords) : undefined;
+      results.push(await this.analyzeContent(content, keyword, preMatch));
     }
 
     return results;

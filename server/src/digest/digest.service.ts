@@ -1,7 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
-import OpenAI from 'openai';
+import { AiRuntimeService } from '../news/ai-runtime.service';
 import { NewsEditorialService } from '../news/news-editorial.service';
 
 export interface DigestHighlight {
@@ -51,16 +51,7 @@ export interface DigestData {
 @Injectable()
 export class DigestService {
   private readonly logger = new Logger(DigestService.name);
-  private readonly client: OpenAI;
-  private readonly model: string;
-
-  constructor(private readonly prisma: PrismaService, @Optional() private readonly editorial?: NewsEditorialService) {
-    this.client = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY ?? '',
-      baseURL: process.env.OPENAI_BASE_URL ?? 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    });
-    this.model = process.env.MODEL_NAME ?? 'qwen-coder-turbo';
-  }
+  constructor(private readonly prisma: PrismaService, private readonly runtime: AiRuntimeService, @Optional() private readonly editorial?: NewsEditorialService) {}
 
   getBeijingDatePublic(): string { return this.getBeijingDate(); }
 
@@ -81,7 +72,7 @@ export class DigestService {
     return d.toISOString().slice(0, 10);
   }
 
-  async generateDigest(date: string, force = true): Promise<void> {
+  async generateDigest(date: string, force = true) {
     if (this.editorial) return this.editorial.generateDigest(date, force);
     // The digest dated `date` summarizes the *previous* Beijing day's hotspots
     // — matches TLDR-style morning newsletter convention. When the 08:00 cron
@@ -121,7 +112,7 @@ export class DigestService {
     let data: DigestData;
     if (items.length === 0) {
       data = this.emptyDigest(0);
-    } else if (!process.env.OPENAI_API_KEY) {
+    } else if (!await this.runtime.isEnabled()) {
       data = this.fallbackDigest(items);
     } else {
       data = await this.generateAiDigest(items, date);
@@ -243,8 +234,7 @@ ${numbered}
 - 所有 url 必须来自输入数据，不要编造
 - affects 写具体方向，如"AI Coding"、"Agent开发"、"中文LLM"，不要写"所有人"`;
 
-      const result = await this.client.chat.completions.create({
-        model: this.model,
+      const result = await this.runtime.completion({
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },

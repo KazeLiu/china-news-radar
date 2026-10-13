@@ -7,6 +7,7 @@ import { useTheme } from '@/providers/ThemeProvider';
 import { adminApi, type AdminSettings } from './admin-api';
 import { AiSettingsForm } from './AiSettingsForm';
 import { AiTestPanel } from './AiTestPanel';
+import { AiQueuePanel } from './AiQueuePanel';
 import { SourceSettingsForm } from './SourceSettingsForm';
 import { RulesSettingsForm } from './RulesSettingsForm';
 import base from '../news.module.css';
@@ -74,7 +75,7 @@ export function AdminConsole() {
       {notice && <div className={styles.notice} role="status">{notice}</div>}
       {loading ? <div className={styles.card} role="status">正在读取后台配置…</div> : !config ? <form className={styles.card} onSubmit={event => { event.preventDefault(); void login(); }}><h2>管理员登录</h2>{!initialized ? <p>尚未设置管理员。请在服务器交互终端运行 <code>pnpm --filter ai-hot-radar-server admin:init</code>，预览副本需指定 DATABASE_URL。</p> : <><label className={styles.fullField}>账号<input autoComplete="username" required maxLength={80} value={username} onChange={e => setUsername(e.target.value)} /></label><label className={styles.fullField}>密码<input type="password" autoComplete="current-password" required maxLength={256} value={password} onChange={e => setPassword(e.target.value)} /></label><button className={styles.primary} type="submit">进入后台</button></>}</form> : <>
         <nav className={styles.tabs} aria-label="后台配置导航">{tabs.map(({ id, label, Icon }) => <button key={id} aria-pressed={tab === id} className={tab === id ? styles.activeTab : ''} disabled={busy} onClick={() => { setTab(id); setNotice(''); window.history.replaceState(null, '', `/admin?tab=${id}`); }}><Icon size={18} />{label}</button>)}</nav>
-        <div hidden={tab !== 'ai'}><AiSettingsForm initial={config.ai} savedApiKey={savedApiKey} busy={busy} onSave={save} /><AiTestPanel token={token} busy={busy} keyConfigured={config.ai.keyConfigured} onUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
+        <div hidden={tab !== 'ai'}><AiSettingsForm initial={config.ai} savedApiKey={savedApiKey} busy={busy} onSave={save} /><AiQueuePanel /><AiTestPanel token={token} busy={busy} keyConfigured={config.ai.keyConfigured} onUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
         <div hidden={tab !== 'sources'}><SourceSettingsForm sources={config.sources} token={token} busy={busy} onSave={save} /></div>
         <div hidden={tab !== 'rules'}><RulesSettingsForm initial={config.rules} sources={config.sources} token={token} busy={busy} onSave={save} /></div>
         <p className={styles.footnote}>配置和会话保存在本站数据库。账号初始化或重置后，旧会话立即失效。</p>

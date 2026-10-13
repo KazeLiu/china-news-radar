@@ -202,6 +202,8 @@ model NewsAnalysis {
   analyzedAt  DateTime?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  historical Boolean @default(true)
+  queuedTaskId String?
 
   @@index([status, retryAt])
 }
@@ -253,4 +255,42 @@ model AdminLoginAttempt {
   failures Int @default(0)
   blockedUntil DateTime?
   updatedAt DateTime @updatedAt
+}
+
+model AiTask {
+  id String @id @default(uuid())
+  kind String
+  payload String
+  activeKey String? @unique
+  status String @default("queued")
+  attempts Int @default(0)
+  maxAttempts Int @default(3)
+  availableAt DateTime @default(now())
+  owner String?
+  leaseUntil DateTime?
+  resultJson String?
+  errorJson String?
+  failureHandled Boolean @default(false)
+  createdAt DateTime @default(now())
+  finishedAt DateTime?
+  requests AiRequest[]
+  @@index([status, availableAt])
+}
+
+model AiRequest {
+  id String @id @default(uuid())
+  taskId String
+  task AiTask @relation(fields: [taskId], references: [id])
+  kind String
+  model String
+  attempt Int
+  status String @default("running")
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  elapsedMs Int?
+  requestId String?
+  errorJson String?
+  analyzedCount Int @default(0)
+  translatedCount Int @default(0)
+  @@index([startedAt])
 }

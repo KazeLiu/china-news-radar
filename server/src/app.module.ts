@@ -16,12 +16,14 @@ import { AgentModule } from './agent/agent.module';
 import { EntitiesModule } from './entities/entities.module';
 import { RadarModule } from './radar.module';
 import { AdminAuthModule } from './admin/admin-auth.module';
+import { AiRuntimeModule } from './news/ai-runtime.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     PrismaModule,
     AdminAuthModule,
+    AiRuntimeModule,
     GatewayModule,
     ServicesModule,
     KeywordsModule,

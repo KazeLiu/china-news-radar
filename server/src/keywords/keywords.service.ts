@@ -47,12 +47,9 @@ export class KeywordsService {
       if (error.code === 'P2002') throw new ConflictException('Keyword already exists');
       throw error;
     }
-    // Fire-and-forget entity profile generation
     await this.bridge?.rebuild();
-    this.entitiesService.createForKeyword(keyword.id, keyword.text).catch((err) => {
-      console.error('[Keywords] entity generation failed:', err);
-    });
-    return keyword;
+    const task = await this.entitiesService.createForKeyword(keyword.id, keyword.text);
+    return { ...keyword, ...(task || {}) };
   }
 
   async update(id: string, data: { text?: string; category?: string; isActive?: boolean }) {
