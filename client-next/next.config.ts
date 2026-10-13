@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Give the backend's 120-second AI timeout enough time to return its diagnostics.
+  experimental: { proxyTimeout: 150_000 },
   // API 代理到后端 NestJS
   async rewrites() {
     const apiUrl = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001';

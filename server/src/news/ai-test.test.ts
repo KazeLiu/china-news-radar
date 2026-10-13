@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NewsService } from './news.service';
 import { NewsController } from './news.controller';
 import { PrismaService } from '../prisma/prisma.service';
+import { APIConnectionTimeoutError, APIConnectionError, APIError } from 'openai';
 
 const model = vi.hoisted(() => ({ create: vi.fn(), options: vi.fn() }));
-vi.mock('openai', () => ({ default: class {
+vi.mock('openai', async importOriginal => ({ ...await importOriginal<typeof import('openai')>(), default: class {
   chat = { completions: { create: model.create } };
   constructor(options: unknown) { model.options(options); }
 } }));
@@ -41,7 +42,7 @@ describe('administrator AI test', () => {
       expect.objectContaining({ role: 'system', content: expect.stringContaining('关注贸易政策') }),
       { role: 'user', content: JSON.stringify({ ...sample, truncated: false }) },
     ] }));
-    expect(model.options).toHaveBeenCalledWith(expect.objectContaining({ timeout: 20_000, maxRetries: 0 }));
+    expect(model.options).toHaveBeenCalledWith(expect.objectContaining({ timeout: 120_000, maxRetries: 0 }));
     expect(f.settings.get(f.usageKey)).toBe('1'); expect(f.settings.size).toBe(1);
     for (const method of Object.values(f.db.newsItem)) expect(method).not.toHaveBeenCalled();
     for (const method of Object.values(f.db.newsAnalysis)) expect(method).not.toHaveBeenCalled();
@@ -51,6 +52,7 @@ describe('administrator AI test', () => {
     const f = fixture('0', false);
     expect(f.service['ai']).toBeNull(); expect((await f.service.testAi(sample)).ok).toBe(true);
     expect(f.service['config'].ai.enabled).toBe(false); expect(model.create).toHaveBeenCalledOnce();
+    expect(model.options).toHaveBeenCalledWith(expect.objectContaining({ timeout: 120_000, maxRetries: 0 }));
   });
   it.each([null, {}, { ...sample, title: ' ' }, { ...sample, title: '<b></b>' }, { ...sample, title: 'a'.repeat(601) }, { ...sample, summary: 'a'.repeat(1601) }])('rejects invalid sample content without charging: %j', async sample => {
     const f = fixture(); await expect(f.service.testAi(sample)).rejects.toThrow();
@@ -68,9 +70,37 @@ describe('administrator AI test', () => {
     expect(JSON.stringify(output)).not.toContain('test-only-key'); expect(model.create).toHaveBeenCalledOnce();
   });
   it('reports timeouts and releases the test lock after failure', async () => {
-    const f = fixture(); model.create.mockRejectedValueOnce({ name: 'APIConnectionTimeoutError' });
-    expect(await f.service.testAi(sample)).toMatchObject({ ok: false, error: { code: 'timeout' } });
+    const f = fixture(); const timeout = new APIConnectionTimeoutError();
+    expect(timeout.name).toBe('Error');
+    model.create.mockRejectedValueOnce(timeout);
+    expect(await f.service.testAi(sample)).toMatchObject({ ok: false, error: { code: 'timeout', errorType: 'APIConnectionTimeoutError', message: expect.stringContaining('120 秒'), detail: expect.stringContaining('未收到完整响应') } });
     expect(await f.service.testAi(sample)).toMatchObject({ ok: true, usage: { used: 2 } });
+  });
+  it('identifies connection causes without returning credentials or provider error bodies', async () => {
+    const f = fixture(); const cause = Object.assign(new Error('https://test-only-key@example.invalid'), { code: 'ENOTFOUND' });
+    model.create.mockRejectedValueOnce(new APIConnectionError({ cause }));
+    const output = await f.service.testAi(sample);
+    expect(output).toMatchObject({ ok: false, error: { code: 'connection-error', errorType: 'APIConnectionError', networkCode: 'ENOTFOUND', detail: expect.stringContaining('域名') } });
+    expect(JSON.stringify(output)).not.toContain('test-only-key');
+  });
+  it('reports HTTP request identifiers and specific rejection guidance', async () => {
+    const f = fixture(); model.create.mockRejectedValueOnce(APIError.generate(429, { error: { message: 'secret test-only-key' } }, undefined, { 'x-request-id': 'req-test-429' }));
+    const output = await f.service.testAi(sample);
+    expect(output).toMatchObject({ ok: false, error: { code: 'http-error', status: 429, errorType: 'RateLimitError', requestId: 'req-test-429', detail: expect.stringContaining('限流') } });
+    expect(JSON.stringify(output)).not.toContain('test-only-key');
+  });
+  it('does not expose a credential returned as a request identifier', async () => {
+    const f = fixture(); model.create.mockRejectedValueOnce(APIError.generate(503, {}, undefined, { 'x-request-id': 'test-only-key' }));
+    const output = await f.service.testAi(sample);
+    expect(output.error).not.toHaveProperty('requestId'); expect(JSON.stringify(output)).not.toContain('test-only-key');
+  });
+  it('explains invalid JSON and includes the response request identifier', async () => {
+    const f = fixture(); model.create.mockResolvedValueOnce({ _request_id: 'req-invalid-json', choices: [{ finish_reason: 'stop', message: { content: 'not JSON' } }] });
+    expect(await f.service.testAi(sample)).toMatchObject({ ok: false, error: { code: 'invalid-response', detail: '模型输出不是有效 JSON。', requestId: 'req-invalid-json' } });
+  });
+  it('explains output truncation before trying to parse it', async () => {
+    const f = fixture(); model.create.mockResolvedValueOnce({ choices: [{ finish_reason: 'length', message: { content: '{' } }] });
+    expect(await f.service.testAi(sample)).toMatchObject({ ok: false, error: { code: 'invalid-response', detail: expect.stringContaining('输出长度上限') } });
   });
   it.each(['not JSON', JSON.stringify({ ...analysis, translation: { title: '标题', summary: '' } })])('rejects invalid output and incomplete translations without caching', async content => {
     const f = fixture(); model.create.mockResolvedValue({ choices: [{ message: { content } }] });

@@ -11,23 +11,7 @@ import { feedUrlsFor, distributionFor } from './transports';
 import { fetchSourceFeed, FeedFetchError, restoreFailures } from './feed-fetch';
 import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, restoreConfig, validateAi, validateRules, validateSource } from './admin-config';
 import { matchingExclusions } from './content-filter';
-
-class InvalidAnalysisResponse extends Error {}
-function aiTestError(problem: unknown) {
-  if (problem instanceof InvalidAnalysisResponse) return { code: 'invalid-response', message: '接口已响应，但返回的 JSON、分类字段或译文不符合项目要求。请使用支持 JSON object 输出的模型。' };
-  const failure = problem as { status?: number; name?: string } | null;
-  const status = typeof failure?.status === 'number' ? failure.status : undefined;
-  const message = status === 401 || status === 403 ? '认证或访问被拒绝，请检查 API Key 和模型权限。'
-    : status === 404 ? '接口或模型不存在，请检查 Base URL（通常以 /v1 结尾）和模型名称。'
-    : status === 429 ? '服务限流或账户额度不足，请检查提供商的用量与余额。'
-    : status === 400 || status === 422 ? '服务不接受当前请求，请检查模型是否支持 Chat Completions、system 提示词和 JSON object 输出。'
-    : status && status >= 500 ? '模型服务暂时出错，请稍后重试。'
-    : failure?.name === 'APIConnectionTimeoutError' ? '调用超过 20 秒仍未完成，请检查网络或更换响应更快的模型。'
-    : failure?.name === 'APIConnectionError' ? '无法连接模型服务，请检查接口地址、网络和证书。'
-    : 'AI 调用未完成，请检查接口地址和模型服务。';
-  // Provider error bodies can contain credentials; only return our message and HTTP status.
-  return { code: failure?.name === 'APIConnectionTimeoutError' ? 'timeout' : status ? 'http-error' : 'connection-error', message, ...(status ? { status } : {}) };
-}
+import { AI_TIMEOUT_MS, InvalidAnalysisResponse, aiTestError, analysisErrorDetail } from './ai-errors';
 
 @Injectable()
 export class NewsService implements OnModuleInit, OnModuleDestroy {
@@ -47,7 +31,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private ai = this.makeAi();
   constructor(private readonly prisma: PrismaService) {}
 
-  private makeAi() { return this.aiEnabled ? new OpenAI({ apiKey: this.config.ai.apiKey, baseURL: this.config.ai.baseUrl, timeout: 20_000, maxRetries: 0 }) : null; }
+  private makeAi() { return this.aiEnabled ? new OpenAI({ apiKey: this.config.ai.apiKey, baseURL: this.config.ai.baseUrl, timeout: AI_TIMEOUT_MS, maxRetries: 0 }) : null; }
   private startAnalysisTimer() {
     if (!this.analysisTimer) this.analysisTimer = setInterval(() => {
       if (this.aiEnabled) void Promise.all([this.showOverdueFallbacks(), this.drainAnalysis()]).catch(() => this.logger.warn('AI 队列异常，原文已保留'));
@@ -242,7 +226,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       }
       // A single SQLite transaction reserves budget before the paid request and claims the job.
       await tx.setting.upsert({ where: { key: usageKey }, create: { key: usageKey, value: String(usage + 1) }, update: { value: String(usage + 1) } });
-      const updated = await tx.newsAnalysis.update({ where: { key: job.key }, data: { status: 'processing', attempts: { increment: 1 }, leaseUntil: new Date(now.getTime() + 90_000), retryAt: null } });
+      const updated = await tx.newsAnalysis.update({ where: { key: job.key }, data: { status: 'processing', attempts: { increment: 1 }, leaseUntil: new Date(now.getTime() + AI_TIMEOUT_MS + 30_000), retryAt: null } });
       return { job: updated, call: true };
     });
     if (!claimed) return false;
@@ -270,11 +254,15 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private async requestAnalysis(ai: OpenAI, model: string, instructions: string, inputJson: string) {
     const response = await ai.chat.completions.create({ model, temperature: 0, max_tokens: 3000,
       response_format: { type: 'json_object' }, messages: [{ role: 'system', content: this.prompt(instructions) }, { role: 'user', content: inputJson }] });
+    const choice = response.choices?.[0];
+    if (choice?.finish_reason === 'length') throw new InvalidAnalysisResponse('模型达到输出长度上限，返回内容被截断。请使用支持当前输出长度的模型。', response._request_id);
+    if (choice?.finish_reason === 'content_filter') throw new InvalidAnalysisResponse('提供商的内容过滤阻止了模型输出。', response._request_id);
+    if (!choice?.message?.content) throw new InvalidAnalysisResponse('接口响应缺少 choices[0].message.content，无法读取模型结果。', response._request_id);
     try {
-      const result = parseAnalysis(response.choices[0]?.message.content || '');
+      const result = parseAnalysis(choice.message.content);
       if (JSON.parse(inputJson).summary && result.translation && !result.translation.summary) throw new Error('Translation summary missing');
       return result;
-    } catch { throw new InvalidAnalysisResponse(); }
+    } catch (problem) { throw new InvalidAnalysisResponse(analysisErrorDetail(problem), response._request_id); }
   }
   async testAi(body: unknown) {
     const sample = body as { title?: unknown; summary?: unknown } | null;
@@ -298,12 +286,12 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       });
       const metadata = { checkedAt, model: config.model, input, usage };
       try {
-        const ai = savedClient || new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, timeout: 20_000, maxRetries: 0 });
+        const ai = savedClient || new OpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl, timeout: AI_TIMEOUT_MS, maxRetries: 0 });
         const result = await this.requestAnalysis(ai, config.model, config.instructions, JSON.stringify(input));
         const decision = analysisDecision(result, { ...input, url: 'https://example.invalid/ai-test' }, []);
         return { ...metadata, ok: true, elapsedMs: Date.now() - start, result, preview: { visible: decision.visible, decisionBy: decision.decisionBy } };
       } catch (problem) {
-        return { ...metadata, ok: false, elapsedMs: Date.now() - start, error: aiTestError(problem) };
+        return { ...metadata, ok: false, elapsedMs: Date.now() - start, error: aiTestError(problem, config.apiKey) };
       }
     } finally { this.testingAi = false; }
   }

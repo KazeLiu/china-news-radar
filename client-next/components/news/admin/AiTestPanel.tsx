@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { adminApi, type AiTestResult } from './admin-api';
 import styles from './admin.module.css';
 
@@ -8,6 +8,7 @@ const relationLabels = { related: '涉华', unrelated: '不涉华', uncertain: '
 const topicLabels = { policy: '政策', economy: '经济', diplomacy: '外交', technology: '科技', security: '安全', society: '社会' };
 const typeLabels = { breaking: '突发快讯', report: '新闻报道', analysis: '分析文章', opinion: '评论', feature: '专题特写', sports: '体育', entertainment: '娱乐', other: '其他' };
 const languageLabels = { 'zh-Hans': '简体中文', 'zh-Hant': '繁体中文', en: '英文', other: '其他语言', mixed: '混合语言' };
+const errorLabels: Record<string, string> = { timeout: '等待超时', 'connection-error': '连接失败', 'http-error': '提供商拒绝或服务出错', 'invalid-response': '模型输出格式错误', 'unknown-error': '未识别异常' };
 
 export function AiTestPanel({ token, busy, keyConfigured, onUsage }: {
   token: string; busy: boolean; keyConfigured: boolean; onUsage: (usage: AiTestResult['usage']) => void;
@@ -17,9 +18,16 @@ export function AiTestPanel({ token, busy, keyConfigured, onUsage }: {
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<AiTestResult | null>(null);
   const [error, setError] = useState('');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  useEffect(() => {
+    if (!testing) return;
+    const start = Date.now();
+    const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [testing]);
 
   async function test() {
-    setTesting(true); setResult(null); setError('');
+    setTesting(true); setResult(null); setError(''); setElapsedSeconds(0);
     try {
       const response = await adminApi<AiTestResult>('admin/ai/test', token, { title, summary }, 'POST');
       setResult(response); onUsage(response.usage);
@@ -36,12 +44,18 @@ export function AiTestPanel({ token, busy, keyConfigured, onUsage }: {
     </div>
     <div className={styles.actions}><button className={styles.primary} type="submit" disabled={busy || testing || !keyConfigured || !title.trim()}>{testing ? '正在调用 AI…' : '测试已保存配置'}</button><span>每次点击调用一次，失败也计入每日额度；测试结果不保存为新闻。</span></div>
     {!keyConfigured && <p className={styles.hint}>请先在上方填写并保存 API Key。</p>}
-    {testing && <p role="status">正在等待模型返回，最多等待约 20 秒…</p>}
+    {testing && <p role="status">正在等待模型返回，已等待 {elapsedSeconds} 秒，最多等待约 120 秒。提供商收到请求后仍需要生成结果，请稍候。</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
     {result && <div className={styles.testResult} role="status">
       <h3>{result.ok ? '调用成功，结果符合项目要求' : '测试未通过'}</h3>
       <p>模型：{result.model} · 耗时：{(result.elapsedMs / 1000).toFixed(1)} 秒 · 今日调用：{result.usage.used} / {result.usage.limit}（UTC）</p>
-      {result.error && <p className={styles.error}>{result.error.status ? `HTTP ${result.error.status}：` : ''}{result.error.message}</p>}
+      {result.error && <div className={styles.error} role="alert">
+        <p>{errorLabels[result.error.code] || result.error.code}：{result.error.message}</p>
+        {result.error.detail && <p>{result.error.detail}</p>}
+        <p>错误代码：{result.error.code}{result.error.errorType ? ` · 异常类型：${result.error.errorType}` : ''}{result.error.status ? ` · HTTP ${result.error.status}` : ''}{result.error.networkCode ? ` · 网络错误：${result.error.networkCode}` : ''}</p>
+        <p>请求 ID：{result.error.requestId || '未收到提供商请求 ID，可按模型和下方测试时间核对提供商记录。'}</p>
+        <p>测试时间：{new Date(result.checkedAt).toLocaleString()} · 最长等待：120 秒 · 自动重试：关闭</p>
+      </div>}
       {result.result && <>
         <dl className={styles.aiFacts}>
           <div><dt>涉华判断</dt><dd>{relationLabels[result.result.relation]}</dd></div>

@@ -63,6 +63,15 @@ describe('persistent unified AI worker', () => {
     await f.service['analyzeNext'](); expect(f.job.status).toBe('done'); expect(f.job.attempts).toBe(2);
     const orphan = fixture(); orphan.item.analysisKey = 'new-version'; await orphan.service['analyzeNext'](); expect(orphan.completion).not.toHaveBeenCalled(); expect(orphan.job.status).toBe('obsolete');
   });
+  it('keeps the processing lease alive longer than the model timeout', async () => {
+    const f = fixture(); let finish!: (value: unknown) => void;
+    f.completion.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }) as never);
+    const start = Date.now(); const pending = f.service['analyzeNext']();
+    await vi.waitFor(() => expect(f.job.status).toBe('processing'));
+    expect(f.job.leaseUntil.getTime()).toBeGreaterThanOrEqual(start + 150_000);
+    finish({ choices: [{ message: { content: JSON.stringify(result) } }] }); await pending;
+    expect(f.job.status).toBe('done'); expect(f.job.leaseUntil).toBeNull(); expect(f.settings.get(f.usageKey)).toBe('1');
+  });
   it('temporarily displays rule-matched news when the model queue takes too long', async () => {
     const f = fixture(); f.item.title = 'China announces trade restrictions';
     await f.service['showOverdueFallbacks']();
