@@ -13,6 +13,7 @@ import { EmptyState } from '../common/EmptyState';
 import type { EntityCardSummary, EntityCardDetail, NewsItem, RelatedData } from '../../services/api';
 import { BilingualText } from '../common/BilingualText';
 import { getNewsText } from '@/lib/newsText';
+import { AiTitleBadge } from '../common/AiTitleBadge';
 import { useReadingPreference } from '@/providers/ReadingPreference';
 
 interface KeywordsViewProps {
@@ -422,7 +423,7 @@ function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: En
 
                 {/* Title */}
                 <p className="text-[14px] font-medium text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors leading-snug mb-1.5">
-                  <BilingualText text={text.title} lineClassName="line-clamp-2">
+                  <BilingualText text={text.title} lineClassName="line-clamp-2" prefix={<AiTitleBadge generated={n.titleGenerated} />}>
                   <ExternalLink className="inline-block w-3 h-3 ml-1 mb-0.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
                   </BilingualText>
                 </p>

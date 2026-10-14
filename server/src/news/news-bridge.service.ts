@@ -27,7 +27,7 @@ export class NewsBridgeService {
     }
     const tier = publisherTier(item.originalPublisher);
     const qualityScore = score ? computeQualityScore({ relevToAi: score.relevance, ...score }, tier) : null;
-    const data = { newsItemId: id, title: item.displayTitle ?? item.titleZh ?? item.title, content: item.displaySummary ?? item.summaryZh ?? item.summary,
+    const data = { newsItemId: id, title: item.displayTitle ?? item.aiGeneratedTitle ?? item.titleZh ?? item.title, content: item.displaySummary ?? item.summaryZh ?? item.summary,
       url: item.url, source: `news_${item.sourceId}`, sourceId: item.sourceId, summary: item.displaySummary ?? item.summaryZh ?? item.summary,
       media: item.hiddenImages ? null : JSON.stringify((JSON.parse(item.images) as string[]).map(url => ({ type: 'photo', url }))),
       publishedAt: item.publishedAt, createdAt: item.firstSeenAt, category: item.topic, region: 'international',
@@ -46,9 +46,9 @@ export class NewsBridgeService {
     return hotspot;
   }
 
-  private async matchItem(tx: Prisma.TransactionClient, item: { id: string; title: string; summary: string; titleZh: string | null; summaryZh: string | null }) {
+  private async matchItem(tx: Prisma.TransactionClient, item: { id: string; title: string; summary: string; titleZh: string | null; summaryZh: string | null; aiGeneratedTitle: string | null }) {
     const keywords = await tx.keyword.findMany({ where: { isActive: true }, include: { newsProfile: true } });
-    const text = `${item.title} ${item.summary} ${item.titleZh || ''} ${item.summaryZh || ''}`.normalize('NFKC').toLowerCase();
+    const text = `${item.title} ${item.summary} ${item.titleZh || ''} ${item.summaryZh || ''} ${item.aiGeneratedTitle || ''}`.normalize('NFKC').toLowerCase();
     await tx.newsKeywordMatch.deleteMany({ where: { newsItemId: item.id } });
     for (const keyword of keywords) {
       let aliases: string[] = [];

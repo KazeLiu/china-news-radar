@@ -2,6 +2,7 @@ export interface NewsText {
   title: string;
   summary?: string | null;
   originalTitle?: string;
+  titleGenerated?: boolean;
   originalSummary?: string;
   displaySummary?: string | null;
 }

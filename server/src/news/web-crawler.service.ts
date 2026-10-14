@@ -71,8 +71,8 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
             try {
               await page.waitForFunction(rules => Array.from(document.querySelectorAll(rules.item)).some(node => {
                 const find = (selector: string) => node.matches(selector) ? node : node.querySelector(selector);
-                const title = find(rules.title); const link = find(rules.link);
-                return !!(title?.getAttribute('content') || title?.textContent || '').trim()
+                const title = rules.title ? find(rules.title) : null; const body = rules.body ? find(rules.body) : null; const link = find(rules.link);
+                return !!(title?.getAttribute('content') || title?.textContent || body?.textContent || '').trim()
                   && !!(link?.getAttribute('href') || link?.getAttribute('data-url') || link?.getAttribute('content'));
               }), source.web!.rules, { timeout: timeoutMs });
             } catch { throw error; }

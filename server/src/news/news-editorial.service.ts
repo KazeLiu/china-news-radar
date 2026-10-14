@@ -58,7 +58,7 @@ export class NewsEditorialService implements OnModuleInit {
       let raw = await this.prisma.hotspot.findMany({ where: contentScope({ ...window, isClusterMain: true, isCurated: true }), include: { newsItem: true }, orderBy: { qualityScore: 'desc' }, take: 60 });
       if (raw.length < 5) raw = await this.prisma.hotspot.findMany({ where: contentScope({ ...window, isClusterMain: true }), include: { newsItem: true }, orderBy: [{ qualityScore: 'desc' }, { publishedAt: 'desc' }], take: 60 });
       const items = raw.map(presentHotspot);
-      const linked = (item: typeof items[number], summary = item.summary || '') => ({ newsItemId: item.newsItemId, title: item.title, summary, source: item.originalPublisher || item.source, url: item.url });
+      const linked = (item: typeof items[number], summary = item.summary || '') => ({ newsItemId: item.newsItemId, title: item.title, titleGenerated: item.titleGenerated, summary, source: item.originalPublisher || item.source, url: item.url });
       let data = { version: 2, summary: items.length ? `前一日共有 ${items.length} 条海外涉华报道。` : '',
         highlights: items.slice(0, 5).map(item => ({ ...linked(item), whyImportant: '', affects: [] as string[] })),
         sections: NEWS_TOPICS.map(key => ({ key, title: TOPIC_LABELS[key], items: items.filter(item => item.category === key).map(item => linked(item)) })),

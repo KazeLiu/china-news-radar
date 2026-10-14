@@ -4,6 +4,7 @@ import { cn } from '../../lib/utils';
 import { relativeTime } from '../../utils/relativeTime';
 import { Skeleton } from '../common/Loader';
 import type { EntityCardSummary, RelatedData } from '../../services/api';
+import { AiTitleBadge } from '../common/AiTitleBadge';
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
   country: <Globe2 className="w-3.5 h-3.5" />,
@@ -152,7 +153,7 @@ export function EntityCard({ entity, isSelected, isRefreshing, onClick, onRefres
               rel="noopener noreferrer"
               className="block text-[11px] text-[var(--text-secondary)] hover:text-[var(--accent-blue)] dark:hover:text-blue-400 transition-colors truncate leading-snug"
             >
-              • {n.title}
+              <AiTitleBadge generated={n.titleGenerated} />• {n.title}
             </a>
           ))}
         </div>

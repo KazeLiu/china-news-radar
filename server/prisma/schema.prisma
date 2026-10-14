@@ -156,6 +156,9 @@ model NewsItem {
   sourceId           String
   source             NewsSource @relation(fields: [sourceId], references: [id])
   title              String
+  sourceTitlePresent Boolean @default(true)
+  aiGeneratedTitle   String?
+  titleGenerated     Boolean @default(false)
   titleZh            String?
   summary            String
   summaryZh          String?

@@ -15,7 +15,7 @@ export function telegramItem(input: { channel?: unknown; messageId?: unknown; te
   const originalUrl = links.find(l => !!publisherForUrl(l)) || null;
   if (!originalUrl && links.some(isDomesticUrl)) return null;
   const title = text.slice(0, 220);
-  return { sourceId: source.id, item: { title, summary: text, url: `https://t.me/${source.channel}/${input.messageId}`, originalUrl,
+  return { sourceId: source.id, item: { title, sourceTitlePresent: false, body: input.text, acquisitionKind: 'telegram', summary: text, url: `https://t.me/${source.channel}/${input.messageId}`, originalUrl,
     originalPublisher: originalUrl ? publisherForUrl(originalUrl) : null, publishedAt, author: source.name,
     topic: topicFor(text), eventKey: eventKey(title), contentHash: createHash('sha256').update(JSON.stringify([text, links, publishedAt])).digest('hex') } };
 }

@@ -43,7 +43,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private fallbackDecision(item: Parameters<typeof fallbackDecision>[0], status: string, rules = this.config.rules, sourceId = '', forceChina = this.forceChina(sourceId)) {
     return fallbackDecision(item, status, rules, sourceId, forceChina);
   }
-  private analysisDecision(result: AnalysisResult, item: Parameters<typeof fallbackDecision>[0], rules = this.config.rules, sourceId = '') {
+  private analysisDecision(result: AnalysisResult, item: Parameters<typeof analysisDecision>[1], rules = this.config.rules, sourceId = '') {
     return analysisDecision(result, item, rules, sourceId, this.forceChina(sourceId));
   }
   constructor(private readonly prisma: PrismaService, private readonly runtime: AiRuntimeService, private readonly adapters: SourceAdapterService, private readonly crawler: WebCrawlerService, private readonly logs: NewsLogsService, @Optional() private readonly bridge?: NewsBridgeService) {}
@@ -110,7 +110,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const where = publicNewsScope({
       ...(query.source ? { sourceId: query.source } : {}), ...(query.topic ? { AND: [{ OR: [{ topic: query.topic }, { aiTopics: { contains: JSON.stringify(query.topic) } }] }] } : {}),
       ...(query.saved === 'true' ? { saved: true } : {}),
-      ...(query.q ? { OR: ['title', 'summary', 'titleZh', 'summaryZh'].map(field => ({ [field]: { contains: query.q!.slice(0, 200) } })) } : {}),
+      ...(query.q ? { OR: ['title', 'summary', 'titleZh', 'aiGeneratedTitle', 'summaryZh'].map(field => ({ [field]: { contains: query.q!.slice(0, 200) } })) } : {}),
     });
     const [items, total] = await Promise.all([this.prisma.newsItem.findMany({ where, omit: { body: true }, orderBy: [{ firstSeenAt: 'desc' }, { publishedAt: 'desc' }, { id: 'desc' }], skip: offset, take: 50 }), this.prisma.newsItem.count({ where })]);
     return { items: items.map(presentNews), total, nextOffset: offset + items.length < total ? offset + items.length : null };
@@ -125,7 +125,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const where: Prisma.NewsItemWhereInput = {
       deletedAt: query.state === 'deleted' ? { not: null } : null,
       ...(query.state === 'draft' ? { isManual: true, publicationStatus: 'draft' } : query.state === 'hidden' ? { hiddenArticle: true } : query.state === 'manual' ? { isManual: true } : {}),
-      ...(query.q ? { OR: ['title', 'summary', 'titleZh', 'displayTitle'].map(field => ({ [field]: { contains: query.q!.slice(0, 200) } })) } : {}),
+      ...(query.q ? { OR: ['title', 'summary', 'titleZh', 'aiGeneratedTitle', 'displayTitle'].map(field => ({ [field]: { contains: query.q!.slice(0, 200) } })) } : {}),
     };
     const [items, total] = await Promise.all([this.prisma.newsItem.findMany({ where, orderBy: { firstSeenAt: 'desc' }, skip: offset, take: 30 }), this.prisma.newsItem.count({ where })]);
     return { items, total, nextOffset: offset + items.length < total ? offset + items.length : null };
@@ -137,13 +137,14 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     return item;
   }
   adminItemsById(id: string) { return this.requireItem(id, true); }
-  async saveManual(body: unknown, id?: string) {
+  async saveManual(body: unknown, id?: string, importedSourceTitlePresent?: boolean) {
     const input = manualInput(body); const existing = id ? await this.requireItem(id) : null;
     if (existing && !existing.isManual) throw new BadRequestException('采集原文不能改为手动草稿');
     const itemId = existing?.id || randomUUID();
     const url = input.originalUrl || new URL(`/articles/${itemId}`, process.env.PUBLIC_SITE_URL || process.env.CLIENT_URL || 'http://localhost:3420').href;
-    const contentChanged = !existing || existing.title !== input.title || existing.summary !== input.summary || existing.body !== input.body || existing.originalUrl !== input.originalUrl;
-    const data = { ...input, url, contentHash: analysisKey(input), eventKey: eventKey(input.title),
+    const sourceTitlePresent = importedSourceTitlePresent ?? (existing?.title === input.title ? existing.sourceTitlePresent : true);
+    const contentChanged = !existing || existing.title !== input.title || existing.summary !== input.summary || existing.body !== input.body || existing.originalUrl !== input.originalUrl || existing.sourceTitlePresent !== sourceTitlePresent;
+    const data = { ...input, sourceTitlePresent, url, contentHash: analysisKey({ ...input, sourceTitlePresent }), eventKey: eventKey(input.title),
       ...(contentChanged ? { ...this.fallbackDecision({ ...input, url }, 'disabled', this.config.rules, 'manual'), analysisKey: null, publicationStatus: 'draft' } : {}) };
     const item = await this.prisma.$transaction(async tx => {
       if (input.originalUrl) {
@@ -177,7 +178,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const sample = result.samples.find(item => item.title && item.url);
     if (!sample) throw new BadRequestException('未取得文章元数据，请改用粘贴内容录入');
     return this.saveManual({ title: sample.title, summary: sample.summary, body: sample.body || '', url: sample.url,
-      publisher: publisherForUrl(sample.url!) || '', publishedAt: sample.publishedAt?.toISOString() || '', images: sample.images });
+      publisher: publisherForUrl(sample.url!) || '', publishedAt: sample.publishedAt?.toISOString() || '', images: sample.images }, undefined, sample.sourceTitlePresent);
   }
   async displayState(id: string, body: unknown) {
     const value = body as { hiddenArticle?: unknown; hiddenImages?: unknown; displayTitle?: unknown; displaySummary?: unknown } | null;
@@ -337,13 +338,13 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   private async store(sourceId: string, item: CollectedItem, discoveredAt = new Date(), refresh = false, counts?: CollectionCounts) {
     const original = item;
-    item = { ...item, summary: distinctSummary(item.title, item.summary), ...(item.body !== undefined ? { body: distinctSummary(item.title, item.body) } : {}) };
+    item = { ...item, sourceTitlePresent: item.sourceTitlePresent !== false, summary: distinctSummary(item.title, item.summary) };
     if (await isDeletedNews(this.prisma, item.url, item.originalUrl)) { if (counts) counts.filtered++; return false; }
     if (await this.prisma.newsItem.findFirst({ where: { isManual: true, OR: [{ url: item.url }, ...(item.originalUrl ? [{ originalUrl: item.originalUrl }] : [])] }, select: { id: true } })) { if (counts) counts.duplicates++; return false; }
     const where = { sourceId_url: { sourceId, url: item.url } };
     const existing = await this.prisma.newsItem.findUnique({ where });
     const sameContent = existing && existing.title === item.title && existing.summary === item.summary && existing.publishedAt?.getTime() === item.publishedAt?.getTime()
-      && existing.body === (item.body ?? existing.body) && existing.images === (item.images ?? existing.images);
+      && existing.body === (item.body ?? existing.body) && existing.images === (item.images ?? existing.images) && existing.sourceTitlePresent === item.sourceTitlePresent;
     if (matchingExclusions(item, this.config.rules, sourceId).length) {
       if (counts) counts.filtered++;
       if (existing) await this.updateItem({ where: { id: existing.id, updatedAt: existing.updatedAt },
@@ -379,7 +380,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private async logAnalysis(item: NewsItem, status: string, route: string, result?: AnalysisResult, taskId?: string) {
     await this.logs.record({ kind: 'analysis', route, sourceId: item.sourceId, taskId, status, elapsedMs: 0,
       detailsJson: JSON.stringify({ newsItemId: item.id, title: item.title.slice(0, 160), aiStatus: result ? 'done' : item.aiStatus,
-        summaryOmitted: !analysisInput(item).summary, forceChina: this.forceChina(item.sourceId), effectiveRelation: this.forceChina(item.sourceId) ? 'related' : item.aiRelation,
+        summaryOmitted: !analysisInput(item).summary, titleGenerated: item.titleGenerated, sourceTitlePresent: item.sourceTitlePresent, forceChina: this.forceChina(item.sourceId), effectiveRelation: this.forceChina(item.sourceId) ? 'related' : item.aiRelation,
         ...(result ? { relation: result.relation, topics: result.topics, type: result.type, language: result.language,
           reason: result.reason, translated: !!result.translation, scoring: result.scoring } : { reason: '使用规则筛选，不产生模型请求' }) }) });
   }
@@ -445,6 +446,10 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private async findCached(item: Parameters<typeof analysisKey>[0]) {
     const current = await this.prisma.newsAnalysis.findUnique({ where: { key: analysisKey(item) } });
     if (current?.status === 'done') return current;
+    if (item.sourceTitlePresent === false) {
+      const previous = await this.prisma.newsAnalysis.findUnique({ where: { key: analysisKey(item, 2) } });
+      if (previous?.status === 'done') return previous;
+    }
     const legacy = await this.prisma.newsAnalysis.findUnique({ where: { key: analysisKey(item, 1) } });
     return legacy && (legacy.status === 'done' || (legacy.status === 'failed' && legacy.resultJson)) ? legacy : current;
   }
@@ -456,7 +461,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       return result;
     });
   }
-  private async cachedDecision(item: Parameters<typeof fallbackDecision>[0], sourceId: string, cache: NewsAnalysis | null, status: string) {
+  private async cachedDecision(item: Parameters<typeof analysisDecision>[1], sourceId: string, cache: NewsAnalysis | null, status: string) {
     if (cache?.status === 'done') {
       try {
         if (!cache.resultJson) throw new Error('AI JSON object required');
@@ -521,7 +526,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     }
     const selected = eligible.slice(0, payload.chunkSize);
     if (!selected.length) return { analyzed: 0 };
-    const items = selected.map(cache => ({ id: cache.key, ...analysisInput(JSON.parse(cache.inputJson)) }));
+    const items = selected.map(cache => ({ id: cache.key, ...JSON.parse(cache.inputJson) }));
     const success = new Set<string>();
     let translated = 0;
     const sourceIds = [...new Set((await this.prisma.newsItem.findMany({ where: { analysisKey: { in: selected.map(cache => cache.key) } }, select: { sourceId: true } })).map(item => item.sourceId))];
@@ -538,7 +543,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         let result;
         try {
           result = parseAnalysis(JSON.stringify(value), JSON.parse(cache.inputJson));
-          if (result.version !== 2) throw new Error();
+          if (result.version !== (JSON.parse(cache.inputJson).sourceTitlePresent === false ? 3 : 2)) throw new Error();
         } catch { continue; }
         const saved = await this.prisma.$transaction(async tx => {
           const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: task.id, status: 'processing' }, data: { resultJson: JSON.stringify(result), status: 'done', analyzedAt: new Date(), model: this.runtime.requestInfo()?.model, error: null, queuedTaskId: null, retryAt: null, leaseUntil: null } });

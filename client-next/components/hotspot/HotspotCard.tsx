@@ -14,6 +14,7 @@ import { relativeTime, formatDateTime } from '../../utils/relativeTime';
 import { HotspotMedia } from './HotspotMedia';
 import type { Hotspot } from '../../types';
 import { BilingualText } from '../common/BilingualText';
+import { AiTitleBadge } from '../common/AiTitleBadge';
 import { getNewsText } from '@/lib/newsText';
 import { useReadingPreference } from '@/providers/ReadingPreference';
 
@@ -149,7 +150,7 @@ export function HotspotCard({
             rel="noopener noreferrer"
             className="block font-semibold text-[15px] text-[var(--text-primary)] mb-2 hover:text-[var(--accent-blue)] dark:hover:text-blue-400 transition-colors cursor-pointer leading-snug"
           >
-            <BilingualText text={text.title} lineClassName="line-clamp-2" />
+            <BilingualText text={text.title} lineClassName="line-clamp-2" prefix={<AiTitleBadge generated={hotspot.titleGenerated} />} />
           </a>
 
           {text.summary.primary && (

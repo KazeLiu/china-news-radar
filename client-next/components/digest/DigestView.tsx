@@ -10,6 +10,7 @@ import { digestApi } from '../../services/api';
 import { digestJobs } from '../../services/digestJobs';
 import { getSourceIcon, getSourceLabel } from '../../lib/sourceMeta';
 import { BackToTopFor } from '../common/BackToTop';
+import { AiTitleBadge } from '../common/AiTitleBadge';
 import { Skeleton, SkeletonList } from '../common/Loader';
 import { cn } from '../../lib/utils';
 import type {
@@ -164,6 +165,7 @@ function HighlightCard({ item }: { item: DigestHighlight }) {
       {/* Title — large, semibold */}
       <h3 className="text-[17px] font-semibold text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors leading-snug mb-2.5">
         {item.title}
+        <AiTitleBadge generated={item.titleGenerated} />
         <ExternalLink className="inline-block w-3.5 h-3.5 ml-1 mb-0.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
       </h3>
 
@@ -209,7 +211,7 @@ function SimpleItem({ item }: { item: DigestSimpleItem }) {
       className="flex items-start gap-2 p-3 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)] hover:border-[var(--card-border-hover)] hover:bg-[var(--card-bg-hover)] transition-colors group">
       <div className="flex-1 min-w-0">
         <p className="text-sm text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors line-clamp-2 leading-snug">
-          {item.title}
+          <AiTitleBadge generated={item.titleGenerated} />{item.title}
         </p>
         {item.summary && (
           <p className="text-[11px] text-[var(--text-muted)] mt-1 line-clamp-1">{item.summary}</p>

@@ -57,7 +57,7 @@ export class NewsTrashService implements OnModuleInit {
         for (const candidate of candidates) purged += await this.prisma.$transaction(async tx => {
           const item = await tx.newsItem.findFirst({ where: { id: candidate.id, deletedAt: { lte: cutoff } } });
           if (!item) return 0;
-          const keys = [...new Set([item.analysisKey, analysisKey(item), analysisKey(item, 1)].filter((key): key is string => !!key))];
+          const keys = [...new Set([item.analysisKey, analysisKey(item), analysisKey(item, 2), analysisKey(item, 1)].filter((key): key is string => !!key))];
           // Let an already-running request finish before removing its last stored material.
           const queued = await tx.newsAnalysis.findMany({ where: { key: { in: keys }, queuedTaskId: { not: null } }, select: { queuedTaskId: true } });
           if (queued.length && await tx.aiTask.count({ where: { id: { in: queued.map(cache => cache.queuedTaskId!) }, status: 'running', leaseUntil: { gt: new Date() } } })) return 0;

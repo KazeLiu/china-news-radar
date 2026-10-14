@@ -6,6 +6,7 @@ import { Eye, EyeOff, Image as ImageIcon, ImageOff, RotateCcw, Trash2, X } from 
 import { adminApi, type ManagedNews } from './admin-api';
 import { waitForAiTask, type AiTicket } from '@/services/ai-tasks';
 import { HotspotMedia } from '../../hotspot/HotspotMedia';
+import { AiTitleBadge } from '../../common/AiTitleBadge';
 import styles from './admin.module.css';
 
 const emptyForm = () => ({ title: '', summary: '', body: '', url: '', publisher: '', publishedAt: '', images: '' });
@@ -54,7 +55,7 @@ export function NewsManagementPanel() {
     const next = item ? { title: item.title, summary: item.summary, body: item.body, url: item.originalUrl || (item.isManual ? '' : item.url),
       publisher: item.originalPublisher || '', publishedAt: item.publishedAt || '', images: (JSON.parse(item.images) as string[]).join('\n') } : emptyForm();
     setSelected(item); setForm(next); setSavedMaterial(JSON.stringify(next));
-    setDisplay({ title: item?.displayTitle ?? item?.titleZh ?? item?.title ?? '', summary: item?.displaySummary ?? item?.summaryZh ?? item?.summary ?? '' });
+    setDisplay({ title: item?.displayTitle ?? item?.aiGeneratedTitle ?? item?.titleZh ?? item?.title ?? '', summary: item?.displaySummary ?? item?.summaryZh ?? item?.summary ?? '' });
   }
   function openEditor(item: ManagedNews | null) { choose(item); setError(''); setNotice(''); setEditorOpen(true); }
   function confirmBatch(action: BatchAction, items = page.items.filter(item => selectedIds.includes(item.id))) {
@@ -67,7 +68,7 @@ export function NewsManagementPanel() {
     setConfirmation(null);
   }
   function closeEditor() {
-    const displayDirty = selected?.isManual && (display.title !== (selected.displayTitle ?? selected.titleZh ?? selected.title) || display.summary !== (selected.displaySummary ?? selected.summaryZh ?? selected.summary));
+    const displayDirty = selected?.isManual && (display.title !== (selected.displayTitle ?? selected.aiGeneratedTitle ?? selected.titleZh ?? selected.title) || display.summary !== (selected.displaySummary ?? selected.summaryZh ?? selected.summary));
     if ((dirty || displayDirty) && !window.confirm('有未保存的修改，仍要关闭吗？')) return;
     setEditorOpen(false);
   }
@@ -123,10 +124,10 @@ export function NewsManagementPanel() {
       <div className={styles.newsList}>{page.items.map(item => {
         const thumbnail = (JSON.parse(item.images) as string[])[0];
         return <article key={item.id} className={styles.newsRow}>
-          <label className={`${styles.check} ${styles.newsSelect}`}><input type="checkbox" aria-label={`选择新闻：${item.displayTitle ?? item.titleZh ?? item.title}`} checked={selectedIds.includes(item.id)} disabled={busy} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, item.id] : ids.filter(id => id !== item.id))} /></label>
+          <label className={`${styles.check} ${styles.newsSelect}`}><input type="checkbox" aria-label={`选择新闻：${item.displayTitle ?? item.aiGeneratedTitle ?? item.titleZh ?? item.title}`} checked={selectedIds.includes(item.id)} disabled={busy} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, item.id] : ids.filter(id => id !== item.id))} /></label>
           <button type="button" className={styles.newsOpen} disabled={busy} aria-haspopup="dialog" onClick={() => openEditor(item)}>
             <span className={styles.newsThumbnail} aria-hidden="true">{thumbnail && <Image key={thumbnail} src={thumbnail} alt="" unoptimized width={120} height={80} loading="lazy" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} />}</span>
-            <span className={styles.newsCopy}><strong>{item.displayTitle ?? item.titleZh ?? item.title}</strong><span>{item.deletedAt ? '回收站' : item.publicationStatus === 'draft' ? '草稿' : '已发布'} · {item.isManual ? '手动录入' : '自动采集'}</span>
+            <span className={styles.newsCopy}><strong>{item.displayTitle ?? item.aiGeneratedTitle ?? item.titleZh ?? item.title}<AiTitleBadge generated={item.titleGenerated} /></strong><span>{item.deletedAt ? '回收站' : item.publicationStatus === 'draft' ? '草稿' : '已发布'} · {item.isManual ? '手动录入' : '自动采集'}</span>
               <small>{beijing(item.firstSeenAt)}</small>{item.deletedAt && <small>60 天保留至：{beijing(new Date(item.deletedAt).getTime() + 60 * 86400000)}</small>}</span>
           </button>
           <div className={styles.visibilityActions}>
@@ -154,7 +155,7 @@ export function NewsManagementPanel() {
     </form>
     {selected && <section className={styles.testResult}><h3>展示预览与操作</h3>
       <p>{selected.deletedAt ? '回收站，仅管理员可见' : selected.publicationStatus === 'draft' ? '草稿，仅管理员可见' : selected.hiddenArticle ? '文章已隐藏' : selected.visible ? '符合展示规则' : '未通过内容筛选'} · AI：{selected.aiStatus}</p>{selected.aiReason && <p>{selected.aiReason}</p>}
-      <div className={styles.previewArticle}><h4>{display.title}</h4><p>{display.summary}</p><small>出处：{selected.originalPublisher || '管理员录入'} · {selected.hiddenImages ? '全部图片已隐藏' : `图片 ${images.length} 张`}</small>
+      <div className={styles.previewArticle}><h4>{display.title}<AiTitleBadge generated={selected.titleGenerated} /></h4>{!selected.sourceTitlePresent && <small>来源没有原始标题；采集标题为正文截取的临时兜底，完整正文仍单独保存。</small>}<p>{display.summary}</p><small>出处：{selected.originalPublisher || '管理员录入'} · {selected.hiddenImages ? '全部图片已隐藏' : `图片 ${images.length} 张`}</small>
         {!selected.hiddenImages && <HotspotMedia media={images.map(url => ({ type: 'photo', url }))} />}
         <details><summary>查看保存的完整正文</summary><p>{selected.body || '未取得正文'}</p></details></div>
       {selected.isManual && !selected.deletedAt && <><div className={styles.fields}><label>展示标题<input maxLength={1200} value={display.title} disabled={busy || dirty} onChange={e => setDisplay({ ...display, title: e.target.value })} /></label><label>展示摘要<textarea maxLength={8000} value={display.summary} disabled={busy || dirty} rows={4} onChange={e => setDisplay({ ...display, summary: e.target.value })} /></label></div><div className={styles.actions}>
@@ -167,7 +168,7 @@ export function NewsManagementPanel() {
     </section>}
     </NewsDialog>}
     {confirmation && <NewsDialog title={`${batchLabels[confirmation.action]} ${confirmation.items.length} 条新闻？`} busy={busy} onClose={() => setConfirmation(null)} compact>
-      {confirmation.items.slice(0, 3).map(item => <p key={item.id} className={styles.confirmTitle}>{item.displayTitle ?? item.titleZh ?? item.title}</p>)}{confirmation.items.length > 3 && <p>以及另外 {confirmation.items.length - 3} 条已选新闻。</p>}
+      {confirmation.items.slice(0, 3).map(item => <p key={item.id} className={styles.confirmTitle}>{item.displayTitle ?? item.aiGeneratedTitle ?? item.titleZh ?? item.title}</p>)}{confirmation.items.length > 3 && <p>以及另外 {confirmation.items.length - 3} 条已选新闻。</p>}
       <p>{confirmation.action === 'delete' ? '将从所有公共入口移除，进入回收站。60 天内可恢复，满 60 天自动永久删除原文、译文及不再共用的分析缓存，仅留 URL 防重记录，避免重新采入。' : confirmation.action === 'hideArticle' ? '将从前台、日报条目、Agent、RSS 等公共入口隐藏文章，保留数据，可随时恢复。' : confirmation.action === 'hideImages' ? '将隐藏这些新闻在公共入口的全部图片，保留文字和原图信息。' : '恢复后仍遵守内容筛选、发布状态和其他人工隐藏设置，不重新调用 AI，也不重复发送通知。'}</p>
       {error && <p className={styles.error} role="alert">{error}</p>}
       <div className={styles.actions}><button type="button" disabled={busy} onClick={() => setConfirmation(null)}>取消</button><button type="button" className={['delete', 'hideArticle', 'hideImages'].includes(confirmation.action) ? styles.danger : styles.primary} disabled={busy} onClick={() => void action(applyBatch)}>{busy ? '正在保存…' : `确认${batchLabels[confirmation.action]}`}</button></div>

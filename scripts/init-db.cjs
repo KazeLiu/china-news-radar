@@ -10,8 +10,13 @@ try { fs.closeSync(fs.openSync(target, 'wx', 0o600)); } catch (error) { if (erro
 async function main() {
   const { PrismaClient } = require('../server/node_modules/@prisma/client');
   const db = new PrismaClient();
+  let migrateTelegramTitles = false;
   try {
     const existing = await db.$queryRawUnsafe("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+    if (existing.some(t => t.name === 'NewsItem')) {
+      const columns = await db.$queryRawUnsafe('PRAGMA table_info("NewsItem")');
+      migrateTelegramTitles = !columns.some(column => column.name === 'sourceTitlePresent');
+    }
     const stored = existing.some(t => t.name === 'Setting') ? await db.setting.findUnique({ where: { key: 'schema-fingerprint' } }) : null;
     const savedConfig = existing.some(t => t.name === 'Setting') ? await db.setting.findUnique({ where: { key: 'news-admin-config-v1' } }) : null;
     const config = savedConfig ? JSON.parse(savedConfig.value) : null;
@@ -40,7 +45,10 @@ async function main() {
   process.exitCode = result.status ?? 1;
   if (result.status === 0) {
     const updated = new PrismaClient();
-    try { await updated.setting.upsert({ where: { key: 'schema-fingerprint' }, create: { key: 'schema-fingerprint', value: fingerprint }, update: { value: fingerprint } }); }
+    try {
+      if (migrateTelegramTitles) await updated.$executeRawUnsafe('UPDATE "NewsItem" SET "sourceTitlePresent" = false WHERE "acquisitionKind" = \'telegram\'');
+      await updated.setting.upsert({ where: { key: 'schema-fingerprint' }, create: { key: 'schema-fingerprint', value: fingerprint }, update: { value: fingerprint } });
+    }
     finally { await updated.$disconnect(); }
   }
 }

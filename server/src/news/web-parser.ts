@@ -53,10 +53,10 @@ export function extractPage(html: string, url: string, rules: WebRules, maxItems
       const nodes = $(rules.item).slice(0, maxItems); records = [];
       const find = (node: any, selector: string) => { const root = $(node); return selector ? (root.is(selector) ? root : root.find(selector)).first() : root; };
       nodes.each((_, node) => {
-        const titleNode = find(node, rules.title); const link = find(node, rules.link); const date = rules.date ? find(node, rules.date) : null;
+        const titleNode = rules.title ? find(node, rules.title) : null; const link = find(node, rules.link); const date = rules.date ? find(node, rules.date) : null;
         const imageNodes = rules.image ? $(node).find(rules.image).add($(node).filter(rules.image)) : null;
         const summary = rules.summary ? find(node, rules.summary) : null;
-        records.push({ title: titleNode.attr('content') || titleNode.text(), summary: summary?.attr('content') || summary?.text() || '', url: link.attr('href') || link.attr('data-url') || link.attr('content'),
+        records.push({ title: titleNode?.attr('content') || titleNode?.text(), summary: summary?.attr('content') || summary?.text() || '', url: link.attr('href') || link.attr('data-url') || link.attr('content'),
           publishedAt: date?.attr('datetime') || date?.attr('content') || date?.text(), author: rules.author ? find(node, rules.author).text() : '',
           body: rules.body ? find(node, rules.body).text() : '', images: imageNodes?.map((_, image) => $(image).attr('src') || $(image).attr('data-src') || $(image).attr('content')).get() });
       });
@@ -65,7 +65,7 @@ export function extractPage(html: string, url: string, rules: WebRules, maxItems
   } catch { throw new SourceFetchError('invalid-selector', 'CSS 选择器无效，请修改规则后预览'); }
   for (const key of ['title', 'summary', 'url', 'publishedAt', 'images', 'body'] as const) counts[key] = records.filter(record => !!record[key]).length;
   const empty = !records.length && /no (?:results|articles|stories|news) (?:found|available)|nothing found|暂无(?:内容|新闻|结果)|没有(?:内容|新闻|结果)/i.test(text);
-  if (!empty && (!records.length || !counts.title || !counts.url)) throw new SourceFetchError('structure-invalid', '解析结构未匹配到标题和链接，请检查来源规则；不会自动调用 AI');
+  if (!empty && (!records.length || (!counts.title && !counts.body) || !counts.url)) throw new SourceFetchError('structure-invalid', '解析结构未匹配到标题或正文及链接，请检查来源规则；不会自动调用 AI');
   return { records, next: next ? new URL(next, url).href : undefined, counts, empty };
 }
 export function clippedPageFragment(html: string) {

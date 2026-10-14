@@ -17,6 +17,7 @@ import { tabFilter } from '../../lib/filterState';
 import { requestJson } from '../../services/http';
 import { HotspotMedia } from '../hotspot/HotspotMedia';
 import { BilingualText } from '../common/BilingualText';
+import { AiTitleBadge } from '../common/AiTitleBadge';
 import { getNewsText } from '@/lib/newsText';
 import { useReadingPreference } from '@/providers/ReadingPreference';
 
@@ -100,6 +101,7 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
         {/* Title — large, semibold, reading-first */}
         <h3 className="text-[17px] font-semibold text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors leading-snug mb-2.5">
           <a href={item.url} target="_blank" rel="noopener noreferrer"><BilingualText text={text.title}>
+          <AiTitleBadge generated={item.titleGenerated} />
           <ExternalLink className="inline-block w-3.5 h-3.5 ml-1 mb-0.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
           </BilingualText>
           </a>

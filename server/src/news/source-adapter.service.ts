@@ -10,30 +10,32 @@ import { requestPublic, SourceFetchError } from './public-network';
 import { feedUrlsFor } from './transports';
 import { sourcePublishedAt } from './source-date';
 
-export interface ScrapedRecord { title?: unknown; summary?: unknown; url?: unknown; publishedAt?: unknown; author?: unknown; images?: unknown; body?: unknown }
+export interface ScrapedRecord { title?: unknown; sourceTitlePresent?: boolean; summary?: unknown; url?: unknown; publishedAt?: unknown; author?: unknown; images?: unknown; body?: unknown }
 export interface CollectionResult { items: CollectedItem[]; rawCount: number; checkedCount: number; samples: Array<ScrapedRecord & { title: string; summary: string; url: string | null; publishedAt: Date | null; accepted: boolean; reason: string | null; originalPublisher: string | null }>; structure: Record<string, unknown>; status: number; pageFragment?: string }
 export function inspectRecords(records: ScrapedRecord[], source: NewsSourceConfig, rules: FilterRule[], structure: Record<string, unknown> = {}, baseUrl = source.target) {
   const items: CollectedItem[] = []; const now = new Date();
   const samples = records.slice(0, source.kind === 'web' ? source.web!.maxItems : 150).map(record => {
-    const title = plainText(typeof record.title === 'string' ? record.title : '').slice(0, 600);
+    const sourceTitle = plainText(typeof record.title === 'string' ? record.title : '').slice(0, 600);
+    const body = typeof record.body === 'string' ? record.body.slice(0, 200000) : '';
+    const sourceTitlePresent = record.sourceTitlePresent !== false && !!sourceTitle;
+    const title = sourceTitle || plainText(body).slice(0, 220);
     const summary = plainText(typeof record.summary === 'string' ? record.summary : '').slice(0, 1600);
     let url: string | null = null;
     if (typeof record.url === 'string' && record.url.trim() && record.url.length <= 2000) { try { url = canonicalUrl(new URL(record.url, baseUrl).href); } catch { url = null; } }
     const publishedAt = sourcePublishedAt(record.publishedAt, source.timeZone, now);
     const originalPublisher = url ? publisherForUrl(url) || (matchesHost(url, source.publisherHosts) ? new URL(url).hostname : null) : null;
     const matched = matchingExclusions({ title, summary, url: url || '' }, rules, source.id);
-    const reason = !title ? '缺少标题' : !url ? '缺少有效原文链接' : isDomesticUrl(url) ? '本轮不接入国内平台' : !withinNewsWindow(publishedAt, now) ? '发布时间超过最近七天' : matched.length ? '命中排除规则' : null;
+    const reason = !title ? '缺少标题及正文' : !url ? '缺少有效原文链接' : isDomesticUrl(url) ? '本轮不接入国内平台' : !withinNewsWindow(publishedAt, now) ? '发布时间超过最近七天' : matched.length ? '命中排除规则' : null;
     const media = (Array.isArray(record.images) ? record.images : record.images ? [record.images] : []).slice(0, 20).flatMap(value => {
       const raw = typeof value === 'string' ? value : value && typeof value.url === 'string' ? value.url : '';
       if (!raw || raw.length > 2000) return [];
       try { const image = canonicalUrl(new URL(raw, baseUrl || url || undefined).href); return image ? [image] : []; } catch { return []; }
     });
-    if (!reason && url) items.push({ title, summary, url, originalUrl: url, originalPublisher, publishedAt,
+    if (!reason && url) items.push({ title, sourceTitlePresent, summary, url, originalUrl: url, originalPublisher, publishedAt,
       author: typeof record.author === 'string' ? plainText(record.author).slice(0, 120) : null,
-      body: typeof record.body === 'string' ? plainText(record.body).slice(0, 200000) : '', images: JSON.stringify([...new Set(media)]),
+      body, images: JSON.stringify([...new Set(media)]),
       topic: topicFor(`${title} ${summary}`), eventKey: eventKey(title), contentHash: createHash('sha256').update(JSON.stringify([title, summary, publishedAt])).digest('hex') });
-    return { title, summary, url, publishedAt, images: media, originalPublisher,
-      body: typeof record.body === 'string' ? plainText(record.body).slice(0, 200000) : '',
+    return { title, sourceTitlePresent, summary, url, publishedAt, images: media, originalPublisher, body,
       author: typeof record.author === 'string' ? plainText(record.author).slice(0, 120) : null, accepted: !reason, reason };
   });
   return { items, samples, rawCount: records.length, checkedCount: samples.length, structure, status: 200 } satisfies CollectionResult;
@@ -64,7 +66,7 @@ export class SourceAdapterService {
       const results = source.adapter === 'twitter'
         ? await this.twitter.searchTwitter(query, { apiKey: source.api?.auth.value, strict: true })
         : source.adapter === 'bing' ? await this.search.searchBing(query, true) : await this.search.searchHackerNews(query, true);
-      return inspectRecords(results.map(item => ({ title: item.title, summary: item.content, url: item.url, publishedAt: item.publishedAt, author: item.author?.name, images: item.media?.filter(m => m.type === 'photo').map(m => m.url) })), source, rules, { adapter: source.adapter, count: results.length });
+      return inspectRecords(results.map(item => ({ title: item.title, ...(source.adapter === 'twitter' ? { sourceTitlePresent: false, body: item.content } : {}), summary: item.content, url: item.url, publishedAt: item.publishedAt, author: item.author?.name, images: item.media?.filter(m => m.type === 'photo').map(m => m.url) })), source, rules, { adapter: source.adapter, count: results.length });
     }
     const config = source.api!;
     const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' };

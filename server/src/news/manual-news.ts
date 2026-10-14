@@ -4,9 +4,9 @@ import { canonicalUrl, distinctSummary, isDomesticUrl, plainText, publisherForUr
 export function manualInput(body: unknown) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new BadRequestException('新闻内容格式无效');
   const value = body as Record<string, unknown>;
-  const text = (key: string, max: number) => {
+  const text = (key: string, max: number, trim = true) => {
     if (typeof value[key] !== 'string' || (value[key] as string).length > max) throw new BadRequestException(`${key} 的类型或长度无效`);
-    return (value[key] as string).trim();
+    return trim ? (value[key] as string).trim() : value[key] as string;
   };
   const title = plainText(text('title', 600));
   if (!title) throw new BadRequestException('请填写新闻标题');
@@ -19,7 +19,7 @@ export function manualInput(body: unknown) {
     if (typeof image !== 'string' || image.length > 2000) throw new BadRequestException('图片链接格式无效');
     const url = canonicalUrl(image); if (!url) throw new BadRequestException('图片必须是 HTTP(S) 链接'); return url;
   });
-  return { title, summary: distinctSummary(title, text('summary', 1600)), body: text('body', 200000), originalUrl: url,
+  return { title, summary: distinctSummary(title, text('summary', 1600)), body: text('body', 200000, false), originalUrl: url,
     originalPublisher: url ? publisherForUrl(url) || plainText(text('publisher', 120)) || null : null,
     publishedAt, images: JSON.stringify([...new Set(images)]) };
 }

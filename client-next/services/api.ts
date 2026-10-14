@@ -142,6 +142,7 @@ export interface NewsItem {
   id: string;
   title: string;
   originalTitle?: string;
+  titleGenerated?: boolean;
   originalSummary?: string;
   displaySummary?: string | null;
   url: string;

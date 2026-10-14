@@ -30,6 +30,8 @@ export interface Hotspot {
   id: string;
   newsItemId?: string;
   originalTitle?: string;
+  titleGenerated?: boolean;
+  sourceTitlePresent?: boolean;
   originalSummary?: string;
   displaySummary?: string | null;
   originalPublisher?: string;
@@ -121,6 +123,7 @@ export interface ChatMessage {
 // Digest types
 export interface DigestHighlight {
   title: string;
+  titleGenerated?: boolean;
   summary: string;
   whyImportant: string;
   affects: string[];
@@ -130,6 +133,7 @@ export interface DigestHighlight {
 
 export interface DigestSimpleItem {
   title: string;
+  titleGenerated?: boolean;
   summary: string;
   source: string;
   url: string;

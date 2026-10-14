@@ -63,7 +63,7 @@ export function validateWebRules(value: unknown): WebRules {
   rules.mode = input.mode as WebRules['mode'];
   for (const key of ['item', 'title', 'summary', 'link', 'date', 'image', 'body', 'author', 'next'] as const) rules[key] = string(input[key] ?? '', 'CSS 选择器', 500, true);
   if (Object.keys(input).some(key => !Object.hasOwn(rules, key))) throw new BadRequestException('解析规则不能包含脚本或其他字段');
-  if (rules.mode === 'css' && (!rules.item || !rules.title || !rules.link)) throw new BadRequestException('列表解析至少需要条目、标题和链接选择器');
+  if (rules.mode === 'css' && (!rules.item || (!rules.title && !rules.body) || !rules.link)) throw new BadRequestException('列表解析至少需要条目、标题或正文、链接选择器');
   return rules;
 }
 export function validateSource(value: unknown, previous?: NewsSourceConfig, restoring = false): NewsSourceConfig {
@@ -123,7 +123,7 @@ export function validateSource(value: unknown, previous?: NewsSourceConfig, rest
       defaults.mapping[key] = string(mapping[key] ?? '', '字段映射', 200, true);
       if (defaults.mapping[key] && (!/^[A-Za-z0-9_$.-]+$/.test(defaults.mapping[key]) || defaults.mapping[key].split('.').some(v => ['__proto__', 'prototype', 'constructor'].includes(v)))) throw new BadRequestException('字段映射只能使用属性路径，不支持脚本');
     }
-    if (!defaults.mapping.title || !defaults.mapping.url) throw new BadRequestException('API 至少需要标题与链接字段映射');
+    if ((!defaults.mapping.title && !defaults.mapping.body) || !defaults.mapping.url) throw new BadRequestException('API 至少需要标题或正文、链接字段映射');
     source.api = { method: input.method as ApiSourceConfig['method'], body: requestBody, auth: { type: auth.type as ApiSourceConfig['auth']['type'], header, value: secret }, mapping: defaults.mapping };
   }
   if (source.kind === 'web') {
