@@ -287,14 +287,14 @@ export function CuratedView({
             全部通过筛选的报道 · {total} 条 · 质量评分只用于排序
           </p>
         </div>
-        <div className="flex gap-1 p-1 bg-[var(--bg-elevated)] rounded-xl border border-[var(--border-subtle)]">
+        <div className="flex shrink-0 gap-1 p-1 bg-[var(--bg-elevated)] rounded-xl border border-[var(--border-subtle)]">
           {(['today', 'week'] as Period[]).map(p => (
             <button
               key={p}
               type="button"
               onClick={() => setPeriod(p)}
               className={cn(
-                'px-3 py-1.5 rounded-lg text-sm transition-colors',
+                'px-3 py-1.5 rounded-lg text-sm whitespace-nowrap transition-colors',
                 period === p
                   ? 'bg-[var(--card-bg)] text-[var(--text-primary)] shadow-sm font-medium'
                   : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
@@ -407,7 +407,7 @@ function StatTile({
 }) {
   return (
     <div className="flex items-center gap-3 p-3 sm:p-4 rounded-2xl bg-[var(--card-bg)] border border-[var(--card-border)]">
-      <span className={cn('flex items-center justify-center w-9 h-9 rounded-xl shrink-0', accent)}>
+      <span className={cn('hidden sm:flex items-center justify-center w-9 h-9 rounded-xl shrink-0', accent)}>
         {icon}
       </span>
       <div className="min-w-0">
