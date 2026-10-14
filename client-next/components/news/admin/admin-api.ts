@@ -1,4 +1,4 @@
-import type { Source } from '../NewsSourceRow';
+import type { Source, RssAddressStatus } from '../NewsSourceRow';
 import { requestJson } from '@/services/http';
 
 export interface AiSettings { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; instructions: string; keyConfigured: boolean; protocolPrompt: string; intervalMs: number; autoAnalyzeNew: boolean; newsOutputTokens: number }
@@ -20,8 +20,8 @@ export interface WebRules { mode: 'metadata' | 'css'; item: string; title: strin
 export interface WebSourceSettings { rules: WebRules; previousRules?: WebRules; timeoutSeconds: number; maxItems: number; maxPages: number; concurrency: number }
 export interface SourceSettings { id: string; name: string; englishName: string; kind: string; website: string; feedUrl?: string; feedUrls?: string[]; publisherHosts: string[]; description: string; pollSeconds: number; state?: Source; target?: string; logo?: string; notes?: string; channel?: string; adapter?: string; api?: ApiSourceSettings; web?: WebSourceSettings; timeZone?: string }
 export interface SourceTestResult {
-  ok: boolean; checkedAt: string; feedUrl?: string; feedTitle?: string; error?: string; rawCount?: number; checkedCount?: number; acceptedCount?: number;
-  attempts: { url: string; status: number | null; error: string | null }[];
+  ok: boolean; checkedAt: string; feedUrl?: string; feedTitle?: string; error?: string; rawCount?: number; checkedCount?: number; acceptedCount?: number; duplicateCount?: number;
+  attempts: RssAddressStatus[];
   structure?: Record<string, unknown>; code?: string; status?: number;
   samples?: { title: string; summary: string; url: string | null; publishedAt: string | null; accepted: boolean; reason: string | null; fallbackVisible: boolean; originalPublisher?: string | null; images?: string[] }[];
 }

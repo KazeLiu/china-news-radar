@@ -12,6 +12,7 @@ export interface CollectedItem {
   originalUrl: string | null; author: string | null; topic: string; eventKey: string;
   contentHash: string; publishedAt: Date | null;
   body?: string; images?: string;
+  acquisitionKind?: string;
 }
 // rss-parser flattens XML nodes containing `_`; keeping the array preserves source attributes.
 interface ParsedFields { publisher?: { $?: { url?: string } }[]; 'content:encoded'?: string; 'content:encodedSnippet'?: string; author?: string; 'media:content'?: { $?: { url?: string; medium?: string; type?: string } }[]; 'media:thumbnail'?: { $?: { url?: string } }[] }
@@ -44,7 +45,7 @@ export async function inspectFeed(xml: string, source: NewsSourceConfig, now = n
     const images = [...new Set(media.flatMap(raw => { if (!raw || raw.length > 2000) return []; try { const value = canonicalUrl(new URL(raw, source.website || source.feedUrl).href); return value ? [value] : []; } catch { return []; } }))].slice(0, 20);
     samples.push({ title, summary, url, publishedAt, accepted: !reason, reason, images, originalPublisher: !reason ? source.englishName : null });
     if (reason || !url) return [];
-    return [{ title, summary, url, publishedAt, originalPublisher: source.englishName,
+    return [{ title, summary, url, publishedAt, originalPublisher: source.englishName, acquisitionKind: source.kind,
       originalUrl: source.kind === 'google-rss' ? null : url,
       author: item.creator || item.author ? plainText(item.creator || item.author || '').slice(0, 120) : null,
       topic: topicFor(`${title} ${summary}`), eventKey: eventKey(title), body: plainText(html).slice(0, 200000), images: JSON.stringify(images),

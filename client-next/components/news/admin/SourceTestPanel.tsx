@@ -2,12 +2,14 @@ import type { SourceTestResult } from './admin-api';
 import styles from './admin.module.css';
 
 export function SourceTestPanel({ result, onAnalyze }: { result: SourceTestResult; onAnalyze?: (sample: { title: string; summary: string }) => void }) {
+  const merged = result.duplicateCount !== undefined;
   return <div className={styles.testResult} role="status">
     <h3>{result.ok ? result.rawCount === 0 ? '连接成功，当前没有内容' : result.acceptedCount === 0 ? '连接成功，样例未通过基础检查' : '连接与解析成功' : '来源预览未完成'}</h3>
-    <p>{result.ok ? `${result.feedTitle || '来源'}：返回 ${result.rawCount} 条，检查 ${result.checkedCount} 条，其中 ${result.acceptedCount} 条通过来源、时间和排除规则。` : `${result.status ? `HTTP ${result.status} · ` : ''}${result.code ? `${result.code}：` : ''}${result.error}`}</p>
+    <p>{result.ok ? `${result.feedTitle || '来源'}：返回 ${result.rawCount} 条，检查 ${result.checkedCount} 条，${merged ? '合并去重后 ' : '其中 '}${result.acceptedCount} 条通过来源、时间和排除规则${result.duplicateCount ? `，折叠 ${result.duplicateCount} 条重复记录` : ''}。` : `${result.status ? `HTTP ${result.status} · ` : ''}${result.code ? `${result.code}：` : ''}${result.error}`}</p>
+    {result.ok && result.attempts.some(attempt => attempt.error) && <p className={styles.error}>部分 RSS 地址未成功，以下样例来自成功地址；失败或退避不会丢弃其他地址的结果。</p>}
     {result.structure && <details className={styles.details} open><summary>解析结构与字段映射</summary><pre>{JSON.stringify(result.structure, null, 2)}</pre></details>}
     <ol className={styles.attempts}>{result.attempts.map((attempt, index) => <li key={attempt.url}>
-      <strong>{index === 0 ? '首选地址' : `备用地址 ${index}`} · {attempt.error || `HTTP ${attempt.status}，获取成功`}</strong><span>{attempt.url}</span>
+      <strong>RSS 地址 {index + 1} · {attempt.skipped ? '暂不请求：' : ''}{attempt.error || (attempt.status === 304 ? 'HTTP 304，该地址未变化' : `HTTP ${attempt.status}，获取成功`)}</strong><span>{attempt.url}</span>
     </li>)}</ol>
     {result.ok && <p>下面展示前 10 条解析样例。测试不保存新闻、不调用 AI；“关键词兜底”仅用于说明未开启 AI 时的展示结果。</p>}
     {result.samples?.map((sample, index) => <article className={styles.sample} key={`${sample.url}-${index}`}>

@@ -12,11 +12,15 @@ export class AppController {
     return { status: 'ok', timestamp: new Date().toISOString() };
   }
 
-  /** Fire-and-forget: returns immediately, scan continues in the background. */
+  /** News collection returns its result; the legacy scheduler returns a scan ticket. */
   @Post('check-hotspots')
   @HttpCode(202)
   async checkHotspots(@Req() req: AdminRequest) {
-    if (this.news) { requireAdminMutation(req); const result = await this.news.scan(); return { message: '涉华采集已完成', ...result }; }
+    if (this.news) {
+      requireAdminMutation(req); const result = await this.news.scan();
+      const message = !result.started ? '采集正在进行' : !result.sourcesChecked ? '当前没有到期的来源，失败来源仍遵守退避' : result.sourcesFailed ? '采集已完成，部分来源失败，请查看后台详情' : '涉华采集已完成';
+      return { message, isScanning: result.scanning, ...result };
+    }
     const result = this.scheduler!.triggerScan();
     if (!result.started) {
       return { message: 'Scan already in progress', ...this.scheduler!.getScanStatus() };

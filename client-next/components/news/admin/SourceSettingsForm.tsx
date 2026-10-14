@@ -63,13 +63,13 @@ function SourceEditor({ source, token, busy, onSave, onSaved, aiKeyConfigured, o
       <label>Logo 地址<input value={draft.logo || ''} maxLength={2000} onChange={e => change('logo', e.target.value)} placeholder="https://… 或上传后的本站地址" /></label>
       <label>上传 Logo<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e => void upload(e.target.files?.[0])} /><small>最大 1 MiB。{draft.logo && <a href={draft.logo} target="_blank" rel="noopener noreferrer">查看 Logo</a>}</small></label>
       {draft.kind === 'rss' ? <div className={`${styles.wide} ${styles.feedList}`}>
-        {feedUrls.map((url, index) => <div key={index} className={styles.feedRow}><label htmlFor={`feed-${index}`}>{index === 0 ? 'RSS 地址（首选）' : `备用 RSS 地址 ${index}`}</label><div className={styles.feedInput}>
+        {feedUrls.map((url, index) => <div key={index} className={styles.feedRow}><label htmlFor={`feed-${index}`}>{`RSS 地址 ${index + 1}`}</label><div className={styles.feedInput}>
           <input id={`feed-${index}`} type="url" required maxLength={2000} value={url} onChange={e => editFeeds(old => old.map((value, i) => i === index ? e.target.value : value))} />
-          {index === 0 && <button type="button" disabled={feedUrls.length >= 10} onClick={() => editFeeds(old => [...old, ''])}><Plus size={16} />添加备用</button>}
+          {index === 0 && <button type="button" disabled={feedUrls.length >= 10} onClick={() => editFeeds(old => [...old, ''])}><Plus size={16} />新增 RSS 地址</button>}
           {index > 0 && <button type="button" aria-label={`上移地址 ${index + 1}`} onClick={() => moveFeed(index, -1)}><ArrowUp size={16} /></button>}
           {index < feedUrls.length - 1 && <button type="button" aria-label={`下移地址 ${index + 1}`} onClick={() => moveFeed(index, 1)}><ArrowDown size={16} /></button>}
           {feedUrls.length > 1 && <button type="button" aria-label={`移除地址 ${index + 1}`} onClick={() => editFeeds(old => old.filter((_, i) => i !== index))}><Trash2 size={16} /></button>}
-        </div></div>)}<small>连接或解析失败才尝试下一地址，成功但无内容不切换。Google 索引与 RSSHub 仍通过 RSS 接入。</small>
+        </div></div>)}<small>每轮采集会同时请求这些地址，合并去重后处理。</small>
       </div> : <label className={styles.wide}>{draft.kind === 'telegram' ? '公开频道用户名' : draft.kind === 'api' && draft.adapter !== 'generic' ? '搜索词 / 平台采集目标' : '采集目标 URL'}<input required maxLength={2000} value={draft.target || draft.channel || ''} onChange={e => change('target', e.target.value)} placeholder={draft.kind === 'telegram' ? 'channel_name' : 'https://…'} /></label>}
       {draft.kind === 'api' && <><label>适配器<select value={draft.adapter || 'generic'} onChange={e => change('adapter', e.target.value)}><option value="generic">通用 JSON API</option><option value="twitter">X（复用上游 Twitter）</option><option value="bing">Bing 搜索（复用上游）</option><option value="hackernews">Hacker News 搜索（复用上游）</option><option value="bilibili">哔哩哔哩（保留，暂不启用）</option><option value="sogou">搜狗（保留，暂不启用）</option></select></label>
         <label>请求方法<select value={api.method} onChange={e => editApi({ ...api, method: e.target.value as ApiSourceSettings['method'] })}><option>GET</option><option>POST</option></select></label>

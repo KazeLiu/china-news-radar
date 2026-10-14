@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, NotFoundException, ConflictException, Optional } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, BadGatewayException, NotFoundException, ConflictException, Optional } from '@nestjs/common';
 import { AiTask, Prisma, NewsAnalysis, NewsItem } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,7 +7,7 @@ import { CollectedItem, inspectFeed } from './collector';
 import { telegramItem } from './telegram';
 import { analysisKey, analysisInput, parseAnalysis, analysisDecision, fallbackDecision, ANALYSIS_PROMPT } from './analysis';
 import { feedUrlsFor, distributionFor } from './transports';
-import { fetchSourceFeed, FeedFetchError, restoreFailures } from './feed-fetch';
+import { fetchSourceFeed, FeedFetchError, restoreFailures, restoreValidators, mergeFeeds } from './feed-fetch';
 import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, restoreConfig, validateAi, validateRules, validateSource, readAiUsage } from './admin-config';
 import { matchingExclusions } from './content-filter';
 import { InvalidAnalysisResponse, aiTestError, analysisErrorDetail } from './ai-errors';
@@ -84,7 +84,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         parse: includeFeedAddresses && state?.lastParseJson ? JSON.parse(state.lastParseJson) : undefined,
         activeFeedUrl: includeFeedAddresses ? state?.activeFeedUrl || null : undefined,
         feedFailures: undefined, feedWarning: Object.values(restoreFailures(state?.feedFailures)).map(f => f.error).join('；'),
-        distribution: distributionFor(state?.activeKind || s.kind) };
+        distribution: feedUrlsFor(s).length > 1 ? 'RSS 多地址并行采集' : distributionFor(state?.activeKind || s.kind) };
     });
   }
   async status() {
@@ -240,16 +240,21 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     return this.sources();
   }
   async scan(force = true) {
-    if (this.busy || this.configBusy) return { scanning: true, started: false };
+    if (this.busy || this.configBusy) return { scanning: true, started: false, sourcesChecked: 0, sourcesFailed: 0 };
     this.busy = true;
     this.bridge?.scanStatus(true);
     try {
       const now = new Date();
       const states = await this.prisma.newsSource.findMany({ where: { enabled: true } });
       const due = this.config.sources.filter(s => s.kind !== 'telegram' && this.adapters.configured(s) && states.some(x => x.id === s.id && (!x.nextCheckAt || x.nextCheckAt <= now || (force && !x.error))));
-      // At most two HTTP requests at a time. Manual scans still honor error backoff.
-      for (let i = 0; i < due.length; i += 2) await Promise.all(due.slice(i, i + 2).map(s => this.collect(s)));
-      return { scanning: false, started: true, sourcesChecked: due.length };
+      // Two sources may collect together; all RSS requests share four slots.
+      let failed = 0;
+      for (let i = 0; i < due.length; i += 2) {
+        const results = await Promise.all(due.slice(i, i + 2).map(s => this.collect(s)));
+        failed += results.filter(result => result === false).length;
+      }
+      if (due.length && failed === due.length) throw new BadGatewayException('本轮所有来源采集失败，请查看后台来源详情；已有新闻已保留');
+      return { scanning: false, started: true, sourcesChecked: due.length, sourcesFailed: failed };
     } finally { this.busy = false; this.bridge?.scanStatus(false); }
   }
   private async collect(source: NewsSourceConfig) {
@@ -259,19 +264,26 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (source.kind === 'api' || source.kind === 'web') return this.collectAdapted(source, now);
     const counts: CollectionCounts = { discovered: 0, added: 0, updated: 0, duplicates: 0, filtered: 0 };
     try {
-      const { response, parsed, selected, failures } = await fetchSourceFeed(source, (xml, selected) => inspectFeed(xml, selected, now, false, this.config.rules), state);
+      const result = await fetchSourceFeed(source, (xml, selected) => inspectFeed(xml, selected, now, false, this.config.rules), state);
       if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
-      counts.discovered = parsed?.rawCount || 0; counts.filtered = (parsed?.checkedCount || 0) - (parsed?.items.length || 0);
+      const parsed = mergeFeeds(result.feeds.flatMap(feed => feed.parsed ? [feed.parsed] : []));
+      counts.discovered = parsed.rawCount; counts.filtered = parsed.filtered; counts.duplicates = parsed.duplicates;
       let changed = 0;
-      for (const item of parsed?.items || []) {
+      for (const item of parsed.items) {
         if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
         if (await this.store(source.id, item, now, false, counts)) changed++;
       }
+      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      const first = result.feeds[0];
       await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: now, lastSuccessAt: now, error: null,
-        nextCheckAt: new Date(Date.now() + source.pollSeconds * 1000), activeKind: selected.kind, activeFeedUrl: selected.feedUrl, feedFailures: JSON.stringify(failures),
-        ...(response.status === 200 ? { etag: response.headers.etag || null, lastModified: response.headers['last-modified'] || null, lastItemCount: parsed?.items.length || 0 } : {}) } });
-      await this.logs.record({ kind: 'collection', route: 'collection/rss', sourceId: source.id, startedAt: now, elapsedMs: Date.now() - now.getTime(), status: counts.discovered && !parsed?.items.length ? 'filtered' : !changed ? 'empty' : 'success', ...counts });
-      this.logger.log(`${source.englishName}: ${response.status}, ${changed} 条新增或更新`);
+        nextCheckAt: new Date(Date.now() + source.pollSeconds * 1000), activeKind: first.selected.kind, activeFeedUrl: first.selected.feedUrl,
+        etag: result.validators[first.selected.feedUrl!].etag, lastModified: result.validators[first.selected.feedUrl!].lastModified,
+        feedFailures: JSON.stringify(result.failures), feedValidators: JSON.stringify(result.validators),
+        lastParseJson: JSON.stringify({ mode: 'rss', attempts: result.attempts, checkedAt: now }),
+        ...(result.feeds.some(feed => feed.response.status === 200) ? { lastItemCount: parsed.items.length } : {}) } });
+      await this.logs.record({ kind: 'collection', route: 'collection/rss', sourceId: source.id, startedAt: now, elapsedMs: Date.now() - now.getTime(), status: counts.discovered && !parsed.items.length ? 'filtered' : !changed ? 'empty' : 'success', ...counts });
+      this.logger.log(`${source.englishName}: ${result.feeds.length}/${result.attempts.length} 个 RSS 地址成功，${changed} 条新增或更新`);
+      return true;
     } catch (error) {
       if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
       const failures = error instanceof FeedFetchError ? error.failures : {};
@@ -280,7 +292,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: now,
         nextCheckAt: new Date(retryTimes.length ? Math.min(...retryTimes) : Date.now() + 300_000),
         error: error instanceof FeedFetchError ? `${error.message}，所有 RSS 地址均未成功，稍后重试` : '入库失败，请检查数据库',
-        ...(error instanceof FeedFetchError ? { feedFailures: JSON.stringify(failures) } : {}) } });
+        ...(error instanceof FeedFetchError ? { feedFailures: JSON.stringify(failures), lastParseJson: JSON.stringify({ mode: 'rss', attempts: error.attempts, checkedAt: now }) } : {}) } });
+      return false;
     }
   }
   private async collectAdapted(source: NewsSourceConfig, now: Date) {
@@ -299,10 +312,12 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         ...(source.kind === 'web' ? { lastParseJson: JSON.stringify({ ...result.structure, ruleHash: webHash(source) }) } : {}) } });
       this.logger.log(`${source.name}：${changed} 条新增或更新`);
       await this.logs.record({ kind: 'collection', route: `collection/${source.kind}`, sourceId: source.id, startedAt: now, elapsedMs: Date.now() - now.getTime(), status: counts.discovered && !result.items.length ? 'filtered' : !changed ? 'empty' : 'success', ...counts });
+      return true;
     } catch (error) {
       if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
       await this.logs.record({ kind: 'collection', route: `collection/${source.kind}`, sourceId: source.id, startedAt: now, elapsedMs: Date.now() - now.getTime(), status: 'failed', errorCode: error instanceof SourceFetchError ? error.code : 'storage-error', errorReason: error instanceof SourceFetchError ? error.message : '来源采集或写入未完成', ...counts });
       await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: now, nextCheckAt: new Date(Date.now() + 300000), error: error instanceof SourceFetchError ? `${error.code}：${error.message}` : '来源采集或入库失败，请核对配置和服务状态' } });
+      return false;
     }
   }
   private async store(sourceId: string, item: CollectedItem, discoveredAt = new Date(), refresh = false, counts?: CollectionCounts) {
@@ -324,7 +339,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (!cache) cache = await this.prisma.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: !this.config.ai.autoAnalyzeNew }, update: {} });
     const decision = await this.cachedDecision(item, sourceId, cache, this.aiEnabled && this.config.ai.autoAnalyzeNew ? cache?.status || 'pending' : 'disabled');
     if (this.aiEnabled && this.config.ai.autoAnalyzeNew && !cache.historical && ['pending', 'processing'].includes(cache.status)) decision.visible = false;
-    const data = { ...item, analysisKey: key, acquisitionKind: this.config.sources.find(s => s.id === sourceId)?.kind || 'rss', ...decision };
+    const data = { ...item, analysisKey: key, acquisitionKind: item.acquisitionKind || this.config.sources.find(s => s.id === sourceId)?.kind || 'rss', ...decision };
     const args = { where, create: { ...data, sourceId, firstSeenAt: discoveredAt }, update: { ...data, ...(sameContent ? { updatedAt: existing.updatedAt } : {}) } };
     if (this.bridge) {
       const stored = await this.prisma.$transaction(async tx => {
@@ -605,9 +620,19 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (JSON.stringify(this.config.sources.find(s => s.id === source.id)) !== JSON.stringify(previous)) throw new ConflictException('来源已在其他操作中修改，请重新读取后保存');
     if (!previous && this.config.sources.length >= 100) throw new BadRequestException('最多配置 100 个来源');
     const sources = previous ? this.config.sources.map(s => s.id === source.id ? source : s) : [...this.config.sources, source];
-    await this.updateConfig({ ...this.config, sources, removedSourceIds: this.config.removedSourceIds.filter(id => id !== source.id) }, tx => tx.newsSource.upsert({ where: { id: source.id },
-      create: { id: source.id, enabled: false, lastParseJson: checked ? JSON.stringify({ ...checked.structure, ruleHash: webHash(source) }) : null }, update: { etag: null, lastModified: null, activeKind: null, activeFeedUrl: null, feedFailures: '{}', nextCheckAt: null, error: null,
-        ...(checked ? { lastParseJson: JSON.stringify({ ...checked.structure, ruleHash: webHash(source) }) } : rulesChanged ? { lastParseJson: null } : {}) } }));
+    await this.updateConfig({ ...this.config, sources, removedSourceIds: this.config.removedSourceIds.filter(id => id !== source.id) }, async tx => {
+      const state = await tx.newsSource.findUnique({ where: { id: source.id } });
+      const urls = new Set(feedUrlsFor(source));
+      const sameParsing = previous && previous.englishName === source.englishName && previous.timeZone === source.timeZone && JSON.stringify(previous.publisherHosts) === JSON.stringify(source.publisherHosts);
+      const validators = state && sameParsing ? Object.fromEntries(Object.entries(restoreValidators(state)).filter(([url]) => urls.has(url))) : {};
+      const failures = state ? Object.fromEntries(Object.entries(restoreFailures(state.feedFailures)).filter(([url]) => urls.has(url))) : {};
+      const active = state?.activeFeedUrl && sameParsing && urls.has(state.activeFeedUrl) ? state.activeFeedUrl : null;
+      return tx.newsSource.upsert({ where: { id: source.id },
+        create: { id: source.id, enabled: false, lastParseJson: checked ? JSON.stringify({ ...checked.structure, ruleHash: webHash(source) }) : null },
+        update: { etag: active ? validators[active].etag : null, lastModified: active ? validators[active].lastModified : null, activeKind: active ? state!.activeKind : null, activeFeedUrl: active,
+          feedValidators: JSON.stringify(validators), feedFailures: JSON.stringify(failures), nextCheckAt: null, error: null,
+          ...(checked ? { lastParseJson: JSON.stringify({ ...checked.structure, ruleHash: webHash(source) }) } : rulesChanged || urls.size ? { lastParseJson: null } : {}) } });
+    });
     return { ...await this.adminConfig(), savedSourceId: source.id };
   }
   async generateParserRules(body: unknown) {
@@ -660,16 +685,18 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         return { ok: true, checkedAt: now, feedTitle: source.name, attempts: [], structure: result.structure, rawCount: result.rawCount, checkedCount: result.checkedCount, acceptedCount: result.items.length,
           samples: result.samples.slice(0, 10).map(sample => ({ ...sample, fallbackVisible: sample.accepted && !!sample.originalPublisher && fallbackDecision({ title: sample.title, summary: sample.summary, url: sample.url || '' }, 'preview', this.config.rules, source.id).visible })) };
       }
-      const result = await fetchSourceFeed(source, (xml, selected) => inspectFeed(xml, selected, now, false, this.config.rules));
-      const feed = result.parsed!;
-      return { ok: true, checkedAt: now, feedUrl: result.selected.feedUrl, attempts: result.attempts, feedTitle: feed.title,
-        rawCount: feed.rawCount, checkedCount: feed.checkedCount, acceptedCount: feed.items.length,
+      const state = previous ? await this.prisma.newsSource.findUniqueOrThrow({ where: { id: previous.id } }) : null;
+      // Preview honors address backoff but never advances ingestion's conditional-request watermark.
+      const result = await fetchSourceFeed(source, (xml, selected) => inspectFeed(xml, selected, now, false, this.config.rules), state ? { activeFeedUrl: null, etag: null, lastModified: null, feedFailures: state.feedFailures } : undefined);
+      const feed = mergeFeeds(result.feeds.flatMap(selected => selected.parsed ? [selected.parsed] : []));
+      return { ok: true, checkedAt: now, feedUrl: result.feeds[0].selected.feedUrl, attempts: result.attempts, feedTitle: source.name,
+        rawCount: feed.rawCount, checkedCount: feed.checkedCount, acceptedCount: feed.items.length, duplicateCount: feed.duplicates,
         samples: feed.samples.slice(0, 10).map(sample => ({ ...sample,
           fallbackVisible: sample.accepted && fallbackDecision({ ...sample, url: sample.url! }, 'preview', this.config.rules, source.id).visible })) };
     } catch (error) {
       if (source.kind === 'api' || source.kind === 'web' || source.kind === 'telegram') return { ok: false, checkedAt: now, attempts: [], error: error instanceof SourceFetchError ? error.message : '来源连接或解析失败，请核对配置', code: error instanceof SourceFetchError ? error.code : 'adapter-error', status: error instanceof SourceFetchError ? error.status : undefined };
       if (!(error instanceof FeedFetchError)) throw error;
-      return { ok: false, checkedAt: now, attempts: error.attempts, error: '所有 RSS 地址都获取失败，请检查下方逐条结果。' };
+      return { ok: false, checkedAt: now, attempts: error.attempts, error: '所有 RSS 地址均未成功（请求、解析失败或仍在退避），请检查下方逐条结果。' };
     } finally { this.testingSource = false; }
   }
   async openSourceBrowser(body: unknown, owner: string) {

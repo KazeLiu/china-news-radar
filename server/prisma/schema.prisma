@@ -144,6 +144,7 @@ model NewsSource {
   activeKind     String?
   activeFeedUrl  String?
   feedFailures   String    @default("{}")
+  feedValidators String    @default("{}")
   rsshubError    String?
   rsshubRetryAt  DateTime?
   lastParseJson String?

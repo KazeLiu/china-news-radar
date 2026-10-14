@@ -7,7 +7,7 @@ China Radar aggregates overseas reporting about China, with Chinese classificati
 ## Features
 
 - **Curated reading**: the home page opens curated news, with source, topic, time, and keyword filters. Quality scores affect ordering, not eligibility; unscored articles can still appear.
-- **Source management**: RSS, public web pages, Telegram, and exclusion rules. RSS supports ordered fallback URLs; RSSHub feeds use complete URLs.
+- **Source management**: RSS, public web pages, Telegram, and exclusion rules. Multiple RSS URLs per source are fetched concurrently, with four RSS requests at most globally; results are merged by article URL. RSSHub feeds use complete URLs.
 - **Shared AI analysis**: classification, translation, and scoring run in persistent batch jobs. Results are cached; reading and viewing statistics do not call a model.
 - **Manual publishing**: save pasted content or URL extracts as drafts, request analysis, edit display text, then explicitly publish. Articles and images can be hidden and restored separately without deleting the original data.
 - **Operation logs**: collection and AI statistics distinguish previews, actual requests, retries, and processed articles. Dates use Beijing time; quotas use UTC. Logs are retained for 30 days.
