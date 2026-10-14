@@ -42,4 +42,5 @@ export interface ManagedNews {
   displayTitle: string | null; displaySummary: string | null; url: string; originalUrl: string | null; originalPublisher: string | null;
   images: string; publishedAt: string | null; firstSeenAt: string; updatedAt: string; isManual: boolean;
   publicationStatus: 'draft' | 'published'; hiddenArticle: boolean; hiddenImages: boolean; visible: boolean; aiStatus: string; aiReason: string | null;
+  deletedAt: string | null;
 }

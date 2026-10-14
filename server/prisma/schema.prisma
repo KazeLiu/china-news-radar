@@ -176,6 +176,7 @@ model NewsItem {
   visible            Boolean    @default(true)
   hiddenArticle      Boolean    @default(false)
   hiddenImages       Boolean    @default(false)
+  deletedAt          DateTime?
   isManual           Boolean    @default(false)
   publicationStatus  String     @default("published")
   publishedOnceAt    DateTime?
@@ -199,6 +200,11 @@ model NewsItem {
   @@index([eventKey])
   @@index([topic, sourceId])
   @@index([analysisKey])
+  @@index([deletedAt])
+}
+
+model NewsDeletedUrl {
+  url String @id
 }
 
 model NewsAnalysis {

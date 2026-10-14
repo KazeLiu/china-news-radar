@@ -4,7 +4,7 @@ import { adminApi, type SourceSettings } from './admin-api';
 import styles from './admin.module.css';
 interface OperationGroup { kind: string; status: string; _count: number; _sum: { discovered: number | null; added: number | null; updated: number | null; duplicates: number | null; filtered: number | null } }
 interface AiGroup { status: string; _count: number; _sum: { analyzedCount: number | null; translatedCount: number | null } }
-interface ProcessDetails { newsItemId?: string; title?: string; aiStatus?: string; relation?: string; forceChina?: boolean; topics?: string[]; type?: string; language?: string; reason?: string; translated?: boolean; summaryOmitted?: boolean; inputCount?: number; attempts?: number; maxAttempts?: number; retryAt?: string; scoring?: { relevance: number; novelty: number; audience: number; quality: number; importance: string; tags: string[] } }
+interface ProcessDetails { newsItemId?: string; title?: string; aiStatus?: string; relation?: string; forceChina?: boolean; topics?: string[]; type?: string; language?: string; reason?: string; translated?: boolean; summaryOmitted?: boolean; inputCount?: number; count?: number; action?: string; purged?: number; attempts?: number; maxAttempts?: number; retryAt?: string; scoring?: { relevance: number; novelty: number; audience: number; quality: number; importance: string; tags: string[] } }
 interface LogRow { id: string; startedAt: string; kind: string; route: string; model?: string; sourceId?: string; sourceIds?: string[]; status: string; elapsedMs: number | null; taskId?: string; requestId?: string; attempt?: number; errorCode?: string; errorReason?: string; error?: { message: string; detail?: string }; details?: ProcessDetails; analyzedCount?: number; translatedCount?: number; discovered?: number; added?: number; updated?: number; duplicates?: number; filtered?: number }
 interface LogPage { retentionDays: number; recordingStartedAt: string; recordingError: boolean; summary: { operations: OperationGroup[]; ai: AiGroup[]; retries: number }; items: LogRow[]; total: number; nextOffset: number | null }
 const kinds: Record<string, string> = { collection: '正式采集', preview: '预览与测试', admin: '管理操作', ai: 'AI 实际请求', task: 'AI 任务流程', analysis: '新闻分析结果' };
@@ -61,6 +61,8 @@ export function LogsPanel({ sources }: { sources: SourceSettings[] }) {
         {row.kind === 'ai' && <p>完成分析 {row.analyzedCount} 条 · 翻译 {row.translatedCount} 条</p>}
         {row.model && <p>模型：{row.model}</p>}
         {row.details?.inputCount !== undefined && <p>本批 {row.details.inputCount} 条待分析内容</p>}
+        {row.details?.count !== undefined && <p>{({ hideArticle: '隐藏文章', showArticle: '显示文章', hideImages: '隐藏图片', showImages: '显示图片', delete: '移入回收站', restore: '从回收站恢复' } as Record<string, string>)[row.details.action || '']} · {row.details.count} 条</p>}
+        {row.details?.purged !== undefined && <p>已永久清理 {row.details.purged} 条超过 60 天的回收站新闻</p>}
         {row.details?.attempts !== undefined && <p>实际请求 {row.details.attempts} / {row.details.maxAttempts} 次{row.details.retryAt ? ` · 下次尝试 ${beijing(row.details.retryAt)}` : ''}</p>}
         {row.details?.newsItemId && <><p><strong>{row.details.title}</strong></p><p>新闻 ID：{row.details.newsItemId}{row.status === 'cached' ? ' · 复用缓存，本次没有模型请求' : ''}</p>
           <p>{row.details.relation ? relations[row.details.relation] : `分析状态：${row.details.aiStatus}`} · {row.details.summaryOmitted ? '摘要为空或为标题副本，省略摘要译文' : '保留独立摘要'}{row.details.translated !== undefined ? row.details.translated ? ' · 已有中文译文' : ' · 简体中文，无需翻译' : ''}</p>

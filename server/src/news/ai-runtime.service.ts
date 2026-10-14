@@ -81,7 +81,7 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
     const [paused, queued, running, historical] = await Promise.all([
       this.prisma.setting.findUnique({ where: { key: QUEUE_KEY } }),
       this.prisma.aiTask.count({ where: { status: 'queued' } }), this.prisma.aiTask.count({ where: { status: 'running' } }),
-      this.prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*) AS count FROM NewsItem n LEFT JOIN NewsAnalysis a ON a.key = n.analysisKey WHERE n.aiStatus NOT IN ('done', 'excluded') AND n.originalPublisher IS NOT NULL AND n.hiddenArticle = 0 AND n.isManual = 0 AND (a.historical = 1 OR a.key IS NULL)`,
+      this.prisma.$queryRaw<Array<{ count: bigint }>>`SELECT COUNT(*) AS count FROM NewsItem n LEFT JOIN NewsAnalysis a ON a.key = n.analysisKey WHERE n.deletedAt IS NULL AND n.aiStatus NOT IN ('done', 'excluded') AND n.originalPublisher IS NOT NULL AND n.hiddenArticle = 0 AND n.isManual = 0 AND (a.historical = 1 OR a.key IS NULL)`,
     ]);
     const tasks = await this.prisma.aiTask.findMany({ orderBy: { createdAt: 'desc' }, take: 20, select: { id: true, kind: true, status: true, attempts: true, createdAt: true, errorJson: true } });
     return { paused: paused?.value === 'true', queued, running, historical: Number(historical[0].count), concurrency: 1, tasks: tasks.map(({ errorJson, ...t }) => ({ ...t, error: errorJson ? JSON.parse(errorJson) : null })) };

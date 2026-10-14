@@ -9,7 +9,7 @@ export class NewsAuditInterceptor implements NestInterceptor {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method) || /\/sources\/browser\/[^/]+\/input$/.test(req.path) || !(req.path.includes('/admin/') || req.path.includes('/sources/') || req.path.endsWith('/scan'))) return next.handle();
     const startedAt = new Date(); const route = `${req.method} ${req.route.path}`;
     const kind = /\/(?:test|preview)$/.test(req.path) ? 'preview' : 'admin';
-    const record = async (status: string, result?: { savedSourceId?: string; sourceId?: string; item?: { sourceId: string }; rawCount?: number; checkedCount?: number; acceptedCount?: number; code?: string; error?: string }, error?: unknown) => {
+    const record = async (status: string, result?: { savedSourceId?: string; sourceId?: string; item?: { sourceId: string }; rawCount?: number; checkedCount?: number; acceptedCount?: number; code?: string; error?: string; count?: number; action?: string }, error?: unknown) => {
       let sourceId: string | null = null;
       if ((status !== 'failed' || kind === 'preview') && req.path.includes('/sources')) {
         const id = result?.savedSourceId || req.params.id || req.body?.id;
@@ -20,6 +20,7 @@ export class NewsAuditInterceptor implements NestInterceptor {
       const sourcePreview = req.path.endsWith('/sources/test') ? result : undefined;
       await this.logs.record({ startedAt, kind, route, sourceId, status, elapsedMs: Date.now() - startedAt.getTime(), errorCode: status === 'failed' ? sourcePreview?.code || 'operation-rejected' : null,
         errorReason: status === 'failed' ? sourcePreview?.error || reasons[httpStatus] || '操作未完成，请查看页面错误或关联任务详情' : null,
+        ...(req.path.endsWith('/items/batch') && status === 'success' ? { detailsJson: JSON.stringify({ count: result?.count, action: result?.action }) } : {}),
         ...(kind === 'preview' && result?.rawCount !== undefined ? { discovered: result.rawCount, filtered: (result.checkedCount || 0) - (result.acceptedCount || 0) } : {}) });
     };
     return next.handle().pipe(mergeMap(async result => { await record(result?.ok === false ? 'failed' : 'success', result); return result; }),

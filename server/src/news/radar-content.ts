@@ -3,7 +3,7 @@ import { distributionFor } from './transports';
 
 export const newsMode = () => process.env.RADAR_MODE !== 'legacy';
 export function publicNewsScope(where: Prisma.NewsItemWhereInput = {}): Prisma.NewsItemWhereInput {
-  return { AND: [where, { visible: true, hiddenArticle: false, publicationStatus: 'published', OR: [{ originalPublisher: { not: null } }, { isManual: true }] }] };
+  return { AND: [where, { visible: true, hiddenArticle: false, deletedAt: null, publicationStatus: 'published', OR: [{ originalPublisher: { not: null } }, { isManual: true }] }] };
 }
 export function presentNews<T extends Omit<NewsItem, 'body'>>(item: T) {
   return { ...item, titleZh: item.displayTitle ?? item.titleZh, summaryZh: item.displaySummary ?? item.summaryZh,

@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { NewsService } from './news.service';
 import { requireAdmin, AdminRequest } from './admin-access';
 import { NewsAuditInterceptor } from './news-audit.interceptor';
+import { NewsTrashService } from './news-trash.service';
 
 export function validCollectorToken(header: string | undefined, token = process.env.COLLECTOR_TOKEN) {
   if (!token || token.length < 32 || !header?.startsWith('Bearer ')) return false;
@@ -19,7 +20,7 @@ function sameOrigin(req: { headers: Record<string, string | string[] | undefined
 @Controller('api/news')
 @UseInterceptors(NewsAuditInterceptor)
 export class NewsController {
-  constructor(private readonly news: NewsService) {}
+  constructor(private readonly news: NewsService, private readonly trash: NewsTrashService) {}
   @Get('health') health() { return { ok: true, mode: 'news' }; }
   @Get('items') items(@Query() query: Parameters<NewsService['items']>[0]) { return this.news.items(query); }
   @Get('items/:id') article(@Param('id') id: string) { return this.news.article(id); }
@@ -27,6 +28,7 @@ export class NewsController {
   @Get('admin/items/:id') adminItem(@Param('id') id: string) { return this.news.adminItemsById(id); }
   @Post('admin/items') createManual(@Body() body: unknown) { return this.news.saveManual(body); }
   @Post('admin/items/import') importManual(@Body() body: unknown) { return this.news.importManual(body); }
+  @Post('admin/items/batch') batch(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.trash.batch(body); }
   @Put('admin/items/:id') editManual(@Param('id') id: string, @Body() body: unknown) { return this.news.saveManual(body, id); }
   @Patch('admin/items/:id/display') display(@Param('id') id: string, @Body() body: unknown) { return this.news.displayState(id, body); }
   @Post('admin/items/:id/analyze') analyzeManual(@Param('id') id: string) { return this.news.analyzeManual(id); }

@@ -33,7 +33,7 @@ export class NewsBridgeService {
       publishedAt: item.publishedAt, createdAt: item.firstSeenAt, category: item.topic, region: 'international',
       sourceTier: tier, qualityScore, relevance: score ? score.relevance * 10 : 0, relevanceReason: item.aiReason,
       importance: score?.importance || 'low', tags: JSON.stringify(score?.tags || []), clusterKey: item.eventKey,
-      isCurated: item.visible && !item.hiddenArticle && item.publicationStatus === 'published', authorName: item.author };
+      isCurated: item.visible && !item.hiddenArticle && !item.deletedAt && item.publicationStatus === 'published', authorName: item.author };
     const previous = await tx.hotspot.findUnique({ where: { newsItemId: id }, select: { clusterKey: true } });
     const hotspot = await tx.hotspot.upsert({ where: { newsItemId: id }, create: { id: `news:${id}`, notifyEligible, ...data }, update: data });
     await this.matchItem(tx, item);
@@ -63,7 +63,7 @@ export class NewsBridgeService {
     for (const keyword of keywords) await this.prisma.entityCard.upsert({ where: { keywordId: keyword.id }, create: { keywordId: keyword.id, name: keyword.text }, update: {} });
     let cursor: string | undefined;
     do {
-      const items = await this.prisma.newsItem.findMany({ orderBy: { id: 'asc' }, take: 100, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+      const items = await this.prisma.newsItem.findMany({ where: { deletedAt: null, ...(cursor ? { id: { gt: cursor } } : {}) }, orderBy: { id: 'asc' }, take: 100 });
       for (const item of items) await this.prisma.$transaction(tx => this.sync(tx, item.id));
       if (items.length < 100) break;
       cursor = items[items.length - 1].id;
@@ -72,7 +72,7 @@ export class NewsBridgeService {
 
   async announce(id: string) {
     const hotspot = await this.prisma.hotspot.findUnique({ where: { newsItemId: id }, include: { newsItem: { include: { keywordMatches: { include: { keyword: true } } } } } });
-    if (!hotspot?.notifyEligible || !hotspot.newsItem?.visible || hotspot.newsItem.hiddenArticle || hotspot.newsItem.publicationStatus !== 'published'
+    if (!hotspot?.notifyEligible || !hotspot.newsItem?.visible || hotspot.newsItem.hiddenArticle || hotspot.newsItem.deletedAt || hotspot.newsItem.publicationStatus !== 'published'
       || (!hotspot.newsItem.originalPublisher && !hotspot.newsItem.isManual) || !hotspot.isClusterMain) return;
     // The unique notification id prevents edits, backfills and restarts from replaying an alert.
     const notificationId = `news:${id}`;
