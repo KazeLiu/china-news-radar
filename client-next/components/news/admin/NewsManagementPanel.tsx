@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { adminApi, type ManagedNews } from './admin-api';
 import { waitForAiTask, type AiTicket } from '@/services/ai-tasks';
+import { HotspotMedia } from '../../hotspot/HotspotMedia';
 import styles from './admin.module.css';
 
 const emptyForm = () => ({ title: '', summary: '', body: '', url: '', publisher: '', publishedAt: '', images: '' });
@@ -18,6 +19,7 @@ export function NewsManagementPanel() {
   const polling = useRef<AbortController | null>(null);
   const dirty = JSON.stringify(form) !== savedMaterial;
   const editable = !selected || selected.isManual;
+  const images = selected ? JSON.parse(selected.images) as string[] : [];
   async function load(nextOffset = offset) {
     const next = await adminApi<Page>(`admin/items?${new URLSearchParams({ state, q: query, offset: String(nextOffset) })}`, '');
     setPage(next); setOffset(nextOffset);
@@ -87,7 +89,9 @@ export function NewsManagementPanel() {
     </form>
     {selected && <section className={styles.testResult}><h3>展示预览与操作</h3>
       <p>{selected.publicationStatus === 'draft' ? '草稿，仅管理员可见' : selected.hiddenArticle ? '文章已隐藏' : selected.visible ? '符合展示规则' : '未通过内容筛选'} · AI：{selected.aiStatus}</p>{selected.aiReason && <p>{selected.aiReason}</p>}
-      <div className={styles.previewArticle}><h4>{display.title}</h4><p>{display.summary}</p><small>出处：{selected.originalPublisher || '管理员录入'} · {selected.hiddenImages ? '全部图片已隐藏' : `图片 ${(JSON.parse(selected.images) as string[]).length} 张`}</small><details><summary>查看保存的完整正文</summary><p>{selected.body || '未取得正文'}</p></details></div>
+      <div className={styles.previewArticle}><h4>{display.title}</h4><p>{display.summary}</p><small>出处：{selected.originalPublisher || '管理员录入'} · {selected.hiddenImages ? '全部图片已隐藏' : `图片 ${images.length} 张`}</small>
+        {!selected.hiddenImages && <HotspotMedia media={images.map(url => ({ type: 'photo', url }))} />}
+        <details><summary>查看保存的完整正文</summary><p>{selected.body || '未取得正文'}</p></details></div>
       {selected.isManual && <><div className={styles.fields}><label>展示标题<input maxLength={1200} value={display.title} disabled={busy || dirty} onChange={e => setDisplay({ ...display, title: e.target.value })} /></label><label>展示摘要<textarea maxLength={8000} value={display.summary} disabled={busy || dirty} rows={4} onChange={e => setDisplay({ ...display, summary: e.target.value })} /></label></div><div className={styles.actions}>
         <button type="button" disabled={busy || dirty} onClick={() => void action(() => updateDisplay({ displayTitle: display.title, displaySummary: display.summary }))}>保存展示文案 · 不调用 AI</button>
         <button type="button" disabled={busy || dirty} onClick={() => void action(() => updateDisplay({ displayTitle: null, displaySummary: null }))}>使用原文或分析译文</button>
