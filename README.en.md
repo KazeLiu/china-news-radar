@@ -25,7 +25,7 @@ Administration is available at `/admin`; accounts are initialized through an int
 
 The deployment target is **Ubuntu ARM64 with Docker**, using `compose.arm64.yml` and `Dockerfile.radar`. The planned domain is `china-news.951211.xyz`. See the [deployment guide](docs/DEPLOY-RADAR.md) for persistent storage and access protection.
 
-Web collection and URL extraction require a separate Chromium installation, not a personal Chrome profile. Pasted content does not require Chromium, and RSSHub is optional.
+Web collection and URL extraction require a separate Camoufox installation, not a personal Chrome profile. Pasted content does not require Camoufox, and RSSHub is optional.
 
 ## Documentation
 
@@ -33,12 +33,12 @@ Web collection and URL extraction require a separate Chromium installation, not 
 - [Target-computer setup and acceptance](docs/CONTINUE-ON-ANOTHER-PC.md)
 - [Deployment](docs/DEPLOY-RADAR.md)
 - [Administrator access](docs/ADMIN-ACCESS.md)
-- [Web collection and Chromium](docs/WEB-CRAWLER.md)
+- [Web collection and Camoufox](docs/WEB-CRAWLER.md)
 - [RSSHub integration](docs/RSSHUB.md)
 
 ## Current status
 
-Manual publishing, content hiding, operation logs, and frontend integration have passed local functional checks. Standalone Chromium is installed. Regression checks use isolated SQLite databases, a mocked SDK, or a local model server, without paid services. Real media sources, platform accounts, and Ubuntu ARM64/TLS deployment still need acceptance in their actual environments. See [the development record](docs/DEVELOPMENT-PLAN.md#17-接续代码审查与本地验收2026-10-13) for results and remaining steps.
+Earlier checks for publishing, content hiding, logs, and frontend integration are recorded in [the development record](docs/DEVELOPMENT-PLAN.md#17-接续代码审查与本地验收2026-10-13). This revision adds write-only credentials, AI titles for untitled content, and Camoufox integration. It received static code review only; no tests or paid models were run. See [browser setup](docs/WEB-CRAWLER.md) for platform requirements and the actual verification scope. Real platforms and Ubuntu ARM64/TLS deployment still require acceptance in their target environments.
 
 ## Author and credits
 

@@ -1,10 +1,10 @@
 # 在另一台电脑接续与验收
 
-按本文在新的电脑准备依赖、数据库和账号。手动新闻、人工隐藏、日志统计及前台整合已完成本地检查，最新结果见 [开发计划第 17 节](DEVELOPMENT-PLAN.md#17-接续代码审查与本地验收2026-10-13)。换电脑仍需各自准备持久数据和独立 Chromium。
+按本文在新的电脑准备依赖、数据库和账号。手动新闻、人工隐藏、日志统计及前台整合的基础检查记录见 [开发计划第 17 节](DEVELOPMENT-PLAN.md#17-接续代码审查与本地验收2026-10-13)。当前新增功能与验证范围见开发计划开头及 `WEB-CRAWLER.md`。换电脑仍需各自准备持久数据和独立 Camoufox。
 
 ## 先准备依赖与数据库
 
-在项目根目录执行下列命令。使用 Node 22 和 `pnpm@9.12.1`，按锁文件安装前后端依赖；RSSHub 是独立可选服务，不是手动录入和日志页面的前置依赖。
+在项目根目录执行下列命令。使用 Node 22.15 或更新的兼容版本和 `pnpm@9.12.1`，按锁文件安装前后端依赖；RSSHub 是独立可选服务，不是手动录入和日志页面的前置依赖。
 
 ```powershell
 npx --yes pnpm@9.12.1 --filter ai-hot-radar-server --filter client-next install --frozen-lockfile
@@ -23,13 +23,13 @@ node scripts/init-db.cjs
 
 后台账号通过交互命令初始化或重置，见 [管理员登录](ADMIN-ACCESS.md)。不要在命令参数中放密码。本轮没有为新空库创建默认账号。
 
-## 网页能力需要独立 Chromium
+## 网页能力需要独立 Camoufox
 
 ```powershell
-npx --yes pnpm@9.12.1 --filter ai-hot-radar-server exec playwright-core install chromium
+node scripts/install-camoufox.cjs
 ```
 
-Chromium 按电脑安装，不随 Git 同步。粘贴录入不依赖它；网页来源预览、URL 提取、解析规则辅助依赖它。安装与 ARM64 部署说明见 [WEB-CRAWLER.md](WEB-CRAWLER.md)，不连接个人 Chrome 或加载个人登录资料。
+Camoufox 按电脑安装，不随 Git 同步。粘贴录入不依赖它；网页来源预览、URL 提取、解析规则辅助依赖它。安装与 ARM64 部署说明见 [WEB-CRAWLER.md](WEB-CRAWLER.md)，不连接个人 Chrome 或加载个人登录资料。
 
 ## 验收当前业务流程
 

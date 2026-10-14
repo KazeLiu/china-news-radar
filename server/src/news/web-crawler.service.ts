@@ -1,5 +1,8 @@
 import { Injectable, OnModuleDestroy, OnModuleInit, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { Browser, BrowserContext, CDPSession, chromium, errors } from 'playwright-core';
+import { Browser, BrowserContext, errors } from 'playwright-core';
+import { Camoufox, findInstalledVersion } from 'camoufox';
+import { access } from 'node:fs/promises';
+import { join } from 'node:path';
 import { NewsSourceConfig } from './sources';
 import { SourceAdapterService, CollectionResult, inspectRecords } from './source-adapter.service';
 import { FilterRule } from './content-filter';
@@ -10,7 +13,7 @@ import { createCrawlerPage, sourceHosts, CrawlerPage } from './web-browser';
 import { randomUUID } from 'node:crypto';
 
 type StorageState = Awaited<ReturnType<BrowserContext['storageState']>>;
-interface Verification extends CrawlerPage { id: string; owner: string; source: NewsSourceConfig; expiresAt: number; timer: ReturnType<typeof setTimeout>; loading: boolean; busy: boolean; capture: CDPSession; error?: string }
+interface Verification extends CrawlerPage { id: string; owner: string; source: NewsSourceConfig; expiresAt: number; timer: ReturnType<typeof setTimeout>; loading: boolean; busy: boolean; error?: string }
 @Injectable()
 export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
   private browser?: Promise<Browser>;
@@ -27,10 +30,22 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
   private getBrowser() {
     if (!this.browser) {
       const env = Object.fromEntries(['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'TEMP', 'TMP', 'LANG', 'APPDATA', 'LOCALAPPDATA', 'XDG_RUNTIME_DIR', 'DISPLAY'].flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []));
-      this.browser = chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE_PATH || undefined, chromiumSandbox: true, env,
-        args: ['--disable-quic', '--disable-background-networking', '--disable-extensions', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] }).then(browser => {
+      this.browser = (async () => {
+        const installed = await findInstalledVersion('official/156.0.1-beta.36');
+        const executablePath = process.env.CAMOUFOX_EXECUTABLE_PATH || (installed ? join(installed, process.platform === 'win32' ? 'camoufox.exe' : 'camoufox-bin') : '');
+        if (!executablePath) throw new Error('Camoufox not installed');
+        await access(executablePath);
+        // Supply launch options directly: replace only the engine, without identity spoofing,
+        // model/addon downloads or inherited credentials. The dead-end proxy blocks
+        // background traffic; routed page requests still use requestPublic and its proxy.
+        return Camoufox({ from_options: { headless: true, executablePath, env,
+          proxy: { server: 'http://127.0.0.1:9' },
+          firefoxUserPrefs: { 'media.peerconnection.enabled': false, 'network.http.http3.enable': false,
+            'network.prefetch-next': false, 'network.dns.disablePrefetch': true, 'network.http.speculative-parallel-limit': 0,
+            'network.captive-portal-service.enabled': false, 'network.connectivity-service.enabled': false } } });
+      })().then(browser => {
           browser.on('disconnected', () => { this.browser = undefined; }); return browser;
-        }).catch(() => { this.browser = undefined; throw new SourceFetchError('browser-unavailable', 'Chromium 启动失败，请检查浏览器安装和系统依赖'); });
+        }).catch(() => { this.browser = undefined; throw new SourceFetchError('browser-unavailable', 'Camoufox 启动失败，请安装项目固定浏览器包并检查系统依赖；不会回退到 Chromium'); });
     }
     return this.browser;
   }
@@ -122,11 +137,8 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
       const browser = await this.getBrowser();
       const page = await createCrawlerPage(browser, source, true);
       if (revision !== this.browserRevision) { page.controller.abort(); await page.context.close(); throw new ConflictException('网络设置已改变，请重新打开浏览器'); }
-      let capture: CDPSession;
-      try { capture = await page.context.newCDPSession(page.page); }
-      catch (error) { page.controller.abort(); await page.context.close(); throw error; }
       const id = randomUUID();
-      const session = { ...page, capture, id, owner, source, expiresAt: Date.now() + 600000, loading: true, busy: false } as Verification;
+      const session = { ...page, id, owner, source, expiresAt: Date.now() + 600000, loading: true, busy: false } as Verification;
       this.verification = session;
       session.timer = setTimeout(() => { void this.closeVerification(id, owner).catch(() => console.warn('人工浏览器清理失败')); }, 600000);
       void session.page.goto(source.target!, { waitUntil: 'domcontentloaded' }).catch(() => { session.error = session.failure?.message || '页面加载未完成，可查看画面后重试'; }).finally(() => { session.loading = false; });
@@ -135,9 +147,8 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
   }
   async verificationFrame(id: string, owner: string) {
     const session = this.requireVerification(id, owner);
-    // A live frame must not wait for third-party fonts or alter page animations.
-    const screenshot = await session.capture.send('Page.captureScreenshot', { format: 'jpeg', quality: 65, captureBeyondViewport: false });
-    return { image: `data:image/jpeg;base64,${screenshot.data}`, url: session.page.url(), loading: session.loading, error: session.failure?.message || session.error, expiresAt: new Date(session.expiresAt).toISOString() };
+    const screenshot = await session.page.screenshot({ type: 'jpeg', quality: 65, timeout: 5000 });
+    return { image: `data:image/jpeg;base64,${screenshot.toString('base64')}`, url: session.page.url(), loading: session.loading, error: session.failure?.message || session.error, expiresAt: new Date(session.expiresAt).toISOString() };
   }
   async verificationInput(id: string, owner: string, input: unknown) {
     const session = this.requireVerification(id, owner);

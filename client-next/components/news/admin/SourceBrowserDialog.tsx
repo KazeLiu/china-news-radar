@@ -65,7 +65,7 @@ export function SourceBrowserDialog({ source, onClose, onResult, onSourceId }: {
     return { x: Math.max(0, Math.min(1279, (event.clientX - rect.left) / rect.width * 1280)), y: Math.max(0, Math.min(799, (event.clientY - rect.top) / rect.height * 800)) };
   }
   return <dialog ref={dialog} className={styles.browserDialog} aria-labelledby="source-browser-title" onCancel={event => { event.preventDefault(); if (!busy) void close(); }}>
-    <div className={styles.sectionTitle}><div><h2 id="source-browser-title">远程采集浏览器 · {source.name}</h2><p>这是后端的独立 Chromium。你可以点击、拖动、滚动或输入文字；只用于公开页面验证，请勿登录私人账号或付款。</p></div><button type="button" disabled={busy} onClick={() => void close()}>关闭窗口</button></div>
+    <div className={styles.sectionTitle}><div><h2 id="source-browser-title">远程采集浏览器 · {source.name}</h2><p>这是后端的独立 Camoufox。你可以点击、拖动、滚动或输入文字；只用于公开页面验证，请勿登录私人账号或付款。</p></div><button type="button" disabled={busy} onClick={() => void close()}>关闭窗口</button></div>
     {!session ? <><p>会话十分钟后自动关闭。完成后仅在后端内存中保留本来源验证状态三十分钟，重启或修改采集网络后清除。</p><button type="button" className={styles.primary} disabled={busy} onClick={() => void open()}>{busy ? '正在启动…' : '打开远程浏览器'}</button></> : <>
       <div className={styles.browserAddress}>{frame?.url || source.target}<span>{frame?.loading ? '页面正在加载…' : '可操作'} · 截止 {new Date(session.expiresAt).toLocaleTimeString()}</span></div>
       {frame ? <div className={styles.browserScreen} role="application" tabIndex={0} aria-label="远程网页操作区，可点击拖动，键盘支持方向键、Tab、回车和空格" onKeyDown={event => {

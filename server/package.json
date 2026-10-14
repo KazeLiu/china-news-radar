@@ -1,6 +1,7 @@
 {
   "name": "ai-hot-radar-server",
   "version": "1.0.0",
+  "engines": { "node": ">=22.15" },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
     "build": "tsc",
@@ -26,6 +27,7 @@
     "@nestjs/websockets": "^11.0.0",
     "@prisma/client": "^6.19.2",
     "axios": "^1.13.4",
+    "camoufox": "0.5.8",
     "cheerio": "^1.1.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
@@ -33,7 +35,7 @@
     "https-proxy-agent": "7.0.6",
     "nodemailer": "^8.0.0",
     "openai": "^4.104.0",
-    "playwright-core": "1.64.0",
+    "playwright-core": "1.62.0",
     "prisma": "^6.19.2",
     "reflect-metadata": "^0.2.2",
     "rss-parser": "^3.13.0",

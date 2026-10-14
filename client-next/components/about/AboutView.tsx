@@ -126,7 +126,7 @@ export function AboutView() {
           ))}
         </div>
         <p className="text-xs text-[var(--text-muted)] mt-3">
-          来源由管理员配置。网页采集需安装独立 Chromium，国内平台本轮不默认启用。
+          来源由管理员配置。网页采集需安装独立 Camoufox，国内平台本轮不默认启用。
           API 与 RSS 使用方式见
           <Link
             href="/agent"
@@ -173,7 +173,7 @@ export function AboutView() {
               数据采集
             </div>
             <div className="text-[var(--text-secondary)]">
-              RSS · Chromium 网页解析 · API · Telegram · 手动录入
+              RSS · Camoufox 网页解析 · API · Telegram · 手动录入
             </div>
           </div>
         </div>

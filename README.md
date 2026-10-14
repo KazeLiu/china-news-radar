@@ -18,7 +18,7 @@
 - Node.js 22、pnpm 9.12.1。
 - 后端：NestJS 11、Prisma、SQLite；前端：Next.js 16、React 19。
 - AI 分析使用兼容 OpenAI 协议的模型，由管理员统一配置；准备依赖与空数据库不需要模型密钥。
-- 网页采集和 URL 提取需要独立 Chromium；粘贴录入不依赖它，RSSHub 也是可选服务。
+- 网页采集和 URL 提取需要独立 Camoufox；粘贴录入不依赖它，RSSHub 也是可选服务。
 
 ```powershell
 git clone https://github.com/KazeLiu/china-news-radar.git
@@ -34,7 +34,7 @@ npx --yes pnpm@9.12.1 --filter ai-hot-radar-server --filter client-next install 
 
 部署目标为 **Ubuntu ARM64 + Docker**，预定域名为 `china-news.951211.xyz`。使用仓库中的 `compose.arm64.yml` 和 `Dockerfile.radar`，按 [部署与使用说明](docs/DEPLOY-RADAR.md)配置持久卷、访问保护与反向代理。
 
-网页能力的 Chromium 安装与容器配置见 [网页采集说明](docs/WEB-CRAWLER.md)，不连接个人 Chrome 或加载个人登录资料。
+网页能力的 Camoufox 安装与容器配置见 [网页采集说明](docs/WEB-CRAWLER.md)，不连接个人 Chrome 或加载个人登录资料。
 
 ## 文档导航
 
@@ -42,12 +42,12 @@ npx --yes pnpm@9.12.1 --filter ai-hot-radar-server --filter client-next install 
 - [目标电脑接续与验收说明](docs/CONTINUE-ON-ANOTHER-PC.md)
 - [部署与使用说明](docs/DEPLOY-RADAR.md)
 - [管理员登录与账号初始化](docs/ADMIN-ACCESS.md)
-- [网页采集与独立 Chromium](docs/WEB-CRAWLER.md)
+- [网页采集与独立 Camoufox](docs/WEB-CRAWLER.md)
 - [RSSHub 接入与实测记录](docs/RSSHUB.md)
 
 ## 当前开发状态
 
-手动新闻、人工隐藏、日志统计和前台整合已完成本地功能检查，独立 Chromium 已安装。回归使用隔离 SQLite、模拟 SDK 或本地模型，不调用付费服务。真实媒体来源、平台账号与 Ubuntu ARM64/TLS 部署仍需在实际环境验收，结果与剩余事项见 [开发计划第 17 节](docs/DEVELOPMENT-PLAN.md#17-接续代码审查与本地验收2026-10-13)。
+手动新闻、人工隐藏、日志统计和前台整合的既有检查记录见 [开发计划第 17 节](docs/DEVELOPMENT-PLAN.md#17-接续代码审查与本地验收2026-10-13)。当前新增密钥只写配置、无标题新闻的 AI 标题及 Camoufox 接入；按本轮约定仅做代码与调用关系自查，没有运行测试或付费模型。浏览器各平台的安装条件和实际验证范围见 [网页采集说明](docs/WEB-CRAWLER.md)。真实平台与 Ubuntu ARM64/TLS 部署仍需在实际环境验收。
 
 ## 项目结构
 
