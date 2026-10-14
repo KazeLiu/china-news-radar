@@ -17,6 +17,7 @@ export interface NewsSourceConfig {
   publisherHosts: string[];
   description: string;
   enabled: boolean;
+  forceChina?: boolean;
   pollSeconds: number;
   channel?: string;
   logo?: string;

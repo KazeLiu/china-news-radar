@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NewsSourceConfig } from './sources';
 import { CollectedItem, inspectFeed } from './collector';
 import { telegramItem } from './telegram';
-import { analysisKey, analysisInput, parseAnalysis, analysisDecision, fallbackDecision, ANALYSIS_PROMPT, AnalysisResult } from './analysis';
+import { analysisKey, analysisInput, parseAnalysis, analysisDecision, analysisVisibility, fallbackDecision, ANALYSIS_PROMPT, AnalysisResult } from './analysis';
 import { feedUrlsFor, distributionFor } from './transports';
 import { fetchSourceFeed, FeedFetchError, restoreFailures, restoreValidators, mergeFeeds } from './feed-fetch';
 import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, restoreConfig, validateAi, validateRules, validateSource, readAiUsage } from './admin-config';
@@ -38,6 +38,13 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private get aiRequested() { return this.config.ai.enabled; }
   private get aiEnabled() { return this.aiRequested && !!this.config.ai.apiKey; }
   private get dailyLimit() { return this.config.ai.dailyLimit; }
+  private forceChina(sourceId: string) { return this.config.sources.some(source => source.id === sourceId && source.forceChina); }
+  private fallbackDecision(item: Parameters<typeof fallbackDecision>[0], status: string, rules = this.config.rules, sourceId = '', forceChina = this.forceChina(sourceId)) {
+    return fallbackDecision(item, status, rules, sourceId, forceChina);
+  }
+  private analysisDecision(result: AnalysisResult, item: Parameters<typeof fallbackDecision>[0], rules = this.config.rules, sourceId = '') {
+    return analysisDecision(result, item, rules, sourceId, this.forceChina(sourceId));
+  }
   constructor(private readonly prisma: PrismaService, private readonly runtime: AiRuntimeService, private readonly adapters: SourceAdapterService, private readonly crawler: WebCrawlerService, private readonly logs: NewsLogsService, @Optional() private readonly bridge?: NewsBridgeService) {}
 
   private startAnalysisTimer() {
@@ -133,7 +140,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const url = input.originalUrl || new URL(`/articles/${itemId}`, process.env.PUBLIC_SITE_URL || process.env.CLIENT_URL || 'http://localhost:3420').href;
     const contentChanged = !existing || existing.title !== input.title || existing.summary !== input.summary || existing.body !== input.body || existing.originalUrl !== input.originalUrl;
     const data = { ...input, url, contentHash: analysisKey(input), eventKey: eventKey(input.title),
-      ...(contentChanged ? { ...fallbackDecision({ ...input, url }, 'disabled', this.config.rules, 'manual'), analysisKey: null, publicationStatus: 'draft' } : {}) };
+      ...(contentChanged ? { ...this.fallbackDecision({ ...input, url }, 'disabled', this.config.rules, 'manual'), analysisKey: null, publicationStatus: 'draft' } : {}) };
     const item = await this.prisma.$transaction(async tx => {
       if (input.originalUrl) {
         const duplicate = await tx.newsItem.findFirst({ where: { ...(id ? { id: { not: id } } : {}), OR: [{ url: input.originalUrl }, { originalUrl: input.originalUrl }] } });
@@ -147,7 +154,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         if ((body as { updatedAt?: unknown }).updatedAt !== existing.updatedAt.toISOString()) throw new ConflictException('草稿已更新，请重新读取后保存');
         const changed = await tx.newsItem.updateMany({ where: { id: itemId, updatedAt: existing.updatedAt }, data });
         if (!changed.count) throw new ConflictException('草稿已更新，请重新读取后保存');
-      } else await tx.newsItem.create({ data: { id: itemId, sourceId: 'manual', isManual: true, acquisitionKind: 'manual', ...fallbackDecision({ ...input, url }, 'disabled', this.config.rules, 'manual'), ...data, publicationStatus: 'draft' } });
+      } else await tx.newsItem.create({ data: { id: itemId, sourceId: 'manual', isManual: true, acquisitionKind: 'manual', ...this.fallbackDecision({ ...input, url }, 'disabled', this.config.rules, 'manual'), ...data, publicationStatus: 'draft' } });
       await this.bridge?.sync(tx, itemId);
       return { item: await tx.newsItem.findUniqueOrThrow({ where: { id: itemId } }), reused: false };
     });
@@ -364,7 +371,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private async logAnalysis(item: NewsItem, status: string, route: string, result?: AnalysisResult, taskId?: string) {
     await this.logs.record({ kind: 'analysis', route, sourceId: item.sourceId, taskId, status, elapsedMs: 0,
       detailsJson: JSON.stringify({ newsItemId: item.id, title: item.title.slice(0, 160), aiStatus: result ? 'done' : item.aiStatus,
-        summaryOmitted: !analysisInput(item).summary, ...(result ? { relation: result.relation, topics: result.topics, type: result.type, language: result.language,
+        summaryOmitted: !analysisInput(item).summary, forceChina: this.forceChina(item.sourceId), effectiveRelation: this.forceChina(item.sourceId) ? 'related' : item.aiRelation,
+        ...(result ? { relation: result.relation, topics: result.topics, type: result.type, language: result.language,
           reason: result.reason, translated: !!result.translation, scoring: result.scoring } : { reason: '使用规则筛选，不产生模型请求' }) }) });
   }
   private async logAnalysisKey(key: string, status: string, route: string, result?: AnalysisResult, taskId?: string) {
@@ -403,9 +411,9 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   private async showOverdueFallbacks() {
     // Slow providers or a long queue must not hide timely rule-matched news indefinitely.
-    const overdue = await this.prisma.newsItem.findMany({ where: { aiStatus: 'pending', decisionBy: 'rules', firstSeenAt: { lte: new Date(Date.now() - 15_000) } } });
+    const overdue = await this.prisma.newsItem.findMany({ where: { aiStatus: 'pending', decisionBy: { in: ['rules', 'source-forced-rules'] }, firstSeenAt: { lte: new Date(Date.now() - 15_000) } } });
     for (const item of overdue) {
-      const args = { where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt }, data: { ...fallbackDecision(item, 'pending', this.config.rules, item.sourceId), decisionBy: 'rules-waiting', updatedAt: item.updatedAt } };
+      const args = { where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt }, data: { ...this.fallbackDecision(item, 'pending', this.config.rules, item.sourceId), decisionBy: this.forceChina(item.sourceId) ? 'source-forced-rules-waiting' : 'rules-waiting', updatedAt: item.updatedAt } };
       if (this.bridge) await this.prisma.$transaction(async tx => { await tx.newsItem.updateMany(args); await this.bridge!.sync(tx, item.id); });
       else await this.prisma.newsItem.updateMany(args);
       await this.logAnalysis(item, 'rules', 'news/waiting');
@@ -416,7 +424,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const items = await tx.newsItem.findMany({ where: { analysisKey: job.key } });
     const result = job.status === 'done' && job.resultJson ? parseAnalysis(job.resultJson) : null;
     for (const item of items) {
-      const data = result ? { ...analysisDecision(result, item, this.config.rules, item.sourceId), analyzedAt: job.analyzedAt } : fallbackDecision(item, job.status, this.config.rules, item.sourceId);
+      const data = result ? { ...this.analysisDecision(result, item, this.config.rules, item.sourceId), analyzedAt: job.analyzedAt } : this.fallbackDecision(item, job.status, this.config.rules, item.sourceId);
       await tx.newsItem.updateMany({ where: { id: item.id, analysisKey: job.key, updatedAt: item.updatedAt }, data: { ...data, updatedAt: item.updatedAt } });
       await this.bridge?.sync(tx, item.id);
     }
@@ -444,7 +452,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (cache?.status === 'done') {
       try {
         if (!cache.resultJson) throw new Error('AI JSON object required');
-        return { ...analysisDecision(parseAnalysis(cache.resultJson), item, this.config.rules, sourceId), analyzedAt: cache.analyzedAt };
+        return { ...this.analysisDecision(parseAnalysis(cache.resultJson), item, this.config.rules, sourceId), analyzedAt: cache.analyzedAt };
       } catch (problem) {
         const error = `已保存的 AI 结果无效：${analysisErrorDetail(problem)} 采用规则兜底，不自动重新调用模型。`;
         await this.prisma.newsAnalysis.updateMany({ where: { key: cache.key, status: 'done' }, data: { status: 'failed', error, retryAt: null, leaseUntil: null } });
@@ -452,7 +460,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         status = 'failed';
       }
     }
-    return fallbackDecision(item, status, this.config.rules, sourceId);
+    return this.fallbackDecision(item, status, this.config.rules, sourceId);
   }
   private async queueBatch(keys: string[], chunkSize = 20, previousTaskId?: string) {
     const activeKey = `news:${createHash('sha256').update([...keys].sort().join(',')).digest('hex')}`;
@@ -568,7 +576,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         result = parseAnalysis(JSON.stringify(json), input);
         if (result.version !== 2) throw new Error();
       } catch (problem) { await this.runtime.noteProtocolError(analysisErrorDetail(problem)); throw new InvalidAnalysisResponse(analysisErrorDetail(problem), this.runtime.requestInfo()?.requestId); }
-      const decision = analysisDecision(result, { ...input, url: 'https://example.invalid/ai-test' }, []);
+      const decision = this.analysisDecision(result, { ...input, url: 'https://example.invalid/ai-test' }, []);
       return { ...this.runtime.requestInfo(), input, ok: true, result, preview: { visible: decision.visible, decisionBy: decision.decisionBy } };
     } catch (problem) {
       const day = new Date().toISOString().slice(0, 10);
@@ -622,7 +630,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     await this.updateConfig({ ...this.config, ai }, undefined, async () => { if (!this.aiEnabled) {
       const pending = await this.prisma.newsItem.findMany({ where: { aiStatus: 'pending' } });
       for (const item of pending) await this.updateItem({ where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt },
-        data: { ...fallbackDecision(item, 'disabled', this.config.rules, item.sourceId), updatedAt: item.updatedAt } });
+        data: { ...this.fallbackDecision(item, 'disabled', this.config.rules, item.sourceId), updatedAt: item.updatedAt } });
     } });
     await this.bridge?.rebuild();
     return this.adminConfig();
@@ -655,6 +663,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         update: { etag: active ? validators[active].etag : null, lastModified: active ? validators[active].lastModified : null, activeKind: active ? state!.activeKind : null, activeFeedUrl: active,
           feedValidators: JSON.stringify(validators), feedFailures: JSON.stringify(failures), nextCheckAt: null, error: null,
           ...(checked ? { lastParseJson: JSON.stringify({ ...checked.structure, ruleHash: webHash(source) }) } : rulesChanged || urls.size ? { lastParseJson: null } : {}) } });
+    }, async () => {
+      if (!!previous?.forceChina !== !!source.forceChina) await this.reapplySourcePolicy(source.id);
     });
     return { ...await this.adminConfig(), savedSourceId: source.id };
   }
@@ -706,7 +716,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       if (source.kind === 'api' || source.kind === 'web' || source.kind === 'telegram') {
         const result = await this.adapters.collect(source, this.config.rules);
         return { ok: true, checkedAt: now, feedTitle: source.name, attempts: [], structure: result.structure, rawCount: result.rawCount, checkedCount: result.checkedCount, acceptedCount: result.items.length,
-          samples: result.samples.slice(0, 10).map(sample => ({ ...sample, summary: distinctSummary(sample.title, sample.summary), fallbackVisible: sample.accepted && !!sample.originalPublisher && fallbackDecision({ title: sample.title, summary: sample.summary, url: sample.url || '' }, 'preview', this.config.rules, source.id).visible })) };
+          samples: result.samples.slice(0, 10).map(sample => ({ ...sample, summary: distinctSummary(sample.title, sample.summary), fallbackVisible: sample.accepted && !!sample.originalPublisher && this.fallbackDecision({ title: sample.title, summary: sample.summary, url: sample.url || '' }, 'preview', this.config.rules, source.id, !!source.forceChina).visible })) };
       }
       const state = previous ? await this.prisma.newsSource.findUniqueOrThrow({ where: { id: previous.id } }) : null;
       // Preview honors address backoff but never advances ingestion's conditional-request watermark.
@@ -715,7 +725,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       return { ok: true, checkedAt: now, feedUrl: result.feeds[0].selected.feedUrl, attempts: result.attempts, feedTitle: source.name,
         rawCount: feed.rawCount, checkedCount: feed.checkedCount, acceptedCount: feed.items.length, duplicateCount: feed.duplicates,
         samples: feed.samples.slice(0, 10).map(sample => ({ ...sample, summary: distinctSummary(sample.title, sample.summary),
-          fallbackVisible: sample.accepted && fallbackDecision({ ...sample, url: sample.url! }, 'preview', this.config.rules, source.id).visible })) };
+          fallbackVisible: sample.accepted && this.fallbackDecision({ ...sample, url: sample.url! }, 'preview', this.config.rules, source.id, !!source.forceChina).visible })) };
     } catch (error) {
       if (source.kind === 'api' || source.kind === 'web' || source.kind === 'telegram') return { ok: false, checkedAt: now, attempts: [], error: error instanceof SourceFetchError ? error.message : '来源连接或解析失败，请核对配置', code: error instanceof SourceFetchError ? error.code : 'adapter-error', status: error instanceof SourceFetchError ? error.status : undefined };
       if (!(error instanceof FeedFetchError)) throw error;
@@ -736,7 +746,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     try {
       const result = await this.crawler.finishVerification(id, owner, this.config.rules);
       return { ok: true, checkedAt: new Date(), attempts: [], structure: result.structure, rawCount: result.rawCount, checkedCount: result.checkedCount, acceptedCount: result.items.length,
-        samples: result.samples.slice(0, 10).map(sample => ({ ...sample, fallbackVisible: sample.accepted && !!sample.originalPublisher && fallbackDecision({ title: sample.title, summary: sample.summary, url: sample.url || '' }, 'preview', this.config.rules, result.sourceId).visible })) };
+        samples: result.samples.slice(0, 10).map(sample => ({ ...sample, fallbackVisible: sample.accepted && !!sample.originalPublisher && this.fallbackDecision({ title: sample.title, summary: sample.summary, url: sample.url || '' }, 'preview', this.config.rules, result.sourceId).visible })) };
     } catch (error) {
       if (!(error instanceof SourceFetchError)) throw error;
       return { ok: false, checkedAt: new Date(), attempts: [], code: error.code, error: error.message, status: error.status };
@@ -753,7 +763,27 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       || body.title.length > 600 || body.summary.length > 1600 || body.url.length > 2000) throw new BadRequestException('预览内容格式无效');
     const rules = body.rules === undefined ? this.config.rules : validateRules(body.rules, [...this.config.sources, ...this.config.removedSourceIds.map(id => ({ id }))]);
     const matched = matchingExclusions({ title: body.title, summary: body.summary, url: body.url }, rules, body.sourceId);
-    return { excluded: matched.length > 0, matched, fallbackVisible: fallbackDecision({ title: body.title, summary: body.summary, url: body.url }, 'preview', rules, body.sourceId).visible };
+    return { excluded: matched.length > 0, matched, fallbackVisible: this.fallbackDecision({ title: body.title, summary: body.summary, url: body.url }, 'preview', rules, body.sourceId).visible };
+  }
+  private async reapplySourcePolicy(sourceId: string) {
+    let cursor: string | undefined;
+    while (true) {
+      const items = await this.prisma.newsItem.findMany({ where: { sourceId }, orderBy: { id: 'asc' }, take: 100, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+      for (const item of items) {
+        const decision = item.aiStatus === 'done' && item.aiRelation && item.aiType
+          ? analysisVisibility({ relation: item.aiRelation as AnalysisResult['relation'], type: item.aiType as AnalysisResult['type'] }, item, this.config.rules, sourceId, this.forceChina(sourceId))
+          : this.fallbackDecision(item, item.aiStatus, this.config.rules, sourceId);
+        const data = { visible: decision.visible, decisionBy: decision.decisionBy };
+        if (item.aiStatus === 'pending' && this.aiEnabled && Date.now() - item.firstSeenAt.getTime() < 15_000) data.visible = false;
+        await this.prisma.$transaction(async tx => {
+          await tx.newsItem.updateMany({ where: { id: item.id, updatedAt: item.updatedAt, analysisKey: item.analysisKey, aiStatus: item.aiStatus, analyzedAt: item.analyzedAt }, data: { ...data, updatedAt: item.updatedAt } });
+          await this.bridge?.sync(tx, item.id);
+          await tx.hotspot.updateMany({ where: { newsItemId: item.id }, data: { notifyEligible: false } });
+        });
+      }
+      if (items.length < 100) break;
+      cursor = items[items.length - 1].id;
+    }
   }
   private async reapplyFilters() {
     let cursor: string | undefined; let changed = 0;

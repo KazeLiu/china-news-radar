@@ -102,7 +102,8 @@ export function validateSource(value: unknown, previous?: NewsSourceConfig, rest
     kind: rss ? new URL(feedUrls[0]).hostname === 'news.google.com' ? 'google-rss' : 'rss' : rawKind as NewsSourceConfig['kind'],
     website: body.website ? publicUrl(body.website, '来源链接') : previous?.website || (rss ? new URL(feedUrls[0]).origin : rawKind === 'web' || (rawKind === 'api' && adapter === 'generic') ? new URL(target).origin : ''),
     feedUrls, feedUrl: feedUrls[0], target, adapter, logo, timeZone, notes: string(body.notes ?? previous?.notes ?? '', '备注', 2000, true), publisherHosts: [...new Set(publisherHosts)],
-    description: string(body.description ?? '', '说明', 800, true), pollSeconds, enabled: previous?.enabled ?? false };
+    description: string(body.description ?? '', '说明', 800, true), pollSeconds, enabled: previous?.enabled ?? false,
+    forceChina: boolean(body.forceChina ?? previous?.forceChina ?? false) };
   if (source.kind === 'telegram') {
     const channel = string(body.channel || target, 'Telegram 频道', 100).replace(/^@/, '');
     if (!/^[a-zA-Z][a-zA-Z0-9_]{3,99}$/.test(channel)) throw new BadRequestException('请填写公开 Telegram 频道用户名');

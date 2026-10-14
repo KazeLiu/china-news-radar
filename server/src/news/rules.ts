@@ -36,13 +36,13 @@ export function distinctSummary(title: string, summary: string): string {
   return previous[right.length] <= limit ? '' : clean;
 }
 
-export function relevantToChina(title: string, summary = ''): boolean {
+export function relevantToChina(title: string, summary = '', forceChina = false): boolean {
   const text = `${title} ${summary}`;
-  return CHINA.test(text) && !OPINION.test(title) && !/check out .*stock price|stock quote|stock price .*in real time/i.test(title) && !(SOFT_NEWS.test(title) && !HARD_NEWS.test(text));
+  return (forceChina || CHINA.test(text)) && !OPINION.test(title) && !/check out .*stock price|stock quote|stock price .*in real time/i.test(title) && !(SOFT_NEWS.test(title) && !HARD_NEWS.test(text));
 }
 
-export function shouldDisplay(title: string, summary: string, url: string) {
-  if (!relevantToChina(title, summary)) return false;
+export function shouldDisplay(title: string, summary: string, url: string, forceChina = false) {
+  if (!relevantToChina(title, summary, forceChina)) return false;
   try {
     const path = new URL(url).pathname;
     if (/\/(commentisfree|long-read|opinion|editorials)\//i.test(path)) return false;

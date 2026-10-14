@@ -18,7 +18,7 @@ export interface AiTestResult {
 export interface ApiSourceSettings { method: 'GET' | 'POST'; body: string; auth: { type: 'none' | 'bearer' | 'header'; header: string; value: string; keyConfigured?: boolean }; mapping: { items: string; title: string; summary: string; url: string; publishedAt: string; author: string; images: string; body: string } }
 export interface WebRules { mode: 'metadata' | 'css'; item: string; title: string; summary: string; link: string; date: string; image: string; body: string; author: string; next: string }
 export interface WebSourceSettings { rules: WebRules; previousRules?: WebRules; timeoutSeconds: number; maxItems: number; maxPages: number; concurrency: number }
-export interface SourceSettings { id: string; name: string; englishName: string; kind: string; website: string; feedUrl?: string; feedUrls?: string[]; publisherHosts: string[]; description: string; pollSeconds: number; state?: Source; target?: string; logo?: string; notes?: string; channel?: string; adapter?: string; api?: ApiSourceSettings; web?: WebSourceSettings; timeZone?: string }
+export interface SourceSettings { id: string; name: string; englishName: string; kind: string; website: string; feedUrl?: string; feedUrls?: string[]; publisherHosts: string[]; description: string; pollSeconds: number; forceChina?: boolean; state?: Source; target?: string; logo?: string; notes?: string; channel?: string; adapter?: string; api?: ApiSourceSettings; web?: WebSourceSettings; timeZone?: string }
 export interface SourceTestResult {
   ok: boolean; checkedAt: string; feedUrl?: string; feedTitle?: string; error?: string; rawCount?: number; checkedCount?: number; acceptedCount?: number; duplicateCount?: number;
   attempts: RssAddressStatus[];

@@ -66,15 +66,19 @@ export function parseAnalysis(raw: string, input?: AnalysisText): AnalysisResult
   }
   return { version: value.version, relation: value.relation, topics: value.topics, type: value.type, language: value.language, reason: text(value.reason, 400), translation, ...(scoring ? { scoring } : {}) };
 }
-export function fallbackDecision(item: FilterItem, status: string, exclusions: FilterRule[] = DEFAULT_EXCLUSIONS, sourceId = '') {
+export function fallbackDecision(item: FilterItem, status: string, exclusions: FilterRule[] = DEFAULT_EXCLUSIONS, sourceId = '', forceChina = false) {
   const topic = topicFor(`${item.title} ${item.summary}`);
-  return { visible: !matchingExclusions(item, exclusions, sourceId).length && shouldDisplay(item.title, item.summary, item.url), topic, aiTopics: JSON.stringify([topic]), decisionBy: 'rules', aiStatus: status,
+  return { visible: !matchingExclusions(item, exclusions, sourceId).length && shouldDisplay(item.title, item.summary, item.url, forceChina), topic, aiTopics: JSON.stringify([topic]), decisionBy: forceChina ? 'source-forced-rules' : 'rules', aiStatus: status,
     aiRelation: null, aiType: null, aiLanguage: null, aiReason: null, analyzedAt: null, titleZh: null, summaryZh: null, aiInputTruncated: false };
 }
-export function analysisDecision(result: AnalysisResult, item: FilterItem, exclusions: FilterRule[] = DEFAULT_EXCLUSIONS, sourceId = '') {
+export function analysisVisibility(result: Pick<AnalysisResult, 'relation' | 'type'>, item: FilterItem, exclusions: FilterRule[] = DEFAULT_EXCLUSIONS, sourceId = '', forceChina = false) {
   const uncertain = result.relation === 'uncertain';
-  return { visible: !matchingExclusions(item, exclusions, sourceId).length && (uncertain ? shouldDisplay(item.title, item.summary, item.url) : result.relation === 'related' && ['breaking', 'report'].includes(result.type)),
-    topic: result.topics[0], aiTopics: JSON.stringify(result.topics), decisionBy: uncertain ? 'ai-uncertain-rules' : 'ai', aiStatus: 'done',
+  return { visible: !matchingExclusions(item, exclusions, sourceId).length && (forceChina ? ['breaking', 'report'].includes(result.type) : uncertain ? shouldDisplay(item.title, item.summary, item.url) : result.relation === 'related' && ['breaking', 'report'].includes(result.type)),
+    decisionBy: forceChina ? 'source-forced-ai' : uncertain ? 'ai-uncertain-rules' : 'ai' };
+}
+export function analysisDecision(result: AnalysisResult, item: FilterItem, exclusions: FilterRule[] = DEFAULT_EXCLUSIONS, sourceId = '', forceChina = false) {
+  return { ...analysisVisibility(result, item, exclusions, sourceId, forceChina),
+    topic: result.topics[0], aiTopics: JSON.stringify(result.topics), aiStatus: 'done',
     aiRelation: result.relation, aiType: result.type, aiLanguage: result.language, aiReason: result.reason,
     titleZh: result.translation?.title || null, summaryZh: analysisInput(item).summary ? result.translation?.summary || null : null, aiInputTruncated: analysisInput(item).truncated };
 }
