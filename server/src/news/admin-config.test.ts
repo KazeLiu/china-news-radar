@@ -22,7 +22,7 @@ describe('administrator configuration', () => {
     const config = defaultConfig(); const ap = config.sources.find(s => s.id === 'ap')!;
     const saved = validateSource({ ...ap, feedUrls: ['https://example.org/feed', 'https://backup.example.org/feed'], kind: 'rss', rsshubRoute: '/apnews/topics/china' }, ap);
     expect(saved.feedUrls).toEqual(['https://example.org/feed', 'https://backup.example.org/feed']); expect(saved).not.toHaveProperty('rsshubRoute');
-    for (const patch of [{ feedUrls: ['http://127.0.0.1/private'] }, { feedUrls: [] }, { feedUrls: ['https://example.org/rss', 'https://example.org/rss'] }, { publisherHosts: ['apnews.com.evil/'] }, { publisherHosts: ['sina.com.cn'] }, { pollSeconds: 0 }, { id: 'tg-new-channel' }]) expect(() => validateSource({ ...ap, ...patch }, ap)).toThrow();
+    for (const patch of [{ feedUrls: ['http://127.0.0.1/private'] }, { feedUrls: [] }, { feedUrls: ['https://example.org/rss', 'https://example.org/rss'] }, { publisherHosts: ['apnews.com.evil/'] }, { publisherHosts: ['sina.com.cn'] }, { pollSeconds: 0 }, { id: 'invalid/id' }]) expect(() => validateSource({ ...ap, ...patch }, ap)).toThrow();
     vi.stubEnv('RSSHUB_BASE_URL', 'http://127.0.0.1:3412');
     expect(validateSource({ ...ap, feedUrls: ['http://127.0.0.1:3412/feeds/ap'] }).feedUrls).toHaveLength(1);
   });
@@ -48,17 +48,18 @@ describe('administrator configuration', () => {
 });
 describe('administrator access', () => {
   const local = { socket: { remoteAddress: '127.0.0.1' }, headers: { host: 'localhost:3411', origin: 'http://localhost:3410', 'x-forwarded-for': '::1', 'x-forwarded-host': 'localhost:3410' } };
-  it('allows localhost without a token and rejects remote visitors including proxies', () => {
-    vi.stubEnv('ADMIN_TOKEN', ''); requireAdmin(local);
+  it('requires an authenticated session even for localhost and proxy visitors', () => {
+    vi.stubEnv('ADMIN_TOKEN', ''); expect(() => requireAdmin(local)).toThrow();
     expect(() => requireAdmin({ ...local, socket: { remoteAddress: '203.0.113.10' } })).toThrow();
     expect(() => requireAdmin({ ...local, headers: { ...local.headers, 'x-forwarded-for': '203.0.113.10' } })).toThrow();
     expect(() => requireAdmin({ ...local, headers: { ...local.headers, 'x-forwarded-host': 'china-news.example.org' } })).toThrow();
   });
-  it('requires the token even from localhost once configured', () => {
+  it('does not accept legacy tokens and accepts only the guard-authenticated session', () => {
     const token = 'test-only-admin-token-32-characters'; vi.stubEnv('ADMIN_TOKEN', token);
     expect(() => requireAdmin(local)).toThrow();
-    requireAdmin({ ...local, headers: { authorization: `Bearer ${token}` } });
-    requireAdmin({ ...local, headers: { authorization: 'Basic proxy-auth-fixture', 'x-admin-token': token } });
+    expect(() => requireAdmin({ ...local, headers: { authorization: `Bearer ${token}` } })).toThrow();
+    expect(() => requireAdmin({ ...local, headers: { authorization: 'Basic proxy-auth-fixture', 'x-admin-token': token } })).toThrow();
+    requireAdmin({ ...local, adminAuthenticated: true });
     expect(() => requireAdmin({ ...local, headers: { authorization: `Bearer ${token.slice(1)}` } })).toThrow();
   });
 });

@@ -7,6 +7,7 @@ import { ADMIN_CONFIG_KEY, AiConfig, defaultConfig, readAiUsage, restoreConfig }
 import { AI_TIMEOUT_MS, InvalidAnalysisResponse, aiTestError } from './ai-errors';
 import { SourceFetchError } from './public-network';
 import { NewsLogsService } from './news-logs.service';
+import { retryAfterMs } from './rules';
 
 export async function reserveAiUsage(tx: Prisma.TransactionClient, limit: number, now = new Date()) {
   const key = `news-ai-usage-${now.toISOString().slice(0, 10)}`;
@@ -215,7 +216,8 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
         const safe = problem instanceof SourceFetchError ? { code: problem.code, message: problem.message, status: problem.status }
           : response ? { code: 'task-rejected', message: typeof response === 'string' ? response : typeof (response as { message?: unknown }).message === 'string' ? (response as { message: string }).message : '任务未能完成，已有有效结果保留' }
           : aiTestError(problem, config.apiKey);
-        await this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { status: retry ? 'queued' : 'failed', availableAt: new Date(Date.now() + (retry ? 30_000 * 2 ** (job.attempts - 1) : 0)), errorJson: JSON.stringify(safe), activeKey: retry ? job.activeKey : null, owner: null, leaseUntil: null, finishedAt: retry ? null : new Date() } });
+        const retryDelay = retry ? Math.max(30_000 * 2 ** (job.attempts - 1), problem instanceof APIError && problem.status === 429 ? retryAfterMs(problem.headers?.['retry-after']) : 0) : 0;
+        await this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { status: retry ? 'queued' : 'failed', availableAt: new Date(Date.now() + retryDelay), errorJson: JSON.stringify(safe), activeKey: retry ? job.activeKey : null, owner: null, leaseUntil: null, finishedAt: retry ? null : new Date() } });
         await this.logs.record({ kind: 'task', route: `ai-task/${job.kind}`, taskId: job.id, startedAt, elapsedMs: Date.now() - startedAt.getTime(), status: 'failed', errorCode: retry ? 'retry-scheduled' : safe.code, errorReason: safe.message });
       }
     } finally {

@@ -14,7 +14,8 @@ describe('saved administrator AI key', () => {
     expect(() => controller.aiKey(request)).toThrow();
     expect(() => controller.aiKey({ ...request, headers: { ...request.headers, 'x-admin-token': 'wrong-token' } })).toThrow();
     expect(service.adminAiKey).not.toHaveBeenCalled();
-    expect(controller.aiKey({ ...request, headers: { ...request.headers, 'x-admin-token': token } })).toEqual({ apiKey: 'test-only-saved-key' });
+    expect(() => controller.aiKey({ ...request, headers: { ...request.headers, 'x-admin-token': token } })).toThrow();
+    expect(controller.aiKey({ ...request, adminAuthenticated: true })).toEqual({ apiKey: 'test-only-saved-key' });
     expect(Reflect.getMetadata(HEADERS_METADATA, NewsController.prototype.aiKey)).toContainEqual({ name: 'Cache-Control', value: 'no-store' });
   });
   it('rejects remote visitors when no administrator token is configured', () => {
@@ -25,10 +26,11 @@ describe('saved administrator AI key', () => {
   });
   it('reads the in-memory saved value without changing settings or invoking a model', () => {
     vi.stubEnv('AI_ANALYSIS_ENABLED', 'false'); vi.stubEnv('OPENAI_API_KEY', 'test-only-saved-key');
-    const service = new NewsService({} as PrismaService);
+    const runtime = { enqueue: vi.fn() };
+    const service = new NewsService({} as PrismaService, runtime as never, {} as never, {} as never, {} as never);
     expect(service.adminAiKey()).toEqual({ apiKey: 'test-only-saved-key' });
     service['config'].ai.apiKey = 'replacement-fixture';
     expect(service.adminAiKey()).toEqual({ apiKey: 'replacement-fixture' });
-    expect(service['ai']).toBeNull();
+    expect(runtime.enqueue).not.toHaveBeenCalled();
   });
 });
