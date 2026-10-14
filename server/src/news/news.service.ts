@@ -405,7 +405,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   async telegramSources() {
     const states = await this.prisma.newsSource.findMany({ where: { enabled: true } });
-    return this.config.sources.filter(s => s.kind === 'telegram' && states.some(state => state.id === s.id)).map(s => ({ channel: s.channel }));
+    return this.config.sources.filter(s => s.kind === 'telegram' && states.some(state => state.id === s.id)).map(s => ({ sourceId: s.id, channel: s.channel }));
   }
   private async prepareAnalysis() {
     if (this.stopped || this.configBusy) return;
@@ -602,7 +602,6 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       sources: this.config.sources.map(({ notes, api, ...s }) => ({ ...s, ...(api ? { api: { ...api, body: '', auth: { ...api.auth, value: '', keyConfigured: !!api.auth.value } } } : {}), state: states.find(state => state.id === s.id) })), rules: this.config.rules,
       status: await this.status(), localOnly: false };
   }
-  adminAiKey() { return { apiKey: this.config.ai.apiKey }; }
   adminNetworkPrivate() { return { proxyUrl: sourceNetwork().proxyUrl }; }
   async configureNetwork(body: unknown) {
     const network = validateSourceNetwork(body, sourceNetwork());
@@ -647,6 +646,9 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const id = (body as { id?: unknown } | null)?.id;
     const previous = this.config.sources.find(s => s.id === id);
     const source = validateSource(body, previous);
+    if (source.kind === 'telegram' && this.config.sources.some(s => s.id !== source.id && s.kind === 'telegram' && s.channel?.toLowerCase() === source.channel?.toLowerCase())) {
+      throw new BadRequestException('该公开频道已有对应来源，请编辑原来源');
+    }
     let checked: CollectionResult | undefined;
     const rulesChanged = source.kind === 'web' && (previous?.kind !== 'web' || webHash(source) !== webHash(previous));
     if (forceCheck || (rulesChanged && (previous || source.web!.rules.mode === 'css'))) {

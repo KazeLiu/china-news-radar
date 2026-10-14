@@ -1,15 +1,11 @@
 import { Body, Controller, Delete, Get, Header, Headers, Param, Patch, Post, Put, Query, UnauthorizedException, ForbiddenException, Req, UseInterceptors } from '@nestjs/common';
-import { timingSafeEqual } from 'node:crypto';
+import { validCollectorToken, requireCollector } from './collector-access';
+export { validCollectorToken } from './collector-access';
 import { NewsService } from './news.service';
 import { requireAdmin, AdminRequest } from './admin-access';
 import { NewsAuditInterceptor } from './news-audit.interceptor';
 import { NewsTrashService } from './news-trash.service';
 
-export function validCollectorToken(header: string | undefined, token = process.env.COLLECTOR_TOKEN) {
-  if (!token || token.length < 32 || !header?.startsWith('Bearer ')) return false;
-  const supplied = Buffer.from(header.slice(7)); const expected = Buffer.from(token);
-  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
-}
 // Browsers must write from the configured reader origin. CLI and internal worker requests have no Origin.
 function sameOrigin(req: { headers: Record<string, string | string[] | undefined> }) {
   const origin = req.headers.origin;
@@ -39,7 +35,6 @@ export class NewsController {
   @Patch('items/:id/saved') save(@Param('id') id: string, @Body() body: { saved?: unknown }, @Req() req: Parameters<typeof sameOrigin>[0]) { sameOrigin(req); return this.news.save(id, body.saved); }
   @Patch('sources/:id') source(@Param('id') id: string, @Body() body: { enabled?: unknown }, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.enableSource(id, body.enabled); }
   @Get('admin/config') config(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminConfig(); }
-  @Get('admin/ai/key') @Header('Cache-Control', 'no-store') aiKey(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminAiKey(); }
   @Get('admin/network/private') @Header('Cache-Control', 'no-store') networkPrivate(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminNetworkPrivate(); }
   @Put('admin/network') network(@Body() body: unknown) { return this.news.configureNetwork(body); }
   @Put('admin/ai') ai(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureAi(body); }
@@ -58,8 +53,8 @@ export class NewsController {
     if (!validCollectorToken(auth)) throw new UnauthorizedException('采集令牌无效或未配置');
     return this.news.ingest(body);
   }
-  @Get('telegram/sources') @Header('Cache-Control', 'no-store') telegramSources(@Headers('authorization') auth: string | undefined) {
-    if (!validCollectorToken(auth)) throw new UnauthorizedException('采集令牌无效或未配置');
+  @Get('telegram/sources') @Header('Cache-Control', 'no-store') telegramSources(@Req() req: AdminRequest) {
+    requireCollector(req.headers);
     return this.news.telegramSources();
   }
 }

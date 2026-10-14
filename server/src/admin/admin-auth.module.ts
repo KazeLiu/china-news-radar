@@ -10,7 +10,7 @@ class AdminGuard implements CanActivate {
   async canActivate(context: ExecutionContext) {
     if (context.getType() !== 'http') return true;
     const req = context.switchToHttp().getRequest<AdminRequest & { path: string; method: string }>();
-    if (!req.path.startsWith('/api/') || req.path === '/api/news/telegram' || req.path.startsWith('/api/news/admin/auth/')) return true;
+    if (!req.path.startsWith('/api/') || req.path === '/api/news/telegram' || req.path === '/api/news/telegram/status' || req.path.startsWith('/api/news/admin/auth/')) return true;
     const mutation = !['GET', 'HEAD', 'OPTIONS'].includes(req.method);
     const privateRead = req.path.includes('/admin/') || req.path.startsWith('/api/settings');
     if (mutation || privateRead) {

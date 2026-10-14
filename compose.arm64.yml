@@ -22,6 +22,8 @@ services:
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       AI_DAILY_LIMIT: ${AI_DAILY_LIMIT:-100}
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TG_API_ID: ${TG_API_ID:-}
+      TG_API_HASH: ${TG_API_HASH:-}
       COLLECTOR_TOKEN: ${COLLECTOR_TOKEN:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       RSSHUB_BASE_URL: http://rsshub:3412

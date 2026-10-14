@@ -90,11 +90,11 @@ AI_DAILY_LIMIT=100
 
 ## 可选 Telegram 个人账号
 
-Telegram Bot 无法自行订阅任意频道。这里使用普通账号的 Telethon 客户端，仅监听已由你订阅的七个指定频道。新号不保证免封，程序不会自动加入频道、发送消息或批量抓取成员。
+Telegram Bot 无法自行订阅任意频道。这里使用普通账号的 Telethon 客户端，仅监听后台启用且账号已订阅的公开频道。程序不会自动加入频道、读取私聊、发送消息或批量抓取成员。
 
 先阅读 [API 条款](https://core.telegram.org/api/terms) 和 [内容许可条款](https://telegram.org/tos/content-licensing)，确认个人读取及所选模型处理的使用范围。频道信息不是天然的一手信源：识别海外媒体/机构原始链接；仅有国内链接的消息过滤，出处不明保留为待确认线索。管理员启用统一 AI 时，频道新闻也会分析和按需翻译。
 
-在 [my.telegram.org](https://my.telegram.org) 为自己的账号取得 `api_id`/`api_hash`，只填服务器 `.env`。配置强随机 `COLLECTOR_TOKEN`（至少 32 字符，可用 `openssl rand -hex 32` 在本机生成）：
+在 [my.telegram.org](https://my.telegram.org) 为自己的账号取得 `api_id`/`api_hash`，在后台“Telegram 账号”保存，两项均不可读回；也可继续使用服务器 `.env`，数据库保存的新值优先。配置强随机 `COLLECTOR_TOKEN`（至少 32 字符，可用 `openssl rand -hex 32` 在本机生成），后端与采集器必须相同：
 
 ```dotenv
 TELEGRAM_ENABLED=true
@@ -107,11 +107,12 @@ COLLECTOR_TOKEN=
 先构建 worker，并在你的交互终端登录：
 
 ```bash
+docker compose -f compose.arm64.yml up -d server
 docker compose -f compose.arm64.yml --profile telegram build telegram
 docker compose -f compose.arm64.yml --profile telegram run --rm --no-deps telegram python login.py
 ```
 
-手机号、验证码与两步验证密码直接输入终端。登录脚本不自动订阅；在官方客户端加入这七个频道：FakeNewsCN、zaihuapd、xhqcankao、landiansub、tnews365、kejiqu、Trump_TS。session 文件具有登录权限，不要提交、公开或发送给别人。
+手机号、验证码与两步验证密码直接输入终端，不经过网页。登录脚本通过认证、禁止缓存的后端专用接口读取 API 凭据，环境变量可作为兼容入口；不自动订阅。请在官方客户端订阅目标公开频道，再在后台填写来源名称与公开用户名、启用来源。一个来源对应一个频道，名称仅用于展示。session 文件具有登录权限，不要提交、公开或发送给别人。
 
 重新创建后端，在网页“来源管理”启用想监听的频道，然后启动 worker：
 
@@ -121,7 +122,7 @@ docker compose -f compose.arm64.yml --profile telegram up -d telegram
 docker compose -f compose.arm64.yml logs --tail=40 telegram
 ```
 
-worker 仅使用已授权 session，不会后台索要验证码；缺配置就退出。启动时每频道最多补最近一天的 25 条消息，之后接收新消息和编辑事件。FloodWait 会等待，入库失败存入本地队列并指数退避；新订阅的频道需重启 worker 才会纳入监听。来源页面的 Telegram 成功时间指最后一次收到并入库消息，不代表实时连接心跳。真实账号收取、断线和 FloodWait 尚需现场验证。
+worker 仅使用已授权 session，不会后台索要验证码；缺配置就退出。启动时每频道最多补最近一天的 25 条消息，之后接收新消息和编辑事件。FloodWait 会等待，入库失败存入本地队列并指数退避。每 60 秒刷新来源、订阅匹配与 API 凭据，凭据变化仅重连采集器；新增来源不要求重启项目。后台“Telegram 账号”显示独立的 session、心跳和频道匹配状态；来源的成功时间仍指收到并入库消息。未订阅或用户名不匹配时显示明确状态。真实账号收取、断线和 FloodWait 尚需现场验证。
 
 ## 本地开发与验证
 

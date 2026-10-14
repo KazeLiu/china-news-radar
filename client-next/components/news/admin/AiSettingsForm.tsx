@@ -4,25 +4,24 @@ import { useState } from 'react';
 import type { AiSettings, SaveSettings } from './admin-api';
 import styles from './admin.module.css';
 
-export function AiSettingsForm({ initial, savedApiKey, busy, onSave }: { initial: AiSettings; savedApiKey: string; busy: boolean; onSave: SaveSettings }) {
+export function AiSettingsForm({ initial, busy, onSave }: { initial: AiSettings; busy: boolean; onSave: SaveSettings }) {
   const [draft, setDraft] = useState(initial);
-  const [apiKey, setApiKey] = useState(() => savedApiKey);
+  const [apiKey, setApiKey] = useState('');
   const [dailyLimit, setDailyLimit] = useState(() => String(initial.dailyLimit));
-  const [showKey, setShowKey] = useState(false);
   const change = <K extends keyof AiSettings>(key: K, value: AiSettings[K]) => setDraft(old => ({ ...old, [key]: value }));
   return <form className={styles.card} onSubmit={async event => {
     event.preventDefault();
     const limit = Number(dailyLimit);
     if (!dailyLimit.trim() || !Number.isInteger(limit)) return;
     if (await onSave('admin/ai', { enabled: draft.enabled, baseUrl: draft.baseUrl, model: draft.model, dailyLimit: limit, instructions: draft.instructions, apiKey, intervalMs: draft.intervalMs, autoAnalyzeNew: draft.autoAnalyzeNew, newsOutputTokens: draft.newsOutputTokens })) {
-      setApiKey(apiKey || savedApiKey); setShowKey(false);
+      setApiKey('');
     }
   }}>
     <div className={styles.sectionTitle}><div><h2>统一 AI 分析与翻译</h2><p>多来源新闻按一分钟合批。阅读时复用数据库里的结果。</p></div><label className={styles.check}><input type="checkbox" checked={draft.enabled} onChange={e => change('enabled', e.target.checked)} />启用 AI</label></div>
     <div className={styles.fields}>
       <label>接口地址（Base URL）<input type="url" required value={draft.baseUrl} onChange={e => change('baseUrl', e.target.value)} /><small>填写兼容 OpenAI 的服务根地址，通常以 /v1 结尾。</small></label>
       <label>模型名称<input required value={draft.model} maxLength={200} onChange={e => change('model', e.target.value)} /><small>按提供商填写准确的模型 ID。</small></label>
-      <div className={styles.secretField}><label htmlFor="ai-api-key">API Key</label><span className={styles.inputAction}><input id="ai-api-key" type={showKey ? 'text' : 'password'} autoComplete="new-password" value={apiKey} maxLength={1000} onChange={e => setApiKey(e.target.value)} placeholder="填写 API Key" /><button type="button" onClick={() => setShowKey(x => !x)} aria-pressed={showKey}>{showKey ? '隐藏' : '显示'}</button></span><small>保存后的密钥保留在这里，默认隐藏；点击“显示”可查看。填写新密钥并保存即可替换。</small></div>
+      <label>API Key · {initial.keyConfigured ? '已配置' : '未配置'}<input id="ai-api-key" type="password" autoComplete="new-password" value={apiKey} maxLength={1000} onChange={e => setApiKey(e.target.value)} placeholder="留空保持原值" /><small>保存后不可读回。输入新密钥才覆盖，留空保留原值。</small></label>
       <label>每日调用上限（UTC）<input type="number" min={0} max={100000} required value={dailyLimit} onChange={e => setDailyLimit(e.target.value)} /><small>失败尝试也计入额度。用尽或未配置密钥时采用规则兜底。</small></label>
       <label>请求间隔（毫秒）<input type="number" min={0} max={60000} required value={draft.intervalMs} onChange={e => change('intervalMs', Number(e.target.value))} /><small>上一次完成后再等待。0 表示不额外等待，请求仍串行。</small></label>
       <label>新闻输出预算（tokens）<input type="number" min={1024} max={32768} required value={draft.newsOutputTokens} onChange={e => change('newsOutputTokens', Number(e.target.value))} /><small>默认 8192；正文输入最多 6000 字符，每批最多 20 条。</small></label>

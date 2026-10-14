@@ -12,7 +12,9 @@ import { SourceLogoController } from './news/source-logo.controller';
 import { WebCrawlerService } from './news/web-crawler.service';
 import { NewsAuditInterceptor } from './news/news-audit.interceptor';
 import { NewsTrashService } from './news/news-trash.service';
+import { TelegramAccountController } from './news/telegram-account.controller';
+import { TelegramAccountService } from './news/telegram-account.service';
 
 @Global()
-@Module({ imports: [PrismaModule, GatewayModule, ServicesModule], controllers: [NewsController, SourceLogoController], providers: [NewsService, NewsBridgeService, NewsEditorialService, EmailService, SourceAdapterService, WebCrawlerService, NewsAuditInterceptor, NewsTrashService], exports: [NewsService, NewsBridgeService, NewsEditorialService] })
+@Module({ imports: [PrismaModule, GatewayModule, ServicesModule], controllers: [NewsController, SourceLogoController, TelegramAccountController], providers: [NewsService, NewsBridgeService, NewsEditorialService, EmailService, SourceAdapterService, WebCrawlerService, NewsAuditInterceptor, NewsTrashService, TelegramAccountService], exports: [NewsService, NewsBridgeService, NewsEditorialService] })
 export class RadarModule {}

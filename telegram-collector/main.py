@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from common import Outbox, message_payload
+from account import credentials, backend_request, report_status
 
 load_dotenv()
 os.umask(0o077)
@@ -24,37 +25,56 @@ def deliver(url, token, payload):
         return json.load(response)
 
 
-def configured_channels(url, token):
-    request = Request(f'{url}/sources', headers={'Authorization': f'Bearer {token}'})
-    with urlopen(request, timeout=15) as response:
-        return [source['channel'] for source in json.load(response)]
+class CredentialsChanged(Exception):
+    pass
 
 
 async def main():
     if os.environ.get('TELEGRAM_ENABLED') != 'true' or os.environ.get('TG_USE_CONFIRMED') != 'true':
         raise SystemExit('Telegram 接入默认关闭。阅读使用说明并配置后再启用。')
-    api_id, api_hash, token = (os.environ.get(k) for k in ('TG_API_ID', 'TG_API_HASH', 'COLLECTOR_TOKEN'))
-    if not api_id or not api_hash or not token or len(token) < 32:
-        raise SystemExit('Telegram API 配置或内部采集令牌缺失。')
+    token = os.environ.get('COLLECTOR_TOKEN', '')
+    if len(token) < 32:
+        raise SystemExit('内部采集令牌缺失。')
     state = Path(os.environ.get('TG_STATE_DIR', './state'))
     state.mkdir(parents=True, exist_ok=True)
     session = Path(os.environ.get('TG_SESSION', str(state / 'reader')))
+    while True:
+        current = await asyncio.to_thread(credentials)
+        try:
+            await run_collector(state, session, token, current)
+            return
+        except CredentialsChanged:
+            logging.info('Telegram API 配置已更新，重新连接采集器。')
+
+
+async def run_collector(state, session, token, current):
+    async def report(session_status, channels=None):
+        try:
+            await asyncio.to_thread(report_status, session_status, current['revision'], channels, session_status == 'authorized')
+        except OSError:
+            logging.warning('暂时无法上报采集器状态。')
     if not Path(f'{session}.session').exists():
+        await report('missing')
         raise SystemExit('缺少 session。先在自己的交互终端运行 login.py。')
-    client = TelegramClient(str(session), int(api_id), api_hash, flood_sleep_threshold=60)
+    client = TelegramClient(str(session), int(current['apiId']), current['apiHash'], flood_sleep_threshold=60)
     await client.connect()
     if not await client.is_user_authorized():
+        await report('unauthorized')
         await client.disconnect()
         raise SystemExit('session 已失效，请重新运行 login.py。')
     url = os.environ.get('RADAR_INGEST_URL', 'http://server:3001/api/news/telegram')
     dialogs = {}
     subscribed = {}
     async def refresh_sources():
-        channels = await asyncio.to_thread(configured_channels, url, token)
-        refreshed = {dialog.entity.id: dialog.entity async for dialog in client.iter_dialogs()}
+        sources = await asyncio.to_thread(backend_request, 'sources')
+        refreshed = {dialog.entity.id: dialog.entity async for dialog in client.iter_dialogs()
+                     if dialog.is_channel and getattr(dialog.entity, 'broadcast', False) and getattr(dialog.entity, 'username', None)}
         selected = {}
-        for channel in channels:
+        matches = []
+        for source in sources:
+            channel = source['channel']
             entity = next((value for value in refreshed.values() if (getattr(value, 'username', None) or '').lower() == channel.lower()), None)
+            matches.append({'sourceId': source['sourceId'], 'channel': channel, 'subscribed': entity is not None})
             if entity:
                 selected[entity.id] = channel
             else:
@@ -63,7 +83,7 @@ async def main():
         dialogs.update(refreshed)
         subscribed.clear()
         subscribed.update(selected)
-    await refresh_sources()
+        await report('authorized', matches)
     outbox = Outbox(state / 'outbox.db')
 
     @client.on(events.NewMessage())
@@ -115,6 +135,9 @@ async def main():
         while True:
             await asyncio.sleep(60)
             try:
+                latest = await asyncio.to_thread(credentials, False)
+                if latest != current:
+                    raise CredentialsChanged()
                 await refresh_sources()
             except HTTPError as error:
                 if error.code in (401, 403):
@@ -122,12 +145,19 @@ async def main():
                 logging.warning('来源配置暂时不可读，保留当前监听列表。')
             except (URLError, TimeoutError, OSError, json.JSONDecodeError):
                 logging.warning('来源配置暂时不可读，保留当前监听列表。')
-    logging.info('已监听 %s 个已订阅频道；新闻交给本站统一处理。', len(subscribed))
+    tasks = []
     try:
-        await asyncio.gather(sender(), backfill(), source_updates(), client.run_until_disconnected())
+        await refresh_sources()
+        logging.info('已监听 %s 个已订阅频道；新闻交给本站统一处理。', len(subscribed))
+        tasks = [asyncio.create_task(work) for work in (sender(), backfill(), source_updates(), client.run_until_disconnected())]
+        await asyncio.gather(*tasks)
     finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         await client.disconnect()
         outbox.db.close()
+        await report('disconnected')
 
 
 if __name__ == '__main__':

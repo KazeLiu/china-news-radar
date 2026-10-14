@@ -1,12 +1,13 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+const PRIVATE_SETTINGS = ['news-admin-config-v1', 'news-telegram-account-v1'];
 
 @Injectable()
 export class SettingsService {
   constructor(private prisma: PrismaService) {}
 
   async findAll(): Promise<Record<string, string>> {
-    const settings = await this.prisma.setting.findMany();
+    const settings = await this.prisma.setting.findMany({ where: { key: { notIn: PRIVATE_SETTINGS } } });
     return settings.reduce((acc: Record<string, string>, item) => {
       acc[item.key] = item.value;
       return acc;
@@ -14,6 +15,7 @@ export class SettingsService {
   }
 
   async findOne(key: string) {
+    if (PRIVATE_SETTINGS.includes(key)) throw new NotFoundException('Setting not found');
     const setting = await this.prisma.setting.findUnique({ where: { key } });
     if (!setting) throw new NotFoundException('Setting not found');
     return { key: setting.key, value: setting.value };
@@ -21,6 +23,7 @@ export class SettingsService {
 
   async updateBatch(settings: Record<string, string>) {
     if (typeof settings !== 'object') throw new BadRequestException('Invalid settings format');
+    if (Object.keys(settings).some(key => PRIVATE_SETTINGS.includes(key))) throw new BadRequestException('请通过专用后台配置入口保存');
     const updates = Object.entries(settings).map(([key, value]) =>
       this.prisma.setting.upsert({
         where: { key },
@@ -33,6 +36,7 @@ export class SettingsService {
   }
 
   async updateOne(key: string, value: string) {
+    if (PRIVATE_SETTINGS.includes(key)) throw new BadRequestException('请通过专用后台配置入口保存');
     if (value === undefined) throw new BadRequestException('Value is required');
     return this.prisma.setting.upsert({
       where: { key },
