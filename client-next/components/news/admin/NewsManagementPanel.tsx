@@ -1,6 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import Image from 'next/image';
+import { Eye, EyeOff, Image as ImageIcon, ImageOff, X } from 'lucide-react';
 import { adminApi, type ManagedNews } from './admin-api';
 import { waitForAiTask, type AiTicket } from '@/services/ai-tasks';
 import { HotspotMedia } from '../../hotspot/HotspotMedia';
@@ -9,13 +11,24 @@ import styles from './admin.module.css';
 const emptyForm = () => ({ title: '', summary: '', body: '', url: '', publisher: '', publishedAt: '', images: '' });
 type Form = ReturnType<typeof emptyForm>;
 interface Page { items: ManagedNews[]; total: number; nextOffset: number | null }
+function NewsDialog({ title, busy, onClose, children, compact = false }: { title: string; busy: boolean; onClose: () => void; children: ReactNode; compact?: boolean }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
+  return <dialog ref={dialog} className={`${styles.newsDialog} ${compact ? styles.confirmDialog : ''}`} aria-labelledby={titleId} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
+    <header className={styles.dialogHeader}><h2 id={titleId}>{title}</h2><button type="button" aria-label="关闭窗口" disabled={busy} onClick={onClose}><X size={20} /></button></header>
+    <div className={styles.dialogBody}>{children}</div>
+  </dialog>;
+}
 export function NewsManagementPanel() {
   const [page, setPage] = useState<Page>({ items: [], total: 0, nextOffset: null });
-  const [state, setState] = useState('draft'); const [query, setQuery] = useState(''); const [offset, setOffset] = useState(0);
+  const [state, setState] = useState('all'); const [query, setQuery] = useState(''); const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<ManagedNews | null>(null); const [form, setForm] = useState<Form>(emptyForm);
   const [savedMaterial, setSavedMaterial] = useState(''); const [display, setDisplay] = useState({ title: '', summary: '' });
   const [importUrl, setImportUrl] = useState(''); const [busy, setBusy] = useState(false); const [loading, setLoading] = useState(true);
   const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [confirmation, setConfirmation] = useState<{ item: ManagedNews; field: 'hiddenArticle' | 'hiddenImages' } | null>(null);
   const polling = useRef<AbortController | null>(null);
   const dirty = JSON.stringify(form) !== savedMaterial;
   const editable = !selected || selected.isManual;
@@ -26,7 +39,7 @@ export function NewsManagementPanel() {
   }
   useEffect(() => {
     let cancelled = false;
-    adminApi<Page>('admin/items?state=draft', '').then(next => { if (!cancelled) setPage(next); }).catch(e => { if (!cancelled) setError(e.message); }).finally(() => { if (!cancelled) setLoading(false); });
+    adminApi<Page>('admin/items?state=all', '').then(next => { if (!cancelled) setPage(next); }).catch(e => { if (!cancelled) setError(e.message); }).finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; polling.current?.abort(); };
   }, []);
   function choose(item: ManagedNews | null) {
@@ -34,6 +47,12 @@ export function NewsManagementPanel() {
       publisher: item.originalPublisher || '', publishedAt: item.publishedAt || '', images: (JSON.parse(item.images) as string[]).join('\n') } : emptyForm();
     setSelected(item); setForm(next); setSavedMaterial(JSON.stringify(next));
     setDisplay({ title: item?.displayTitle ?? item?.titleZh ?? item?.title ?? '', summary: item?.displaySummary ?? item?.summaryZh ?? item?.summary ?? '' });
+  }
+  function openEditor(item: ManagedNews | null) { choose(item); setError(''); setNotice(''); setEditorOpen(true); }
+  function closeEditor() {
+    const displayDirty = selected?.isManual && (display.title !== (selected.displayTitle ?? selected.titleZh ?? selected.title) || display.summary !== (selected.displaySummary ?? selected.summaryZh ?? selected.summary));
+    if ((dirty || displayDirty) && !window.confirm('有未保存的修改，仍要关闭吗？')) return;
+    setEditorOpen(false);
   }
   async function action(run: () => Promise<void>, refresh = true) {
     setBusy(true); setError(''); setNotice('');
@@ -47,9 +66,10 @@ export function NewsManagementPanel() {
     }, selected ? 'PUT' : 'POST');
     choose(result.item); setNotice(result.reused ? '此 URL 已有新闻，已打开原记录，没有重复录入或改变发布状态。' : '草稿已保存。分析与发布都需要单独点击。');
   }
-  async function updateDisplay(body: unknown) {
-    if (!selected) return;
-    choose(await adminApi<ManagedNews>(`admin/items/${selected.id}/display`, '', body, 'PATCH'));
+  async function updateDisplay(body: unknown, item = selected) {
+    if (!item) return;
+    const updated = await adminApi<ManagedNews>(`admin/items/${item.id}/display`, '', body, 'PATCH');
+    if (selected?.id === updated.id) choose(updated);
     setNotice('展示设置已保存，没有调用 AI；原文和图片信息仍保留。');
   }
   async function analyze() {
@@ -59,24 +79,36 @@ export function NewsManagementPanel() {
     choose(await adminApi<ManagedNews>(`admin/items/${selected.id}`, ''));
     setNotice('分析结果已保存，请确认预览。草稿不会自动发布。');
   }
-  const field = (key: keyof Form, label: string, max: number, multiline = false) => <label className={multiline ? styles.fullField : undefined}>{label}{multiline
+  const field = (key: keyof Form, label: string, max: number, multiline = false) => <label className={multiline ? styles.wide : undefined}>{label}{multiline
     ? <textarea value={form[key]} rows={key === 'body' ? 10 : 3} maxLength={max} disabled={busy || !editable} onChange={e => setForm({ ...form, [key]: e.target.value })} />
     : <input value={form[key]} maxLength={max} required={key === 'title'} disabled={busy || !editable} onChange={e => setForm({ ...form, [key]: e.target.value })} />}</label>;
   return <section className={styles.card}>
-    <div className={styles.sectionTitle}><div><h2>新闻管理</h2><p>手动新闻先保存草稿，分析后确认预览，再点击发布。隐藏设置也适用于采集新闻。</p></div><button type="button" disabled={busy} onClick={() => { choose(null); setNotice(''); }}>新增手动新闻</button></div>
+    <div className={styles.sectionTitle}><div><h2>新闻管理</h2><p>点击新闻查看原文、分析结果和展示设置。右侧按钮控制文章与全部图片是否公开显示。</p></div><button type="button" disabled={busy} onClick={() => openEditor(null)}>新增手动新闻</button></div>
     {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
-    <form className={styles.actions} onSubmit={e => { e.preventDefault(); void action(async () => { await load(0); }, false); }}>
+    <form className={`${styles.actions} ${styles.newsFilters}`} onSubmit={e => { e.preventDefault(); void action(async () => { await load(0); }, false); }}>
       <label>新闻范围<select value={state} disabled={busy} onChange={e => setState(e.target.value)}><option value="draft">草稿</option><option value="hidden">已隐藏文章</option><option value="manual">全部手动新闻</option><option value="all">全部新闻</option></select></label>
       <label>标题或摘要<input value={query} maxLength={200} disabled={busy} onChange={e => setQuery(e.target.value)} /></label><button disabled={busy} type="submit">查询</button>
     </form>
     {loading ? <p role="status">正在读取新闻…</p> : <>
       <p>共 {page.total} 条 · 时间按北京时间显示</p>
-      <div className={styles.newsList}>{page.items.map(item => <button type="button" key={item.id} disabled={busy} aria-pressed={selected?.id === item.id} onClick={() => choose(item)}>
-        <strong>{item.displayTitle ?? item.titleZh ?? item.title}</strong><span>{item.publicationStatus === 'draft' ? '草稿' : '已发布'}{item.hiddenArticle ? ' · 文章已隐藏' : ''}{item.hiddenImages ? ' · 图片已隐藏' : ''} · {item.isManual ? '手动录入' : '自动采集'}</span>
-        <small>{new Date(item.firstSeenAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</small>
-      </button>)}</div>{!page.items.length && <p>此范围暂无新闻。</p>}
+      <div className={styles.newsList}>{page.items.map(item => {
+        const thumbnail = (JSON.parse(item.images) as string[])[0];
+        return <article key={item.id} className={styles.newsRow}>
+          <button type="button" className={styles.newsOpen} disabled={busy} aria-haspopup="dialog" onClick={() => openEditor(item)}>
+            <span className={styles.newsThumbnail} aria-hidden="true">{thumbnail && <Image key={thumbnail} src={thumbnail} alt="" unoptimized width={120} height={80} loading="lazy" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} />}</span>
+            <span className={styles.newsCopy}><strong>{item.displayTitle ?? item.titleZh ?? item.title}</strong><span>{item.publicationStatus === 'draft' ? '草稿' : '已发布'} · {item.isManual ? '手动录入' : '自动采集'}</span>
+              <small>{new Date(item.firstSeenAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}</small></span>
+          </button>
+          <div className={styles.visibilityActions}>
+            <button type="button" className={`${styles.visibilityToggle} ${item.hiddenArticle ? styles.visibilityHidden : ''}`} disabled={busy} aria-pressed={item.hiddenArticle} aria-haspopup="dialog" aria-label={item.hiddenArticle ? '恢复文章' : '隐藏文章'} title={item.hiddenArticle ? '文章已隐藏，点击恢复' : '文章显示中，点击隐藏'} onClick={() => { setError(''); setConfirmation({ item, field: 'hiddenArticle' }); }}>{item.hiddenArticle ? <EyeOff size={18} /> : <Eye size={18} />}文章</button>
+            <button type="button" className={`${styles.visibilityToggle} ${item.hiddenImages ? styles.visibilityHidden : ''}`} disabled={busy} aria-pressed={item.hiddenImages} aria-haspopup="dialog" aria-label={item.hiddenImages ? '恢复全部图片' : '隐藏全部图片'} title={item.hiddenImages ? '图片已隐藏，点击恢复' : '图片未隐藏，点击隐藏全部图片'} onClick={() => { setError(''); setConfirmation({ item, field: 'hiddenImages' }); }}>{item.hiddenImages ? <ImageOff size={18} /> : <ImageIcon size={18} />}图片</button>
+          </div>
+        </article>;
+      })}</div>{!page.items.length && <p>此范围暂无新闻。</p>}
       <div className={styles.actions}><button type="button" disabled={busy || offset === 0} onClick={() => void action(async () => { await load(Math.max(0, offset - 30)); }, false)}>上一页</button><button type="button" disabled={busy || page.nextOffset === null} onClick={() => void action(async () => { await load(page.nextOffset!); }, false)}>下一页</button></div>
     </>}
+    {editorOpen && <NewsDialog title={selected ? selected.isManual ? '编辑手动新闻' : '采集原文与展示预览' : '新增手动新闻'} busy={busy} onClose={closeEditor}>
+    {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
     {!selected && <form className={styles.fields} onSubmit={e => { e.preventDefault(); void action(async () => {
       const result = await adminApi<{ item: ManagedNews; reused: boolean }>('admin/items/import', '', { url: importUrl }, 'POST');
       choose(result.item); setNotice(result.reused ? '已打开同 URL 的原记录，未重复录入。' : '网页内容已保存为草稿，没有调用 AI。');
@@ -96,11 +128,16 @@ export function NewsManagementPanel() {
         <button type="button" disabled={busy || dirty} onClick={() => void action(() => updateDisplay({ displayTitle: display.title, displaySummary: display.summary }))}>保存展示文案 · 不调用 AI</button>
         <button type="button" disabled={busy || dirty} onClick={() => void action(() => updateDisplay({ displayTitle: null, displaySummary: null }))}>使用原文或分析译文</button>
       </div><p>分析仅发送标题与有限摘要，无有效缓存时产生模型请求并计入每日额度。首次请求最多再重试两次。</p></>}
-      <div className={styles.actions}>
-        {selected.isManual && <><button type="button" disabled={busy || dirty || selected.hiddenArticle} onClick={() => void action(analyze)}>主动分析并预览</button><button type="button" className={styles.primary} disabled={busy || dirty || selected.publicationStatus === 'published' || selected.hiddenArticle || selected.aiStatus !== 'done' || !selected.visible} onClick={() => void action(async () => { choose(await adminApi<ManagedNews>(`admin/items/${selected.id}/publish`, '', {}, 'POST')); setNotice('新闻已发布。重复发布或恢复不会重放通知。'); })}>发布新闻</button></>}
-        <button type="button" disabled={busy || dirty} onClick={() => void action(() => updateDisplay({ hiddenArticle: !selected.hiddenArticle }))}>{selected.hiddenArticle ? '恢复文章' : '隐藏整篇文章'}</button>
-        <button type="button" disabled={busy || dirty} onClick={() => void action(() => updateDisplay({ hiddenImages: !selected.hiddenImages }))}>{selected.hiddenImages ? '恢复全部图片' : '隐藏全部图片'}</button>
-      </div>
+      {selected.isManual && <div className={styles.actions}>
+        <button type="button" disabled={busy || dirty || selected.hiddenArticle} onClick={() => void action(analyze)}>主动分析并预览</button><button type="button" className={styles.primary} disabled={busy || dirty || selected.publicationStatus === 'published' || selected.hiddenArticle || selected.aiStatus !== 'done' || !selected.visible} onClick={() => void action(async () => { choose(await adminApi<ManagedNews>(`admin/items/${selected.id}/publish`, '', {}, 'POST')); setNotice('新闻已发布。重复发布或恢复不会重放通知。'); })}>发布新闻</button>
+      </div>}
     </section>}
+    </NewsDialog>}
+    {confirmation && <NewsDialog title={`${confirmation.item[confirmation.field] ? '恢复' : '隐藏'}${confirmation.field === 'hiddenArticle' ? '文章' : '全部图片'}？`} busy={busy} onClose={() => setConfirmation(null)} compact>
+      <p className={styles.confirmTitle}>{confirmation.item.displayTitle ?? confirmation.item.titleZh ?? confirmation.item.title}</p>
+      <p>{confirmation.item[confirmation.field] ? '恢复后仍遵守内容筛选和发布状态，不重新调用 AI，也不重复发送通知。' : confirmation.field === 'hiddenArticle' ? '隐藏后，这篇新闻将不在前台、日报条目、Agent 和 RSS 等公共入口展示。原文和译文保留，可以随时恢复。' : '隐藏后，公共入口不展示这篇新闻的任何图片，文字保留。原图信息仍保存，可以随时恢复。'}</p>
+      {error && <p className={styles.error} role="alert">{error}</p>}
+      <div className={styles.actions}><button type="button" disabled={busy} onClick={() => setConfirmation(null)}>取消</button><button type="button" className={confirmation.item[confirmation.field] ? styles.primary : styles.danger} disabled={busy} onClick={() => void action(async () => { await updateDisplay({ [confirmation.field]: !confirmation.item[confirmation.field] }, confirmation.item); setConfirmation(null); })}>{busy ? '正在保存…' : confirmation.item[confirmation.field] ? '确认恢复' : '确认隐藏'}</button></div>
+    </NewsDialog>}
   </section>;
 }
