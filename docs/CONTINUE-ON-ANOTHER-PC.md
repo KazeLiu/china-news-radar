@@ -1,13 +1,12 @@
 # 在另一台电脑接续与验收
 
-本轮已写入手动新闻、人工隐藏、日志统计及前台整合代码。本机不启动预览、不爬数据、不调用模型，最终测试在目标电脑进行。开发状态见 [开发计划第 16 节](DEVELOPMENT-PLAN.md#16-当前电脑接续2026-10-13)。
+按本文在新的电脑准备依赖、数据库和账号。手动新闻、人工隐藏、日志统计及前台整合已完成本地检查，最新结果见 [开发计划第 17 节](DEVELOPMENT-PLAN.md#17-接续代码审查与本地验收2026-10-13)。换电脑仍需各自准备持久数据和独立 Chromium。
 
 ## 先准备依赖与数据库
 
-代码在 `D:/china-news-radar`。使用 Node 22 和 `pnpm@9.12.1`，按锁文件安装前后端依赖；RSSHub 是独立可选服务，不是手动录入和日志页面的前置依赖。
+在项目根目录执行下列命令。使用 Node 22 和 `pnpm@9.12.1`，按锁文件安装前后端依赖；RSSHub 是独立可选服务，不是手动录入和日志页面的前置依赖。
 
 ```powershell
-cd D:\china-news-radar
 npx --yes pnpm@9.12.1 --filter ai-hot-radar-server --filter client-next install --frozen-lockfile
 ```
 
@@ -30,7 +29,7 @@ node scripts/init-db.cjs
 npx --yes pnpm@9.12.1 --filter ai-hot-radar-server exec playwright-core install chromium
 ```
 
-本机下载未完成，目标电脑需重新安装。粘贴录入不依赖 Chromium；网页来源预览、URL 提取、解析规则辅助依赖它。安装与 ARM64 部署说明见 [WEB-CRAWLER.md](WEB-CRAWLER.md)，不连接个人 Chrome 或加载个人登录资料。
+Chromium 按电脑安装，不随 Git 同步。粘贴录入不依赖它；网页来源预览、URL 提取、解析规则辅助依赖它。安装与 ARM64 部署说明见 [WEB-CRAWLER.md](WEB-CRAWLER.md)，不连接个人 Chrome 或加载个人登录资料。
 
 ## 验收当前业务流程
 
@@ -44,4 +43,4 @@ npx --yes pnpm@9.12.1 --filter ai-hot-radar-server exec playwright-core install 
 - 首页和 `/news` 进入精选，`/saved` 进入我的关注；通过筛选但未评分的旧记录能展示；来源、主题、时间、搜索、加载更多、原文切换、配图及出处时间可用。相同筛选条件下 `/api/curated` 与 `/api/agent/curated` 应一致。
 - 关于、页面元数据和站点描述使用 China Radar、蓝芷怡及已提供的联系信息，保留上游致谢。部署保护仍保留，是否公开访问另行决定。
 
-本轮没有运行测试、构建、ESLint、React Doctor、实际页面或外部平台验证。现有自动化检查有旧账号/任务协议假设，不能直接当作新流程的覆盖证据；需要开展自动化验证时，先确认检查与必要更新范围。付费模型、真实 Telegram 登录和 ARM64/TLS 应分别验收，不用它们代替本地模拟检查。
+相关回归用例和集成脚本已经适配会话与持久队列。后续仍按用户明确要求运行相应检查，不自动调用付费模型或登录真实平台。真实 Telegram 接入与 ARM64/TLS 部署分别验收，不用它们代替本地模拟检查。

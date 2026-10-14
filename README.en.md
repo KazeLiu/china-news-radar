@@ -38,7 +38,7 @@ Web collection and URL extraction require a separate Chromium installation, not 
 
 ## Current status
 
-Manual publishing, content hiding, operation logs, and frontend integration have been implemented. The current development computer uses a new empty database, without running a preview, collecting data, or calling models. Chromium installation is deferred. Runtime testing and deployment acceptance will take place on the target computer; the acceptance checklist is in the setup guide.
+Manual publishing, content hiding, operation logs, and frontend integration have passed local functional checks. Standalone Chromium is installed. Regression checks use isolated SQLite databases, a mocked SDK, or a local model server, without paid services. Real media sources, platform accounts, and Ubuntu ARM64/TLS deployment still need acceptance in their actual environments. See [the development record](docs/DEVELOPMENT-PLAN.md#17-接续代码审查与本地验收2026-10-13) for results and remaining steps.
 
 ## Author and credits
 
