@@ -15,11 +15,14 @@ export class NewsLogsService implements OnModuleInit {
   }
   @Cron('0 15 3 * * *', { timeZone: 'Asia/Shanghai' })
   async cleanup() {
-    const before = new Date(Date.now() - 30 * 86400000);
-    await this.prisma.$transaction([
-      this.prisma.newsOperationLog.deleteMany({ where: { startedAt: { lt: before } } }),
-      this.prisma.aiRequest.deleteMany({ where: { startedAt: { lt: before }, task: { is: { status: { not: 'running' } } } } }),
-    ]);
+    const before = new Date(Date.now() - 7 * 86400000);
+    await this.prisma.$transaction(async tx => {
+      await tx.newsOperationLog.deleteMany({ where: { startedAt: { lt: before } } });
+      await tx.aiRequest.deleteMany({ where: { startedAt: { lt: before }, task: { is: { status: { in: ['done', 'failed'] } } } } });
+      const linked = await tx.newsAnalysis.findMany({ where: { queuedTaskId: { not: null } }, select: { queuedTaskId: true } });
+      await tx.aiTask.deleteMany({ where: { status: { in: ['done', 'failed'] }, finishedAt: { lt: before }, requests: { none: {} },
+        id: { notIn: linked.map(cache => cache.queuedTaskId!) }, OR: [{ status: 'done' }, { failureHandled: true }, { kind: { notIn: ['news', 'profile'] } }] } });
+    });
   }
   async record(data: Prisma.NewsOperationLogCreateInput) {
     try { await this.prisma.newsOperationLog.create({ data }); this.recordingError = false; }
@@ -29,8 +32,8 @@ export class NewsLogsService implements OnModuleInit {
     const date = query.date || new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10);
     const midnight = new Date(`${date}T00:00:00Z`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(midnight.getTime()) || midnight.toISOString().slice(0, 10) !== date) throw new BadRequestException('日志日期无效');
-    if (query.kind && !['collection', 'preview', 'admin', 'ai', 'task'].includes(query.kind)) throw new BadRequestException('日志类型无效');
-    if (query.status && !['success', 'failed', 'empty', 'filtered', 'running', 'invalid-response'].includes(query.status)) throw new BadRequestException('日志状态无效');
+    if (query.kind && !['collection', 'preview', 'admin', 'ai', 'task', 'analysis'].includes(query.kind)) throw new BadRequestException('日志类型无效');
+    if (query.status && !['success', 'failed', 'empty', 'filtered', 'running', 'invalid-response', 'queued', 'retrying', 'cached', 'rules'].includes(query.status)) throw new BadRequestException('日志状态无效');
     const from = new Date(`${date}T00:00:00+08:00`); const until = new Date(from.getTime() + 86400000);
     const offset = Math.max(0, Math.min(100000, Math.floor(Number(query.offset) || 0)));
     const time = { gte: from, lt: until };
@@ -42,14 +45,14 @@ export class NewsLogsService implements OnModuleInit {
       query.kind === 'ai' ? 0 : this.prisma.newsOperationLog.count({ where: { ...operations, ...(query.kind ? { kind: query.kind } : {}), ...(query.status ? { status: query.status } : {}) } }),
       query.kind && query.kind !== 'ai' ? 0 : this.prisma.aiRequest.count({ where: { ...requests, ...(query.status ? { status: query.status } : {}) } }),
       query.kind === 'ai' ? [] : this.prisma.newsOperationLog.findMany({ where: { ...operations, ...(query.kind ? { kind: query.kind } : {}), ...(query.status ? { status: query.status } : {}) }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], take: offset + 50 }),
-      query.kind && query.kind !== 'ai' ? [] : this.prisma.aiRequest.findMany({ where: { ...requests, ...(query.status ? { status: query.status } : {}) }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], take: offset + 50, select: { id: true, taskId: true, kind: true, sourceIds: true, attempt: true, status: true, startedAt: true, elapsedMs: true, analyzedCount: true, translatedCount: true, requestId: true, errorJson: true } }),
+      query.kind && query.kind !== 'ai' ? [] : this.prisma.aiRequest.findMany({ where: { ...requests, ...(query.status ? { status: query.status } : {}) }, orderBy: [{ startedAt: 'desc' }, { id: 'desc' }], take: offset + 50, select: { id: true, taskId: true, kind: true, model: true, sourceIds: true, attempt: true, status: true, startedAt: true, elapsedMs: true, analyzedCount: true, translatedCount: true, requestId: true, errorJson: true } }),
       this.prisma.setting.findUnique({ where: { key: 'news-log-started-at' } }),
     ]);
-    const rows = [...timeline, ...requestRows.map(({ errorJson, sourceIds, kind, ...row }) => ({ ...row, kind: 'ai', route: `ai/${kind}`, sourceIds: JSON.parse(sourceIds), error: errorJson ? JSON.parse(errorJson) : null }))]
+    const rows = [...timeline.map(({ detailsJson, ...row }) => ({ ...row, details: detailsJson ? JSON.parse(detailsJson) : null })), ...requestRows.map(({ errorJson, sourceIds, kind, ...row }) => ({ ...row, kind: 'ai', route: `ai/${kind}`, sourceIds: JSON.parse(sourceIds), error: errorJson ? JSON.parse(errorJson) : null }))]
       .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime() || b.id.localeCompare(a.id)).slice(offset, offset + 50);
     const retries = await this.prisma.aiRequest.count({ where: { ...requests, attempt: { gt: 1 } } });
     const total = operationCount + requestCount;
-    return { date, timeZone: 'Asia/Shanghai', quotaTimeZone: 'UTC', recordingStartedAt: began?.value, recordingError: this.recordingError, summary: { operations: totals, ai, retries },
+    return { date, timeZone: 'Asia/Shanghai', quotaTimeZone: 'UTC', retentionDays: 7, recordingStartedAt: began?.value, recordingError: this.recordingError, summary: { operations: totals, ai, retries },
       items: rows, total, nextOffset: offset + rows.length < total ? offset + rows.length : null };
   }
 }

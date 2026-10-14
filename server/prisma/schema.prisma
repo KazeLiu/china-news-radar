@@ -319,6 +319,7 @@ model NewsOperationLog {
   errorCode String?
   errorReason String?
   taskId String?
+  detailsJson String?
   discovered Int @default(0)
   added Int @default(0)
   updated Int @default(0)

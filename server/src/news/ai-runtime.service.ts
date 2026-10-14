@@ -60,6 +60,8 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
     try {
       const task = await this.prisma.aiTask.create({ data: { kind, payload: JSON.stringify(payload), activeKey: options.activeKey, maxAttempts: options.maxAttempts ?? 3 } });
+      await this.logs.record({ kind: 'task', route: `ai-task/${kind}/queued`, taskId: task.id, status: 'queued', elapsedMs: 0,
+        ...(kind === 'news' ? { detailsJson: JSON.stringify({ inputCount: (payload as { keys: string[] }).keys.length }) } : {}) });
       return { taskId: task.id, status: task.status };
     } catch (error) {
       if ((error as { code?: string }).code === 'P2002' && options.activeKey) {
@@ -184,8 +186,12 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
       const finished = Number((await this.prisma.setting.findUnique({ where: { key: 'ai-last-finished-at' } }))?.value || 0);
       if (Date.now() - finished < config.intervalMs) return;
       const now = new Date();
+      const interrupted: AiTask[] = [];
       const job = await this.prisma.$transaction(async tx => {
         // An interrupted paid request has an unknown outcome. Never replay it after restart.
+        interrupted.push(...await tx.aiTask.findMany({ where: { status: 'running', leaseUntil: { lte: now } } }));
+        if (interrupted.length) await tx.aiRequest.updateMany({ where: { taskId: { in: interrupted.map(task => task.id) }, status: 'running' }, data: { status: 'failed', finishedAt: now,
+          errorJson: JSON.stringify({ code: 'interrupted', message: '请求被中断，提供商处理结果未知，未自动重放' }) } });
         await tx.aiTask.updateMany({ where: { status: 'running', leaseUntil: { lte: now } }, data: { status: 'failed', activeKey: null, owner: null, leaseUntil: null, finishedAt: now, errorJson: JSON.stringify({ code: 'interrupted', message: '任务被中断，提供商处理结果未知，请人工查看后重新触发' }) } });
         const task = await tx.aiTask.findFirst({ where: { status: 'queued', availableAt: { lte: now }, kind: { in: [...this.handlers.keys()].filter(kind => config.enabled || kind !== 'news') } }, orderBy: { createdAt: 'asc' } });
         if (!task) return null;
@@ -194,9 +200,12 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
         await tx.newsGenerationLease.upsert({ where: { key: 'ai-runtime' }, create: { key: 'ai-runtime', owner, leaseUntil: new Date(Date.now() + LEASE_MS) }, update: { owner, leaseUntil: new Date(Date.now() + LEASE_MS) } });
         return tx.aiTask.update({ where: { id: task.id }, data: { status: 'running', owner, leaseUntil: new Date(Date.now() + LEASE_MS) } });
       });
+      for (const task of interrupted) await this.logs.record({ kind: 'task', route: `ai-task/${task.kind}`, taskId: task.id, status: 'failed', elapsedMs: 0,
+        errorCode: 'interrupted', errorReason: '任务被中断，提供商处理结果未知，未自动重放' });
       if (!job) return;
       this.current = job; this.lastRequest = undefined;
       const startedAt = new Date();
+      await this.logs.record({ kind: 'task', route: `ai-task/${job.kind}/running`, taskId: job.id, startedAt, status: 'running', elapsedMs: 0 });
       heartbeat = setInterval(() => { void this.prisma.$transaction([
         this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { leaseUntil: new Date(Date.now() + LEASE_MS) } }),
         this.prisma.newsGenerationLease.updateMany({ where: { key: 'ai-runtime', owner }, data: { leaseUntil: new Date(Date.now() + LEASE_MS) } }),
@@ -205,7 +214,8 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
         const result = await this.handlers.get(job.kind)!(JSON.parse(job.payload), job);
         await this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { status: 'done', resultJson: JSON.stringify(result ?? null), activeKey: null, owner: null, leaseUntil: null, finishedAt: new Date(), errorJson: null } });
         const failedTest = !!result && typeof result === 'object' && 'ok' in result && result.ok === false;
-        await this.logs.record({ kind: 'task', route: `ai-task/${job.kind}`, taskId: job.id, startedAt, elapsedMs: Date.now() - startedAt.getTime(), status: failedTest ? 'failed' : 'success', errorCode: failedTest ? 'test-failed' : null, errorReason: failedTest ? '后台测试已结束，结果为失败，请查看实际请求记录' : null });
+        await this.logs.record({ kind: 'task', route: `ai-task/${job.kind}`, taskId: job.id, startedAt, elapsedMs: Date.now() - startedAt.getTime(), status: failedTest ? 'failed' : 'success', errorCode: failedTest ? 'test-failed' : null, errorReason: failedTest ? '后台测试已结束，结果为失败，请查看实际请求记录' : null,
+          detailsJson: JSON.stringify({ attempts: job.attempts, maxAttempts: job.maxAttempts }) });
       } catch (problem) {
         const protocolFailure = problem instanceof BadRequestException && !!this.lastRequest && ['digest', 'profile'].includes(job.kind);
         const diagnostic = aiTestError(problem, config.apiKey);
@@ -218,7 +228,8 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
           : aiTestError(problem, config.apiKey);
         const retryDelay = retry ? Math.max(30_000 * 2 ** (job.attempts - 1), problem instanceof APIError && problem.status === 429 ? retryAfterMs(problem.headers?.['retry-after']) : 0) : 0;
         await this.prisma.aiTask.updateMany({ where: { id: job.id, owner, status: 'running' }, data: { status: retry ? 'queued' : 'failed', availableAt: new Date(Date.now() + retryDelay), errorJson: JSON.stringify(safe), activeKey: retry ? job.activeKey : null, owner: null, leaseUntil: null, finishedAt: retry ? null : new Date() } });
-        await this.logs.record({ kind: 'task', route: `ai-task/${job.kind}`, taskId: job.id, startedAt, elapsedMs: Date.now() - startedAt.getTime(), status: 'failed', errorCode: retry ? 'retry-scheduled' : safe.code, errorReason: safe.message });
+        await this.logs.record({ kind: 'task', route: `ai-task/${job.kind}`, taskId: job.id, startedAt, elapsedMs: Date.now() - startedAt.getTime(), status: retry ? 'retrying' : 'failed', errorCode: retry ? 'retry-scheduled' : safe.code, errorReason: safe.message,
+          detailsJson: JSON.stringify({ attempts: job.attempts, maxAttempts: job.maxAttempts, ...(retry ? { retryAt: new Date(Date.now() + retryDelay).toISOString() } : {}) }) });
       }
     } finally {
       if (heartbeat) clearInterval(heartbeat);

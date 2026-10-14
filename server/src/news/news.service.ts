@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NewsSourceConfig } from './sources';
 import { CollectedItem, inspectFeed } from './collector';
 import { telegramItem } from './telegram';
-import { analysisKey, analysisInput, parseAnalysis, analysisDecision, fallbackDecision, ANALYSIS_PROMPT } from './analysis';
+import { analysisKey, analysisInput, parseAnalysis, analysisDecision, fallbackDecision, ANALYSIS_PROMPT, AnalysisResult } from './analysis';
 import { feedUrlsFor, distributionFor } from './transports';
 import { fetchSourceFeed, FeedFetchError, restoreFailures, restoreValidators, mergeFeeds } from './feed-fetch';
 import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, restoreConfig, validateAi, validateRules, validateSource, readAiUsage } from './admin-config';
@@ -55,6 +55,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       for (const cache of unfinished) {
         const updated = await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'failed', queuedTaskId: null, error: task.errorJson } });
         await this.prisma.$transaction(tx => this.applyCache(tx, updated));
+        await this.logAnalysisKey(cache.key, 'failed', 'news/fallback', undefined, task.id);
         await this.announceAnalysis(cache.key);
       }
     });
@@ -194,6 +195,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       if (decision.aiStatus === 'done') {
         const changed = await this.updateItem({ where: { id, updatedAt: item.updatedAt }, data: { ...decision, analysisKey: cache.key, updatedAt: item.updatedAt } });
         if (!changed.count) throw new ConflictException('分析素材已修改，请重新提交');
+        await this.logAnalysis(item, 'cached', 'news/cache', parseAnalysis(cache.resultJson!));
         return { cached: true };
       }
     }
@@ -347,16 +349,27 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (this.aiEnabled && this.config.ai.autoAnalyzeNew && !cache.historical && ['pending', 'processing'].includes(cache.status)) decision.visible = false;
     const data = { ...item, analysisKey: key, acquisitionKind: item.acquisitionKind || this.config.sources.find(s => s.id === sourceId)?.kind || 'rss', ...decision };
     const args = { where, create: { ...data, sourceId, firstSeenAt: discoveredAt }, update: { ...data, ...(sameContent ? { updatedAt: existing.updatedAt } : {}) } };
-    if (this.bridge) {
-      const stored = await this.prisma.$transaction(async tx => {
+    const stored = this.bridge
+      ? await this.prisma.$transaction(async tx => {
         const record = await tx.newsItem.upsert(args);
         await this.bridge!.sync(tx, record.id, !refresh && !existing);
         return record;
-      });
-      if (counts) counts[existing ? 'updated' : 'added']++;
-      if (!refresh && !existing) await this.bridge.announce(stored.id);
-    } else { await this.prisma.newsItem.upsert(args); if (counts) counts[existing ? 'updated' : 'added']++; }
+      }) : await this.prisma.newsItem.upsert(args);
+    if (counts) counts[existing ? 'updated' : 'added']++;
+    if (!refresh && !existing) await this.bridge?.announce(stored.id);
+    if (decision.aiStatus === 'done') await this.logAnalysis(stored, 'cached', 'news/cache', parseAnalysis(cache.resultJson!));
+    else if (!['pending', 'processing'].includes(decision.aiStatus)) await this.logAnalysis(stored, 'rules', 'news/fallback');
     return true;
+  }
+  private async logAnalysis(item: NewsItem, status: string, route: string, result?: AnalysisResult, taskId?: string) {
+    await this.logs.record({ kind: 'analysis', route, sourceId: item.sourceId, taskId, status, elapsedMs: 0,
+      detailsJson: JSON.stringify({ newsItemId: item.id, title: item.title.slice(0, 160), aiStatus: result ? 'done' : item.aiStatus,
+        summaryOmitted: !analysisInput(item).summary, ...(result ? { relation: result.relation, topics: result.topics, type: result.type, language: result.language,
+          reason: result.reason, translated: !!result.translation, scoring: result.scoring } : { reason: '使用规则筛选，不产生模型请求' }) }) });
+  }
+  private async logAnalysisKey(key: string, status: string, route: string, result?: AnalysisResult, taskId?: string) {
+    const items = await this.prisma.newsItem.findMany({ where: { analysisKey: key } });
+    for (const item of items) await this.logAnalysis(item, status, route, result, taskId);
   }
   async ingest(input: Parameters<typeof telegramItem>[0]) {
     if (process.env.TELEGRAM_ENABLED !== 'true') throw new BadRequestException('Telegram 尚未启用');
@@ -395,6 +408,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       const args = { where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt }, data: { ...fallbackDecision(item, 'pending', this.config.rules, item.sourceId), decisionBy: 'rules-waiting', updatedAt: item.updatedAt } };
       if (this.bridge) await this.prisma.$transaction(async tx => { await tx.newsItem.updateMany(args); await this.bridge!.sync(tx, item.id); });
       else await this.prisma.newsItem.updateMany(args);
+      await this.logAnalysis(item, 'rules', 'news/waiting');
       await this.bridge?.announce(item.id);
     }
   }
@@ -510,11 +524,14 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
           result = parseAnalysis(JSON.stringify(value), JSON.parse(cache.inputJson));
           if (result.version !== 2) throw new Error();
         } catch { continue; }
-        await this.prisma.$transaction(async tx => {
+        const saved = await this.prisma.$transaction(async tx => {
           const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: task.id, status: 'processing' }, data: { resultJson: JSON.stringify(result), status: 'done', analyzedAt: new Date(), model: this.runtime.requestInfo()?.model, error: null, queuedTaskId: null, retryAt: null, leaseUntil: null } });
           if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: cache.key } }));
+          return changed.count;
         });
+        if (!saved) continue;
         success.add(cache.key); if (result.translation) translated++; await this.announceAnalysis(cache.key);
+        await this.logAnalysisKey(cache.key, 'success', 'news/analyzed', result, task.id);
       }
       await this.runtime.noteNewsResults(success.size, translated);
       if (selected.some(cache => !success.has(cache.key)) || entries.some(entry => !entry || !selected.some(cache => cache.key === entry.id))) throw new InvalidAnalysisResponse('批次存在重复、未知、缺失 ID 或无效结果；已成功条目保存，不会重复请求。');
