@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import axios from 'axios';
+import * as network from './public-network';
 import { inspectFeed, parseFeed, requestFeed } from './collector';
 import { NEWS_SOURCES } from './sources';
+import { defaultWeb, validateSource } from './admin-config';
+import { clippedPageFragment, extractPage } from './web-parser';
+import { WebCrawlerService } from './web-crawler.service';
 const reuters = NEWS_SOURCES.find(s => s.id === 'reuters')!;
 const guardian = NEWS_SOURCES.find(s => s.id === 'guardian')!;
 const now = new Date('2026-10-10T12:00:00Z');
@@ -65,19 +68,47 @@ describe('RSS network limits', () => {
   it('does not route internal RSSHub requests through the external proxy', async () => {
     vi.stubEnv('RSSHUB_BASE_URL', 'http://127.0.0.1:3412');
     vi.stubEnv('HTTPS_PROXY', 'http://127.0.0.1:7897');
-    const get = vi.spyOn(axios, 'get').mockResolvedValue({ status: 200, data: '', headers: {} });
+    const get = vi.spyOn(network, 'requestPublic').mockResolvedValue({ status: 200, body: Buffer.from(''), headers: {}, url: 'http://127.0.0.1:3412/feeds/reuters' });
     await requestFeed({ ...reuters, kind: 'rsshub', feedUrl: 'http://127.0.0.1:3412/feeds/reuters' });
-    expect(get.mock.calls[0][1]?.proxy).toBe(false); expect(get.mock.calls[0][1]?.httpsAgent).toBeUndefined();
+    expect(get.mock.calls[0][1]?.allowRsshub).toBe(true); expect(get.mock.calls[0][1]?.agent).toBeUndefined();
   });
   it('uses an HTTPS-compatible tunnel for an HTTP proxy, retaining conditional headers', async () => {
     vi.stubEnv('HTTPS_PROXY', 'http://127.0.0.1:7897');
-    const get = vi.spyOn(axios, 'get').mockResolvedValue({ status: 304, data: '', headers: {} });
+    const get = vi.spyOn(network, 'requestPublic').mockResolvedValue({ status: 304, body: Buffer.from(''), headers: {}, url: reuters.feedUrl! });
     await requestFeed(reuters, 'etag-1', 'yesterday');
     const options = get.mock.calls[0][1]!;
-    expect(options.proxy).toBe(false);
-    expect(options.httpsAgent.constructor.name).toBe('HttpsProxyAgent');
-    expect(options.httpsAgent.proxy.href).toBe('http://127.0.0.1:7897/');
+    expect(options.agent?.constructor.name).toBe('HttpsProxyAgent');
+    expect((options.agent as { proxy: URL }).proxy.href).toBe('http://127.0.0.1:7897/');
     expect(options.headers?.['If-None-Match']).toBe('etag-1');
-    expect(options.timeout).toBe(15_000);
+    expect(options.allowRsshub).toBe(true);
+  });
+});
+describe('web extraction', () => {
+  it('extracts metadata images and rejects invalid structures without invoking AI', () => {
+    const html = '<script type="application/ld+json">' + JSON.stringify({ '@type': 'NewsArticle', headline: 'China trade policy', url: 'https://crawler.example/article', image: ['https://crawler.example/one.jpg', { url: 'https://crawler.example/two.jpg' }, null], articleBody: 'Original body' }) + '</script>';
+    const result = extractPage(html, 'https://crawler.example/article', defaultWeb().rules, 50);
+    expect(result.records[0]).toMatchObject({ title: 'China trade policy', body: 'Original body', images: ['https://crawler.example/one.jpg', 'https://crawler.example/two.jpg'] });
+    expect(() => extractPage('<html><body>Site menu</body></html>', 'https://crawler.example/', defaultWeb().rules, 50)).toThrow('解析结构');
+  });
+  it('clips scripts, forms and URL parameters before parser assistance', () => {
+    const fragment = clippedPageFragment('<script>private-script</script><form><input value="private-input"></form><article><a href="https://crawler.example/news?token=private-query">China trade policy</a><p>' + '正文'.repeat(10000) + '</p></article>');
+    expect(fragment.length).toBeLessThanOrEqual(12000);
+    for (const value of ['private-script', 'private-input', 'private-query']) expect(fragment).not.toContain(value);
+  });
+  it.each(['http://127.0.0.1:9/private', 'http://169.254.169.254/latest/meta-data/', 'http://[::1]/'])('rejects non-public target %s', async target => {
+    await expect(network.requestPublic(target)).rejects.toMatchObject({ code: 'blocked-target' });
+  });
+  it.skipIf(process.env.TEST_WEB_BROWSER !== 'true')('loads an isolated Chromium page and extracts CSS rules', async () => {
+    const target = 'https://crawler.example/news';
+    vi.spyOn(network, 'resolvePublicTarget').mockResolvedValue({ url: new URL(target), address: '93.184.216.34' });
+    vi.spyOn(network, 'requestPublic').mockImplementation(async url => ({ status: 200, url, headers: { 'content-type': 'text/html' }, body: Buffer.from('<html><body><article></article><script>setTimeout(() => { document.querySelector("article").innerHTML = \'<h2>China trade policy</h2><a href="/article">Read</a><p>China export rules</p>\'; }, 100);</script></body></html>') }));
+    const crawler = new WebCrawlerService({ registerWeb() {} } as never);
+    const rules = { ...defaultWeb().rules, mode: 'css', item: 'article', title: 'h2', link: 'a', summary: 'p' };
+    const source = validateSource({ name: 'Browser fixture', kind: 'web', target, pollSeconds: 60, publisherHosts: ['crawler.example'], web: { rules, maxPages: 1 } });
+    try {
+      const result = await crawler.collect(source, []);
+      expect(result.items).toHaveLength(1); expect(result.items[0]).toMatchObject({ title: 'China trade policy', url: 'https://crawler.example/article', summary: 'China export rules' });
+      expect(result.structure).toMatchObject({ matched: 1, counts: { title: 1, url: 1 } });
+    } finally { await crawler.onModuleDestroy(); }
   });
 });

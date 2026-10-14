@@ -13,7 +13,7 @@ function metadataRecords(html: string, url: string): ScrapedRecord[] {
       const author = Array.isArray(value.author) ? value.author[0] : value.author;
       records.push({ title: value.headline || value.name, summary: value.description, url: value.url || value.mainEntityOfPage?.['@id'] || url,
         publishedAt: value.datePublished, body: value.articleBody, author: typeof author === 'string' ? author : author?.name,
-        images: (Array.isArray(value.image) ? value.image : [value.image]).flatMap(image => typeof image === 'string' ? [image] : image?.url || image?.contentUrl ? [image.url || image.contentUrl] : []) });
+        images: (Array.isArray(value.image) ? value.image : [value.image]).flatMap((image: string | { url?: string; contentUrl?: string } | null | undefined) => typeof image === 'string' ? [image] : image?.url || image?.contentUrl ? [image.url || image.contentUrl] : []) });
     }
     if (types.includes('ListItem') && value.item && typeof value.item === 'object') records.push({ title: value.item.name || value.item.headline, summary: value.item.description, url: value.item.url || value.url });
     for (const key of ['@graph', 'itemListElement', 'mainEntity', 'hasPart', 'item']) if (value[key]) walk(value[key], depth + 1);

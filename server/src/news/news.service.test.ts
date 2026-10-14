@@ -3,10 +3,10 @@ import { AxiosError } from 'axios';
 import { NewsService } from './news.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NEWS_SOURCES } from './sources';
-import { requestFeed, parseFeed, inspectFeed } from './collector';
+import { requestFeed, inspectFeed } from './collector';
 import { analysisKey } from './analysis';
 
-vi.mock('./collector', () => ({ requestFeed: vi.fn(), parseFeed: vi.fn(), inspectFeed: vi.fn() }));
+vi.mock('./collector', () => ({ requestFeed: vi.fn(), inspectFeed: vi.fn() }));
 const source = NEWS_SOURCES.find(s => s.id === 'reuters')!;
 const item = { title: 'China trade policy', summary: 'New export measures', url: 'https://news.google.com/rss/articles/id', originalPublisher: 'Reuters', originalUrl: null, author: null, topic: 'economy', eventKey: 'hash', contentHash: 'v1', publishedAt: new Date() };
 function database() {
@@ -14,13 +14,17 @@ function database() {
     newsItem: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}), findFirst: vi.fn().mockResolvedValue(null), findMany: vi.fn().mockResolvedValue([]), updateMany: vi.fn(), update: vi.fn() }, setting: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn() },
     newsAnalysis: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({ status: 'pending' }), updateMany: vi.fn().mockResolvedValue({ count: 1 }) } };
 }
+function createService(db: ReturnType<typeof database>) {
+  return new NewsService(db as unknown as PrismaService, { enqueue: vi.fn() } as never, { configured: () => true } as never, {} as never, { record: vi.fn().mockResolvedValue(undefined) } as never);
+}
+const inspected = (items: typeof item[]) => ({ title: 'Fixture feed', rawCount: items.length, checkedCount: items.length, items, samples: [] });
 let db: ReturnType<typeof database>; let service: NewsService;
-beforeEach(() => { vi.clearAllMocks(); vi.stubEnv('AI_ANALYSIS_ENABLED', 'false'); vi.stubEnv('AI_TRANSLATION_ENABLED', 'false'); vi.stubEnv('TELEGRAM_ENABLED', 'false'); db = database(); service = new NewsService(db as unknown as PrismaService); });
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(requestFeed).mockReset(); vi.mocked(inspectFeed).mockReset(); vi.stubEnv('AI_ANALYSIS_ENABLED', 'false'); vi.stubEnv('AI_TRANSLATION_ENABLED', 'false'); vi.stubEnv('TELEGRAM_ENABLED', 'false'); db = database(); service = createService(db); });
 afterEach(() => vi.unstubAllEnvs());
 describe('independent collector', () => {
   it('marks an invalid completed AI cache as failed without paying for a replacement', async () => {
     vi.stubEnv('AI_ANALYSIS_ENABLED', 'true'); vi.stubEnv('OPENAI_API_KEY', 'test-only-key');
-    service = new NewsService(db as unknown as PrismaService);
+    service = createService(db);
     const key = analysisKey(item);
     db.newsAnalysis.findUnique.mockResolvedValue({ key, status: 'done', resultJson: '{"translation":"bad"}' } as never);
     await service['store'](source.id, item);
@@ -41,7 +45,7 @@ describe('independent collector', () => {
   });
   it('does not queue or create a Google-indexed media collection page for AI', async () => {
     vi.stubEnv('AI_ANALYSIS_ENABLED', 'true'); vi.stubEnv('OPENAI_API_KEY', 'test-only-key');
-    service = new NewsService(db as unknown as PrismaService);
+    service = createService(db);
     const collection = { ...item, title: 'Beijing - AP News', summary: 'Beijing AP News', originalPublisher: 'Associated Press' };
     expect(await service['store']('ap', collection)).toBe(false);
     expect(db.newsAnalysis.upsert).not.toHaveBeenCalled(); expect(db.newsItem.upsert).not.toHaveBeenCalled();
@@ -57,9 +61,9 @@ describe('independent collector', () => {
   it('uses only configured RSS addresses, even when the legacy RSSHub service is enabled', async () => {
     vi.stubEnv('RSSHUB_ENABLED', 'true'); vi.stubEnv('RSSHUB_BASE_URL', 'http://127.0.0.1:3412');
     vi.mocked(requestFeed).mockResolvedValue({ status: 200, data: '<rss/>', headers: {} } as never);
-    vi.mocked(parseFeed).mockResolvedValue([item]); await service['collect'](source);
+    vi.mocked(inspectFeed).mockResolvedValue(inspected([item])); await service['collect'](source);
     expect(vi.mocked(requestFeed).mock.calls[0][0]).toMatchObject({ kind: 'google-rss', feedUrl: source.feedUrl });
-    expect(vi.mocked(parseFeed).mock.calls[0][1].kind).toBe('google-rss');
+    expect(vi.mocked(inspectFeed).mock.calls[0][1].kind).toBe('google-rss');
     expect(db.newsSource.update.mock.calls[0][0].data.activeFeedUrl).toBe(source.feedUrl);
   });
   it('tries backups in order, avoids ETag cross-use between feeds of the same kind, and backs off failed addresses', async () => {
@@ -67,7 +71,7 @@ describe('independent collector', () => {
     service['config'].sources = [selected];
     db.newsSource.findUniqueOrThrow.mockResolvedValue({ id: source.id, enabled: true, activeFeedUrl: selected.feedUrls[0], etag: 'first-tag' } as never);
     vi.mocked(requestFeed).mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ status: 200, data: '<rss/>', headers: {} } as never);
-    vi.mocked(parseFeed).mockResolvedValue([item]); await service['collect'](selected);
+    vi.mocked(inspectFeed).mockResolvedValue(inspected([item])); await service['collect'](selected);
     expect(vi.mocked(requestFeed).mock.calls[0].slice(1)).toEqual(['first-tag', undefined]);
     expect(vi.mocked(requestFeed).mock.calls[1].slice(1)).toEqual([null, null]);
     const data = db.newsSource.update.mock.calls[0][0].data;
@@ -87,9 +91,9 @@ describe('independent collector', () => {
     const selected = { ...source, feedUrls: ['https://example.org/first', 'https://example.org/backup'] };
     service['config'].sources = [selected];
     vi.mocked(requestFeed).mockResolvedValue({ status: 200, data: '<rss/>', headers: {} } as never);
-    vi.mocked(parseFeed).mockRejectedValueOnce(new Error('malformed')).mockResolvedValueOnce([]);
+    vi.mocked(inspectFeed).mockRejectedValueOnce(new Error('malformed')).mockResolvedValueOnce(inspected([]));
     await service['collect'](selected); expect(requestFeed).toHaveBeenCalledTimes(2); expect(db.newsItem.upsert).not.toHaveBeenCalled();
-    vi.mocked(requestFeed).mockClear(); vi.mocked(parseFeed).mockResolvedValue([]);
+    vi.mocked(requestFeed).mockClear(); vi.mocked(inspectFeed).mockResolvedValue(inspected([]));
     await service['collect'](selected); expect(requestFeed).toHaveBeenCalledOnce();
   });
   it('tests the current draft without saving config, inserting news or queuing AI', async () => {
@@ -113,7 +117,7 @@ describe('independent collector', () => {
     service['config'].sources = [selected];
     const error = new AxiosError('limited'); error.response = { status: 429, headers: { 'retry-after': '600' } } as never;
     vi.mocked(requestFeed).mockRejectedValueOnce(error).mockResolvedValueOnce({ status: 200, data: '<rss/>', headers: { etag: 'backup-tag' } } as never);
-    vi.mocked(parseFeed).mockResolvedValue([]);
+    vi.mocked(inspectFeed).mockResolvedValue(inspected([]));
     const before = Date.now(); await service['collect'](selected);
     const state = db.newsSource.update.mock.calls[0][0].data;
     expect(Date.parse(JSON.parse(state.feedFailures)[selected.feedUrls[0]].retryAt)).toBeGreaterThanOrEqual(before + 600_000);
@@ -125,12 +129,12 @@ describe('independent collector', () => {
   });
   it('does not store a response that arrives after its source was deleted or edited', async () => {
     vi.mocked(requestFeed).mockImplementationOnce(async () => { service['config'].sources = []; return { status: 200, data: '<rss/>', headers: {} } as never; });
-    vi.mocked(parseFeed).mockResolvedValue([item]); await service['collect'](source);
+    vi.mocked(inspectFeed).mockResolvedValue(inspected([item])); await service['collect'](source);
     expect(db.newsItem.upsert).not.toHaveBeenCalled(); expect(db.newsSource.update).not.toHaveBeenCalled();
   });
   it('stores original news immediately without an AI key', async () => {
     vi.mocked(requestFeed).mockResolvedValue({ status: 200, data: '<rss/>', headers: { etag: 'v1' } } as never);
-    vi.mocked(parseFeed).mockResolvedValue([item]);
+    vi.mocked(inspectFeed).mockResolvedValue(inspected([item]));
     await service['collect'](source);
     expect(db.newsItem.upsert.mock.calls[0][0].create.aiStatus).toBe('disabled');
     expect(db.newsSource.update.mock.calls[0][0].data.error).toBeNull();
@@ -139,7 +143,7 @@ describe('independent collector', () => {
     db.newsSource.findUniqueOrThrow.mockResolvedValue({ id: source.id, enabled: true, activeFeedUrl: source.feedUrl, etag: 'fixture' } as never);
     vi.mocked(requestFeed).mockResolvedValue({ status: 304, data: '', headers: {} } as never);
     await service['collect'](source);
-    expect(parseFeed).not.toHaveBeenCalled(); expect(db.newsItem.upsert).not.toHaveBeenCalled();
+    expect(inspectFeed).not.toHaveBeenCalled(); expect(db.newsItem.upsert).not.toHaveBeenCalled();
     expect(db.newsSource.update.mock.calls[0][0].data.lastItemCount).toBeUndefined();
   });
   it('honors Retry-After on 429 and keeps stored items', async () => {
@@ -154,11 +158,11 @@ describe('independent collector', () => {
     vi.mocked(requestFeed).mockRejectedValue(new TypeError('invalid proxy'));
     await service['collect'](source); expect(db.newsSource.update.mock.calls[0][0].data.error).toContain('连接失败');
     vi.mocked(requestFeed).mockResolvedValue({ status: 200, data: '', headers: {} } as never);
-    vi.mocked(parseFeed).mockRejectedValue(new Error('invalid xml'));
+    vi.mocked(inspectFeed).mockRejectedValue(new Error('invalid xml'));
     await service['collect'](source); expect(db.newsSource.update.mock.calls[1][0].data.error).toContain('RSS');
   });
   it('does not rewrite unchanged content, and preserves firstSeen/saved on edits', async () => {
-    db.newsItem.findUnique.mockResolvedValue({ contentHash: 'v1', saved: true } as never);
+    db.newsItem.findUnique.mockResolvedValue({ ...item, contentHash: 'v1', saved: true } as never);
     expect(await service['store'](source.id, item)).toBe(false); expect(db.newsItem.upsert).not.toHaveBeenCalled();
     await service['store'](source.id, { ...item, contentHash: 'v2', title: 'China updates trade policy' });
     const update = db.newsItem.upsert.mock.calls[0][0].update;
@@ -166,7 +170,7 @@ describe('independent collector', () => {
   });
   it('queues both RSS and Telegram for AI before deciding visibility', async () => {
     vi.stubEnv('AI_ANALYSIS_ENABLED', 'true'); vi.stubEnv('OPENAI_API_KEY', 'test-only-key');
-    service = new NewsService(db as unknown as PrismaService);
+    service = createService(db);
     await service['store']('tg-xhqcankao', item);
     expect(db.newsItem.upsert.mock.calls[0][0].create.aiStatus).toBe('pending');
     expect(db.newsItem.upsert.mock.calls[0][0].create.visible).toBe(false);
@@ -180,7 +184,7 @@ describe('independent collector', () => {
   });
   it('reuses one completed result across sources and metadata changes without queuing another call', async () => {
     vi.stubEnv('AI_ANALYSIS_ENABLED', 'true'); vi.stubEnv('OPENAI_API_KEY', 'test-only-key');
-    service = new NewsService(db as unknown as PrismaService);
+    service = createService(db);
     const updatedAt = new Date('2026-10-10T00:00:00Z');
     db.newsAnalysis.findUnique.mockResolvedValue({ status: 'done', analyzedAt: updatedAt, resultJson: JSON.stringify({ version: 1, relation: 'related', topics: ['policy', 'economy'], type: 'report', language: 'en', reason: '涉及中国贸易政策', translation: { title: '中国贸易政策', summary: '新的出口措施' } }) } as never);
     await service['store'](source.id, item);

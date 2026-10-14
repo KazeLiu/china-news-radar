@@ -77,15 +77,33 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
         if ([401, 403].includes(mainStatus)) throw new SourceFetchError('access-denied', `页面访问被拒绝（HTTP ${mainStatus}）`, mainStatus);
         if (mainStatus === 402) throw new SourceFetchError('paywall', '页面要求付费访问', mainStatus);
         if (mainStatus >= 400) throw new SourceFetchError('http-error', `页面返回 HTTP ${mainStatus}`, mainStatus);
-        const html = await page.content(); if (html.length > 3_000_000) throw new SourceFetchError('response-too-large', '页面超过解析大小上限');
+        let html = await page.content(); if (html.length > 3_000_000) throw new SourceFetchError('response-too-large', '页面超过解析大小上限');
+        let extracted: ReturnType<typeof extractPage> | undefined;
+        if (!fragmentOnly) {
+          try { extracted = extractPage(html, page.url(), source.web!.rules, source.web!.maxItems); }
+          catch (error) {
+            if (!(error instanceof SourceFetchError) || error.code !== 'structure-invalid' || source.web!.rules.mode !== 'css') throw error;
+            // Client-rendered lists may attach their article fields after DOMContentLoaded.
+            try {
+              await page.waitForFunction(rules => Array.from(document.querySelectorAll(rules.item)).some(node => {
+                const find = (selector: string) => node.matches(selector) ? node : node.querySelector(selector);
+                const title = find(rules.title); const link = find(rules.link);
+                return !!(title?.getAttribute('content') || title?.textContent || '').trim()
+                  && !!(link?.getAttribute('href') || link?.getAttribute('data-url') || link?.getAttribute('content'));
+              }), source.web!.rules, { timeout: timeoutMs });
+            } catch { throw error; }
+            html = await page.content(); if (html.length > 3_000_000) throw new SourceFetchError('response-too-large', '页面超过解析大小上限');
+            extracted = extractPage(html, page.url(), source.web!.rules, source.web!.maxItems);
+          }
+        }
         clearTimeout(deadline);
         pageFragment ||= clippedPageFragment(html);
         if (fragmentOnly) { checkPageAccess(html); return { ...inspectRecords([], source, rules), pageFragment, structure: { fragmentLength: pageFragment.length }, status: mainStatus }; }
-        const extracted = extractPage(html, page.url(), source.web!.rules, source.web!.maxItems);
-        const inspected = inspectRecords(extracted.records, source, rules, { rules: source.web!.rules, matched: extracted.records.length, counts: extracted.counts, checkedAt: new Date().toISOString(), pages: number + 1, empty: extracted.empty }, page.url());
+        const parsed = extracted!;
+        const inspected = inspectRecords(parsed.records, source, rules, { rules: source.web!.rules, matched: parsed.records.length, counts: parsed.counts, checkedAt: new Date().toISOString(), pages: number + 1, empty: parsed.empty }, page.url());
         result = result ? { ...inspected, items: [...result.items, ...inspected.items], samples: [...result.samples, ...inspected.samples], rawCount: result.rawCount + inspected.rawCount, checkedCount: result.checkedCount + inspected.checkedCount } : inspected;
         if (result.items.length >= source.web!.maxItems) break;
-        target = extracted.next; await resolvePublicTarget(target || page.url());
+        target = parsed.next; await resolvePublicTarget(target || page.url());
       }
       const output = result!;
       output.items = [...new Map(output.items.map(item => [item.url, item])).values()].slice(0, source.web!.maxItems);
