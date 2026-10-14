@@ -13,6 +13,29 @@ export function plainText(html: string): string {
   return $.text().replace(/\s+/g, ' ').trim();
 }
 
+export function distinctSummary(title: string, summary: string): string {
+  const clean = plainText(summary);
+  const comparable = (text: string) => text.normalize('NFKC').replace(/[\p{P}\p{S}\s]/gu, '').toLowerCase();
+  const heading = plainText(title);
+  const left = comparable(heading); const right = comparable(clean);
+  const numbers = (text: string) => JSON.stringify(text.normalize('NFKC').match(/\p{N}+(?:[.,]\p{N}+)*/gu));
+  if (numbers(heading) !== numbers(clean)) return clean;
+  if (!right || left === right) return '';
+  // Keep short excerpts and changed numbers; only discard very close textual copies.
+  const limit = Math.floor(Math.max(left.length, right.length) * 0.03);
+  if (Math.min(left.length, right.length) < 40 || Math.abs(left.length - right.length) > limit) return clean;
+  let previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= left.length; row++) {
+    const current = new Array<number>(right.length + 1).fill(limit + 1); current[0] = row;
+    for (let column = Math.max(1, row - limit); column <= Math.min(right.length, row + limit); column++) {
+      current[column] = Math.min(previous[column] + 1, current[column - 1] + 1, previous[column - 1] + Number(left[row - 1] !== right[column - 1]));
+    }
+    if (Math.min(...current) > limit) return clean;
+    previous = current;
+  }
+  return previous[right.length] <= limit ? '' : clean;
+}
+
 export function relevantToChina(title: string, summary = ''): boolean {
   const text = `${title} ${summary}`;
   return CHINA.test(text) && !OPINION.test(title) && !/check out .*stock price|stock quote|stock price .*in real time/i.test(title) && !(SOFT_NEWS.test(title) && !HARD_NEWS.test(text));

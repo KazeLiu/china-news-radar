@@ -21,7 +21,7 @@ import { chmod } from 'node:fs/promises';
 import { validateWebRules } from './admin-config';
 import { publicNewsScope, presentNews } from './radar-content';
 import { manualInput } from './manual-news';
-import { canonicalUrl, eventKey, isDomesticUrl, publisherForUrl } from './rules';
+import { canonicalUrl, distinctSummary, eventKey, isDomesticUrl, publisherForUrl } from './rules';
 import { CollectionCounts, NewsLogsService } from './news-logs.service';
 const webHash = (source: NewsSourceConfig) => createHash('sha256').update(JSON.stringify([source.target, source.web?.rules])).digest('hex');
 
@@ -321,6 +321,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     }
   }
   private async store(sourceId: string, item: CollectedItem, discoveredAt = new Date(), refresh = false, counts?: CollectionCounts) {
+    const original = item;
+    item = { ...item, summary: distinctSummary(item.title, item.summary), ...(item.body !== undefined ? { body: distinctSummary(item.title, item.body) } : {}) };
     if (await this.prisma.newsItem.findFirst({ where: { isManual: true, OR: [{ url: item.url }, ...(item.originalUrl ? [{ originalUrl: item.originalUrl }] : [])] }, select: { id: true } })) { if (counts) counts.duplicates++; return false; }
     const where = { sourceId_url: { sourceId, url: item.url } };
     const existing = await this.prisma.newsItem.findUnique({ where });
@@ -335,6 +337,10 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (sameContent && !refresh && existing.originalPublisher === item.originalPublisher && existing.originalUrl === item.originalUrl && existing.author === item.author) { if (counts) counts.duplicates++; return false; }
     let key = analysisKey(item);
     let cache = await this.findCached(item);
+    if (item.summary !== original.summary && cache?.status !== 'done') {
+      const previous = await this.findCached(original);
+      if (previous && (previous.status === 'done' || !cache)) cache = previous;
+    }
     if (cache?.key) key = cache.key;
     if (!cache) cache = await this.prisma.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: !this.config.ai.autoAnalyzeNew }, update: {} });
     const decision = await this.cachedDecision(item, sourceId, cache, this.aiEnabled && this.config.ai.autoAnalyzeNew ? cache?.status || 'pending' : 'disabled');
@@ -485,7 +491,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     }
     const selected = eligible.slice(0, payload.chunkSize);
     if (!selected.length) return { analyzed: 0 };
-    const items = selected.map(cache => ({ id: cache.key, ...JSON.parse(cache.inputJson) }));
+    const items = selected.map(cache => ({ id: cache.key, ...analysisInput(JSON.parse(cache.inputJson)) }));
     const success = new Set<string>();
     let translated = 0;
     const sourceIds = [...new Set((await this.prisma.newsItem.findMany({ where: { analysisKey: { in: selected.map(cache => cache.key) } }, select: { sourceId: true } })).map(item => item.sourceId))];
@@ -501,8 +507,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         const { id, ...value } = matches[0];
         let result;
         try {
-          result = parseAnalysis(JSON.stringify(value));
-          if (result.version !== 2 || (JSON.parse(cache.inputJson).summary && result.translation && !result.translation.summary)) throw new Error();
+          result = parseAnalysis(JSON.stringify(value), JSON.parse(cache.inputJson));
+          if (result.version !== 2) throw new Error();
         } catch { continue; }
         await this.prisma.$transaction(async tx => {
           const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: task.id, status: 'processing' }, data: { resultJson: JSON.stringify(result), status: 'done', analyzedAt: new Date(), model: this.runtime.requestInfo()?.model, error: null, queuedTaskId: null, retryAt: null, leaseUntil: null } });
@@ -542,8 +548,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       const json = await this.runtime.performJson(ANALYSIS_PROMPT, input, this.config.ai.newsOutputTokens);
       let result;
       try {
-        result = parseAnalysis(JSON.stringify(json));
-        if (result.version !== 2 || (input.summary && result.translation && !result.translation.summary)) throw new Error();
+        result = parseAnalysis(JSON.stringify(json), input);
+        if (result.version !== 2) throw new Error();
       } catch (problem) { await this.runtime.noteProtocolError(analysisErrorDetail(problem)); throw new InvalidAnalysisResponse(analysisErrorDetail(problem), this.runtime.requestInfo()?.requestId); }
       const decision = analysisDecision(result, { ...input, url: 'https://example.invalid/ai-test' }, []);
       return { ...this.runtime.requestInfo(), input, ok: true, result, preview: { visible: decision.visible, decisionBy: decision.decisionBy } };
@@ -683,7 +689,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       if (source.kind === 'api' || source.kind === 'web' || source.kind === 'telegram') {
         const result = await this.adapters.collect(source, this.config.rules);
         return { ok: true, checkedAt: now, feedTitle: source.name, attempts: [], structure: result.structure, rawCount: result.rawCount, checkedCount: result.checkedCount, acceptedCount: result.items.length,
-          samples: result.samples.slice(0, 10).map(sample => ({ ...sample, fallbackVisible: sample.accepted && !!sample.originalPublisher && fallbackDecision({ title: sample.title, summary: sample.summary, url: sample.url || '' }, 'preview', this.config.rules, source.id).visible })) };
+          samples: result.samples.slice(0, 10).map(sample => ({ ...sample, summary: distinctSummary(sample.title, sample.summary), fallbackVisible: sample.accepted && !!sample.originalPublisher && fallbackDecision({ title: sample.title, summary: sample.summary, url: sample.url || '' }, 'preview', this.config.rules, source.id).visible })) };
       }
       const state = previous ? await this.prisma.newsSource.findUniqueOrThrow({ where: { id: previous.id } }) : null;
       // Preview honors address backoff but never advances ingestion's conditional-request watermark.
@@ -691,7 +697,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       const feed = mergeFeeds(result.feeds.flatMap(selected => selected.parsed ? [selected.parsed] : []));
       return { ok: true, checkedAt: now, feedUrl: result.feeds[0].selected.feedUrl, attempts: result.attempts, feedTitle: source.name,
         rawCount: feed.rawCount, checkedCount: feed.checkedCount, acceptedCount: feed.items.length, duplicateCount: feed.duplicates,
-        samples: feed.samples.slice(0, 10).map(sample => ({ ...sample,
+        samples: feed.samples.slice(0, 10).map(sample => ({ ...sample, summary: distinctSummary(sample.title, sample.summary),
           fallbackVisible: sample.accepted && fallbackDecision({ ...sample, url: sample.url! }, 'preview', this.config.rules, source.id).visible })) };
     } catch (error) {
       if (source.kind === 'api' || source.kind === 'web' || source.kind === 'telegram') return { ok: false, checkedAt: now, attempts: [], error: error instanceof SourceFetchError ? error.message : '来源连接或解析失败，请核对配置', code: error instanceof SourceFetchError ? error.code : 'adapter-error', status: error instanceof SourceFetchError ? error.status : undefined };

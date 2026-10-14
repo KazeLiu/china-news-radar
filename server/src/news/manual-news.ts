@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { canonicalUrl, isDomesticUrl, plainText, publisherForUrl, safePublishedAt } from './rules';
+import { canonicalUrl, distinctSummary, isDomesticUrl, plainText, publisherForUrl, safePublishedAt } from './rules';
 
 export function manualInput(body: unknown) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new BadRequestException('新闻内容格式无效');
@@ -19,7 +19,7 @@ export function manualInput(body: unknown) {
     if (typeof image !== 'string' || image.length > 2000) throw new BadRequestException('图片链接格式无效');
     const url = canonicalUrl(image); if (!url) throw new BadRequestException('图片必须是 HTTP(S) 链接'); return url;
   });
-  return { title, summary: plainText(text('summary', 1600)), body: text('body', 200000), originalUrl: url,
+  return { title, summary: distinctSummary(title, text('summary', 1600)), body: text('body', 200000), originalUrl: url,
     originalPublisher: url ? publisherForUrl(url) || plainText(text('publisher', 120)) || null : null,
     publishedAt, images: JSON.stringify([...new Set(images)]) };
 }
