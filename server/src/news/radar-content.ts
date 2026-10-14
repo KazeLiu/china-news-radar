@@ -19,7 +19,7 @@ export const newsInclude = () => newsMode() ? { newsItem: true } as const : {};
 export function presentHotspot<T extends { media?: string | null; newsItem?: NewsItem | null; qualityScore?: number | null }>(item: T) {
   const { newsItem: news, ...base } = item;
   const media = (() => { if (news?.hiddenImages) return null; try { return item.media ? JSON.parse(item.media) : null; } catch { return null; } })();
-  return { ...base, media, ...(news ? { newsItemId: news.id, originalTitle: news.title, originalSummary: news.summary,
+  return { ...base, media, ...(news ? { newsItemId: news.id, originalTitle: news.title, originalSummary: news.summary, displaySummary: news.displaySummary,
     originalPublisher: news.originalPublisher || (news.isManual ? '管理员录入' : null), originalUrl: news.originalUrl, url: news.isManual && !news.originalPublisher ? `/articles/${news.id}` : news.originalUrl || news.url,
     firstSeenAt: news.firstSeenAt, updatedAt: news.updatedAt, saved: news.saved, aiStatus: news.aiStatus, decisionBy: news.decisionBy,
     scoringStatus: item.qualityScore != null ? 'scored' : news.aiStatus === 'done' ? 'unscored' : 'rules',

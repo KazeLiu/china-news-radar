@@ -13,6 +13,9 @@ import { getSourceIcon, getSourceLabel } from '../../lib/sourceMeta';
 import { relativeTime, formatDateTime } from '../../utils/relativeTime';
 import { HotspotMedia } from './HotspotMedia';
 import type { Hotspot } from '../../types';
+import { BilingualText } from '../common/BilingualText';
+import { getNewsText } from '@/lib/newsText';
+import { useReadingPreference } from '@/providers/ReadingPreference';
 
 /** Compute aggregate heat score (normalised 0-100) */
 function calcHeatScore(h: Hotspot): number {
@@ -65,6 +68,8 @@ export function HotspotCard({
   onToggleContent,
   disableEntrance = false,
 }: HotspotCardProps) {
+  const { translationFirst } = useReadingPreference();
+  const text = getNewsText(hotspot, translationFirst);
   // Local state fallback when parent doesn't manage expansion
   const [localReasonOpen, setLocalReasonOpen] = useState(false);
   const [localContentOpen, setLocalContentOpen] = useState(false);
@@ -142,14 +147,12 @@ export function HotspotCard({
             href={hotspot.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block font-semibold text-[15px] text-[var(--text-primary)] mb-2 line-clamp-2 hover:text-[var(--accent-blue)] dark:hover:text-blue-400 transition-colors cursor-pointer leading-snug"
+            className="block font-semibold text-[15px] text-[var(--text-primary)] mb-2 hover:text-[var(--accent-blue)] dark:hover:text-blue-400 transition-colors cursor-pointer leading-snug"
           >
-            {hotspot.title}
+            <BilingualText text={text.title} lineClassName="line-clamp-2" />
           </a>
 
-          {/* AI Summary — quote-style block with leading bar makes it
-              clearly distinct from the title and original content */}
-          {hotspot.summary && (
+          {text.summary.primary && (
             <div className="mb-3 pl-3 border-l-2 border-[var(--accent-blue)]/40 dark:border-blue-400/40">
               <div className="flex items-center gap-1.5 mb-0.5">
                 <Sparkles className="w-3 h-3 text-[var(--accent-blue)] dark:text-blue-400" />
@@ -157,7 +160,7 @@ export function HotspotCard({
                   {hotspot.newsItemId ? '报道摘要' : 'AI 摘要'}
                 </span>
               </div>
-              <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{hotspot.summary}</p>
+              <p className="text-sm text-[var(--text-primary)] leading-relaxed"><BilingualText text={text.summary} /></p>
             </div>
           )}
 

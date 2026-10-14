@@ -11,6 +11,9 @@ import { TrendChart } from './TrendChart';
 import { Skeleton, SkeletonList } from '../common/Loader';
 import { EmptyState } from '../common/EmptyState';
 import type { EntityCardSummary, EntityCardDetail, NewsItem, RelatedData } from '../../services/api';
+import { BilingualText } from '../common/BilingualText';
+import { getNewsText } from '@/lib/newsText';
+import { useReadingPreference } from '@/providers/ReadingPreference';
 
 interface KeywordsViewProps {
   onToast?: (msg: string, type: 'success' | 'error') => void;
@@ -265,6 +268,7 @@ export function KeywordsView({ onToast }: KeywordsViewProps) {
 
 // ── Detail panel ──────────────────────────────────────────────────────────────
 function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: EntityCardDetail }) {
+  const { translationFirst } = useReadingPreference();
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [nodeNews, setNodeNews] = useState<NewsItem[] | null>(null);
   const [loadingNodeNews, setLoadingNodeNews] = useState(false);
@@ -384,7 +388,9 @@ function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: En
           <SkeletonList count={3} itemClassName="h-24" />
         ) : displayNews.length > 0 ? (
           <div className="space-y-2.5">
-            {displayNews.map((n) => (
+            {displayNews.map((n) => {
+              const text = getNewsText(n, translationFirst);
+              return (
               <a
                 key={n.id}
                 href={n.url}
@@ -415,19 +421,21 @@ function DetailPanel({ entity, detail }: { entity: EntityCardSummary; detail: En
                 </div>
 
                 {/* Title */}
-                <p className="text-[14px] font-medium text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors line-clamp-2 leading-snug mb-1.5">
-                  {n.title}
+                <p className="text-[14px] font-medium text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors leading-snug mb-1.5">
+                  <BilingualText text={text.title} lineClassName="line-clamp-2">
                   <ExternalLink className="inline-block w-3 h-3 ml-1 mb-0.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </BilingualText>
                 </p>
 
                 {/* Summary */}
-                {n.summary && (
-                  <p className="text-[12.5px] text-[var(--text-secondary)] line-clamp-2 leading-relaxed">
-                    {n.summary}
+                {text.summary.primary && (
+                  <p className="text-[12.5px] text-[var(--text-primary)] leading-relaxed">
+                    <BilingualText text={text.summary} lineClassName="line-clamp-2" />
                   </p>
                 )}
               </a>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="text-center py-8 text-[var(--text-muted)] text-sm">

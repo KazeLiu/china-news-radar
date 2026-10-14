@@ -141,6 +141,9 @@ export const digestApi = {
 export interface NewsItem {
   id: string;
   title: string;
+  originalTitle?: string;
+  originalSummary?: string;
+  displaySummary?: string | null;
   url: string;
   source: string;
   originalPublisher?: string | null;

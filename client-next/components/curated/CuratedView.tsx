@@ -16,6 +16,9 @@ import type { Hotspot, HotspotTab } from '../../types';
 import { tabFilter } from '../../lib/filterState';
 import { requestJson } from '../../services/http';
 import { HotspotMedia } from '../hotspot/HotspotMedia';
+import { BilingualText } from '../common/BilingualText';
+import { getNewsText } from '@/lib/newsText';
+import { useReadingPreference } from '@/providers/ReadingPreference';
 
 type Period = 'today' | 'week';
 
@@ -36,10 +39,8 @@ const CATEGORY_LABEL: Record<string, string> = {
  */
 function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
   const tags = item.tags ? (JSON.parse(item.tags) as string[]) : [];
-  const [original, setOriginal] = useState(false);
-  const title = original ? item.originalTitle || item.title : item.title;
-  const summary = original ? item.originalSummary ?? item.summary : item.summary;
-  const hasTranslation = !!item.newsItemId && (item.originalTitle !== item.title || item.originalSummary !== item.summary);
+  const { translationFirst } = useReadingPreference();
+  const text = getNewsText(item, translationFirst);
   const fullTime = (value?: string) => value ? new Date(value).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '未提供';
 
   // Same heat formula as HotspotCard for visual consistency
@@ -98,13 +99,13 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
 
         {/* Title — large, semibold, reading-first */}
         <h3 className="text-[17px] font-semibold text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors leading-snug mb-2.5">
-          <a href={item.url} target="_blank" rel="noopener noreferrer">{title}
+          <a href={item.url} target="_blank" rel="noopener noreferrer"><BilingualText text={text.title}>
           <ExternalLink className="inline-block w-3.5 h-3.5 ml-1 mb-0.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+          </BilingualText>
           </a>
         </h3>
 
-        {/* AI Summary — quote-style block, identical to HotspotCard */}
-        {summary && (
+        {text.summary.primary && (
           <div className="mb-3 pl-3 border-l-2 border-[var(--accent-blue)]/40 dark:border-blue-400/40">
             <div className="flex items-center gap-1.5 mb-0.5">
               <Sparkles className="w-3 h-3 text-[var(--accent-blue)] dark:text-blue-400" />
@@ -112,12 +113,11 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
                 {item.newsItemId ? '报道摘要' : 'AI 摘要'}
               </span>
             </div>
-            <p className="text-[14px] text-[var(--text-secondary)] leading-[1.7] line-clamp-3">
-              {summary}
+            <p className="text-[14px] text-[var(--text-primary)] leading-[1.7]">
+              <BilingualText text={text.summary} lineClassName="line-clamp-3" />
             </p>
           </div>
         )}
-        {hasTranslation && <button type="button" aria-pressed={original} onClick={() => setOriginal(value => !value)} className="text-sm text-[var(--accent-blue)] min-h-11 px-2 mb-2">{original ? '显示中文' : '显示原文'}</button>}
         {item.media && item.media.length > 0 && <HotspotMedia media={item.media} />}
 
         {/* Engagement metrics — only when there are any */}

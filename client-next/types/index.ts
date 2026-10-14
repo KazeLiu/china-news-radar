@@ -31,6 +31,7 @@ export interface Hotspot {
   newsItemId?: string;
   originalTitle?: string;
   originalSummary?: string;
+  displaySummary?: string | null;
   originalPublisher?: string;
   originalUrl?: string;
   firstSeenAt?: string;
