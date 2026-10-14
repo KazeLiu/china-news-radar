@@ -2,9 +2,20 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { defaultConfig, restoreConfig, validateAi, validateRules, validateSource, readAiUsage } from './admin-config';
 import { matchingExclusions } from './content-filter';
 import { requireAdmin } from './admin-access';
+import { configureSourceNetwork, sourceNetwork, validateSourceNetwork } from './source-network';
+import { sourceProxyAgent } from './public-network';
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); configureSourceNetwork(); });
 describe('administrator configuration', () => {
+  it('persists direct mode over environment proxies and keeps a blank proxy secret unchanged', () => {
+    vi.stubEnv('RSS_PROXY_URL', 'http://127.0.0.1:7897');
+    const network = validateSourceNetwork({ mode: 'direct', secureDns: false }, sourceNetwork());
+    const restored = restoreConfig(JSON.stringify({ ...defaultConfig(), network }));
+    configureSourceNetwork(restored.network);
+    expect(sourceProxyAgent('https://example.org')).toBeUndefined();
+    expect(validateSourceNetwork({ mode: 'proxy', proxyUrl: '', secureDns: true }, network)).toMatchObject({ proxyUrl: 'http://127.0.0.1:7897', mode: 'proxy', secureDns: true });
+    for (const proxyUrl of ['socks5://localhost:1080', 'http://localhost:7897/path', 'http://localhost:7897\n']) expect(() => validateSourceNetwork({ mode: 'proxy', proxyUrl, secureDns: false }, network)).toThrow();
+  });
   it('rejects corrupt stored usage instead of bypassing the daily budget', () => {
     expect(readAiUsage()).toBe(0); expect(readAiUsage('0')).toBe(0); expect(readAiUsage('100')).toBe(100);
     for (const value of ['', 'invalid', '-1', '1.5', 'Infinity', '9007199254740992']) expect(() => readAiUsage(value)).toThrow('用量无效');

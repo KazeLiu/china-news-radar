@@ -1,5 +1,5 @@
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
-export interface AdminRequest { headers: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string }; adminAuthenticated?: boolean }
+export interface AdminRequest { headers: Record<string, string | string[] | undefined>; socket?: { remoteAddress?: string }; adminAuthenticated?: boolean; adminSessionId?: string }
 export function requireAdmin(req: AdminRequest) {
   if (!req.adminAuthenticated) throw new UnauthorizedException('请先登录管理员账号');
 }

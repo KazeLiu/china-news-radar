@@ -4,7 +4,7 @@ import styles from './admin.module.css';
 export function SourceTestPanel({ result, onAnalyze }: { result: SourceTestResult; onAnalyze?: (sample: { title: string; summary: string }) => void }) {
   return <div className={styles.testResult} role="status">
     <h3>{result.ok ? result.rawCount === 0 ? '连接成功，当前没有内容' : result.acceptedCount === 0 ? '连接成功，样例未通过基础检查' : '连接与解析成功' : '来源预览未完成'}</h3>
-    <p>{result.ok ? `${result.feedTitle || '来源'}：返回 ${result.rawCount} 条，检查 ${result.checkedCount} 条，其中 ${result.acceptedCount} 条通过来源、时间和排除规则。` : `${result.code ? `${result.code}：` : ''}${result.error}`}</p>
+    <p>{result.ok ? `${result.feedTitle || '来源'}：返回 ${result.rawCount} 条，检查 ${result.checkedCount} 条，其中 ${result.acceptedCount} 条通过来源、时间和排除规则。` : `${result.status ? `HTTP ${result.status} · ` : ''}${result.code ? `${result.code}：` : ''}${result.error}`}</p>
     {result.structure && <details className={styles.details} open><summary>解析结构与字段映射</summary><pre>{JSON.stringify(result.structure, null, 2)}</pre></details>}
     <ol className={styles.attempts}>{result.attempts.map((attempt, index) => <li key={attempt.url}>
       <strong>{index === 0 ? '首选地址' : `备用地址 ${index}`} · {attempt.error || `HTTP ${attempt.status}，获取成功`}</strong><span>{attempt.url}</span>

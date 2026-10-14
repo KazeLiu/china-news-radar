@@ -38,6 +38,7 @@ export class NewsController {
   @Patch('sources/:id') source(@Param('id') id: string, @Body() body: { enabled?: unknown }, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.enableSource(id, body.enabled); }
   @Get('admin/config') config(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminConfig(); }
   @Get('admin/ai/key') @Header('Cache-Control', 'no-store') aiKey(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminAiKey(); }
+  @Put('admin/network') network(@Body() body: unknown) { return this.news.configureNetwork(body); }
   @Put('admin/ai') ai(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureAi(body); }
   @Post('admin/ai/test') testAi(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testAi(body); }
   @Post('admin/ai/history') history(@Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.startHistory(); }
@@ -45,6 +46,11 @@ export class NewsController {
   @Get('admin/sources/:id/private') @Header('Cache-Control', 'no-store') privateSource(@Param('id') id: string, @Req() req: AdminRequest) { requireAdmin(req); return this.news.privateSource(id); }
   @Delete('admin/sources/:id') deleteSource(@Param('id') id: string, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.deleteSource(id); }
   @Post('admin/sources/test') testSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testSource(body); }
+  @Post('admin/sources/browser') openBrowser(@Body() body: unknown, @Req() req: AdminRequest) { return this.news.openSourceBrowser(body, req.adminSessionId!); }
+  @Get('admin/sources/browser/:id') @Header('Cache-Control', 'no-store') browserFrame(@Param('id') id: string, @Req() req: AdminRequest) { return this.news.sourceBrowserFrame(id, req.adminSessionId!); }
+  @Post('admin/sources/browser/:id/input') browserInput(@Param('id') id: string, @Body() body: unknown, @Req() req: AdminRequest) { return this.news.sourceBrowserInput(id, req.adminSessionId!, body); }
+  @Post('admin/sources/browser/:id/finish') finishBrowser(@Param('id') id: string, @Req() req: AdminRequest) { return this.news.finishSourceBrowser(id, req.adminSessionId!); }
+  @Delete('admin/sources/browser/:id') closeBrowser(@Param('id') id: string, @Req() req: AdminRequest) { return this.news.closeSourceBrowser(id, req.adminSessionId!); }
   @Post('admin/sources/rules/assist') assistRules(@Body() body: unknown) { return this.news.generateParserRules(body); }
   @Post('admin/sources/rules/apply') applyRules(@Body() body: Parameters<NewsService['applyParserRules']>[0]) { return this.news.applyParserRules(body); }
   @Post('admin/sources/:id/rules/restore') restoreRules(@Param('id') id: string) { return this.news.restoreParserRules(id); }

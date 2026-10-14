@@ -34,7 +34,9 @@ function metadataRecords(html: string, url: string): ScrapedRecord[] {
 export function checkPageAccess(html: string) {
   const $ = load(html);
   const title = $('title').text();
-  if (/captcha|verify (?:you are|that you are) human|checking your browser|人机验证|验证码/i.test(title) || $('[id*="captcha"], iframe[src*="captcha"]').length) throw new SourceFetchError('captcha', '页面要求人机验证，不自动绕过');
+  const content = $('body').clone(); content.find('script, style, noscript').remove();
+  const deviceChallenge = /captcha-delivery\.com|datadome/i.test(html) && /please enable (?:javascript|js)|device check|verify (?:your|this) device|验证设备/i.test(`${title} ${content.text()}`);
+  if (deviceChallenge || /captcha|verify (?:you are|that you are) human|checking your browser|人机验证|验证码/i.test(title) || $('[id*="captcha"], iframe[src*="captcha"]').length) throw new SourceFetchError('captcha', '页面要求人机或设备验证，当前不能自动采集；不会绕过验证');
   if ($('input[type="password"]').length && !$('#article, article').length) throw new SourceFetchError('login-required', '页面要求登录，未使用账号或登录资料');
   if ($('[class*="paywall"], [data-testid*="paywall"]').length && $('article').text().trim().length < 100) throw new SourceFetchError('paywall', '页面存在付费阅读限制');
   if ($('script[type="application/ld+json"]').toArray().some(node => /"isAccessibleForFree"\s*:\s*(?:false|"false")/i.test($(node).text()))) throw new SourceFetchError('paywall', '文章元数据标明需付费访问');

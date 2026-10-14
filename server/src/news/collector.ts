@@ -1,13 +1,11 @@
 import Parser from 'rss-parser';
-import { HttpsProxyAgent } from 'https-proxy-agent';
 import { createHash } from 'node:crypto';
 import { canonicalUrl, eventKey, plainText, shouldDisplay, topicFor, withinNewsWindow } from './rules';
 import { NewsSourceConfig } from './sources';
 import { DEFAULT_EXCLUSIONS, FilterRule, matchingExclusions } from './content-filter';
-import { isLocalFeed } from './transports';
 import { load } from 'cheerio';
 import { sourcePublishedAt } from './source-date';
-import { requestPublic, SourceFetchError } from './public-network';
+import { requestPublic, sourceProxyAgent, SourceFetchError } from './public-network';
 
 export interface CollectedItem {
   title: string; summary: string; url: string; originalPublisher: string | null;
@@ -58,9 +56,8 @@ export async function parseFeed(xml: string, source: NewsSourceConfig, now = new
   return (await inspectFeed(xml, source, now, filterByRules, exclusions)).items;
 }
 export async function requestFeed(source: NewsSourceConfig, etag?: string | null, lastModified?: string | null) {
-  const proxy = process.env.RSS_PROXY_URL || process.env.HTTPS_PROXY || process.env.https_proxy;
   const response = await requestPublic(source.feedUrl!, {
-    ...(proxy && !isLocalFeed(source.feedUrl!) ? { agent: new HttpsProxyAgent(proxy) } : {}), allowRsshub: true,
+    agent: sourceProxyAgent(source.feedUrl!, true), allowRsshub: true,
     headers: { 'User-Agent': 'ChinaNewsRadar/1.0 (personal RSS reader)', Accept: 'application/rss+xml, application/xml, text/xml',
       ...(etag ? { 'If-None-Match': etag } : {}), ...(lastModified ? { 'If-Modified-Since': lastModified } : {}) },
   });

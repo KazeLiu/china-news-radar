@@ -5,6 +5,12 @@ import { NEWS_SOURCES } from './sources';
 import { defaultWeb, validateSource } from './admin-config';
 import { clippedPageFragment, extractPage } from './web-parser';
 import { WebCrawlerService } from './web-crawler.service';
+import https from 'node:https';
+import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
+import type { ClientRequest, IncomingMessage } from 'node:http';
+import { lookup } from 'node:dns/promises';
+vi.mock('node:dns/promises', () => ({ lookup: vi.fn() }));
 const reuters = NEWS_SOURCES.find(s => s.id === 'reuters')!;
 const guardian = NEWS_SOURCES.find(s => s.id === 'guardian')!;
 const now = new Date('2026-10-10T12:00:00Z');
@@ -83,6 +89,55 @@ describe('RSS network limits', () => {
     expect(options.allowRsshub).toBe(true);
   });
 });
+describe('proxied public requests', () => {
+  function transport(address: string) {
+    return vi.spyOn(https, 'request').mockImplementation(((options: https.RequestOptions, respond: (response: IncomingMessage) => void) => {
+      const request = new EventEmitter() as ClientRequest;
+      request.setTimeout = () => request;
+      request.write = () => true;
+      request.destroy = error => { if (error) request.emit('error', error); request.emit('close'); return request; };
+      request.end = (() => {
+        queueMicrotask(() => {
+          const dns = options.hostname === '1.1.1.1';
+          const body = dns ? JSON.stringify({ Status: 0, Answer: [{ type: 1, data: address }] }) : 'Public page';
+          const response = Object.assign(Readable.from([Buffer.from(body)]), { statusCode: 200, headers: { 'content-type': dns ? 'application/dns-json' : 'text/html' } }) as IncomingMessage;
+          response.once('end', () => request.emit('close')); respond(response);
+        });
+        return request;
+      }) as ClientRequest['end'];
+      return request;
+    }) as typeof https.request);
+  }
+  it('resolves through the configured source proxy and pins the validated IP, keeping hostname TLS validation', async () => {
+    vi.stubEnv('SOURCE_PROXY_URL', 'http://127.0.0.1:7897');
+    vi.stubEnv('SOURCE_DNS_OVER_HTTPS', 'true');
+    const request = transport('93.184.216.34');
+    const result = await network.requestPublic('https://public-proxy.example/news');
+    expect(result.body.toString()).toBe('Public page');
+    const calls = request.mock.calls.map(call => call[0] as https.RequestOptions);
+    expect(calls[0]).toMatchObject({ hostname: '1.1.1.1', servername: 'cloudflare-dns.com' });
+    expect(calls[1]).toMatchObject({ hostname: '93.184.216.34', servername: 'public-proxy.example', headers: { Host: 'public-proxy.example' } });
+    expect(calls[1].agent?.constructor.name).toBe('HttpsProxyAgent');
+    await network.requestPublic('https://public-proxy.example/next');
+    expect(request.mock.calls.filter(call => (call[0] as https.RequestOptions).hostname === '1.1.1.1')).toHaveLength(1);
+  });
+  it('rejects private proxy DNS answers before requesting the source', async () => {
+    vi.stubEnv('SOURCE_PROXY_URL', 'http://127.0.0.1:7897');
+    vi.stubEnv('SOURCE_DNS_OVER_HTTPS', 'true');
+    const request = transport('10.0.0.1');
+    await expect(network.requestPublic('https://private-proxy.example/news')).rejects.toMatchObject({ code: 'blocked-target' });
+    expect(request).toHaveBeenCalledOnce();
+  });
+  it('keeps system DNS for existing proxy setups unless encrypted DNS is explicitly enabled', async () => {
+    vi.stubEnv('SOURCE_PROXY_URL', 'http://127.0.0.1:7897');
+    vi.stubEnv('SOURCE_DNS_OVER_HTTPS', 'false');
+    vi.mocked(lookup).mockResolvedValue([{ address: '93.184.216.34', family: 4 }] as never);
+    const request = transport('93.184.216.34');
+    await network.requestPublic('https://legacy-proxy.example/news');
+    expect(request).toHaveBeenCalledOnce();
+    expect(request.mock.calls[0][0]).toMatchObject({ hostname: '93.184.216.34', servername: 'legacy-proxy.example' });
+  });
+});
 describe('web extraction', () => {
   it('extracts metadata images and rejects invalid structures without invoking AI', () => {
     const html = '<script type="application/ld+json">' + JSON.stringify({ '@type': 'NewsArticle', headline: 'China trade policy', url: 'https://crawler.example/article', image: ['https://crawler.example/one.jpg', { url: 'https://crawler.example/two.jpg' }, null], articleBody: 'Original body' }) + '</script>';
@@ -95,8 +150,22 @@ describe('web extraction', () => {
     expect(fragment.length).toBeLessThanOrEqual(12000);
     for (const value of ['private-script', 'private-input', 'private-query']) expect(fragment).not.toContain(value);
   });
+  it('recognizes a DataDome challenge without treating ordinary protection scripts as a challenge', () => {
+    expect(() => extractPage('<html><title>reuters.com</title><body>Please enable JS and disable any ad blocker<script src="https://geo.captcha-delivery.com/c.js"></script></body></html>', 'https://www.reuters.com/world/china/', defaultWeb().rules, 50)).toThrow('设备验证');
+    const html = '<script src="https://js.datadome.co/tags.js"></script><noscript>Please enable JS</noscript><script type="application/ld+json">' + JSON.stringify({ '@type': 'NewsArticle', headline: 'China trade policy', url: 'https://crawler.example/article' }) + '</script>';
+    expect(extractPage(html, 'https://crawler.example/article', defaultWeb().rules, 50).records).toHaveLength(1);
+  });
   it.each(['http://127.0.0.1:9/private', 'http://169.254.169.254/latest/meta-data/', 'http://[::1]/'])('rejects non-public target %s', async target => {
     await expect(network.requestPublic(target)).rejects.toMatchObject({ code: 'blocked-target' });
+  });
+  it('keeps an explicitly configured localhost RSSHub feed direct without opening other local paths', async () => {
+    vi.stubEnv('RSSHUB_BASE_URL', 'http://localhost:3412');
+    vi.stubEnv('SOURCE_PROXY_URL', 'http://127.0.0.1:7897');
+    vi.mocked(lookup).mockResolvedValue([{ address: '127.0.0.1', family: 4 }] as never);
+    expect(network.sourceProxyAgent('http://localhost:3412/feeds/ap', true)).toBeUndefined();
+    expect((await network.resolvePublicTarget('http://localhost:3412/feeds/ap', true)).address).toBe('127.0.0.1');
+    await expect(network.resolvePublicTarget('http://localhost:3412/private', true)).rejects.toMatchObject({ code: 'blocked-target' });
+    await expect(network.resolvePublicTarget('http://localhost:3412/feeds/ap')).rejects.toMatchObject({ code: 'blocked-target' });
   });
   it.skipIf(process.env.TEST_WEB_BROWSER !== 'true')('loads an isolated Chromium page and extracts CSS rules', async () => {
     const target = 'https://crawler.example/news';
@@ -109,6 +178,21 @@ describe('web extraction', () => {
       const result = await crawler.collect(source, []);
       expect(result.items).toHaveLength(1); expect(result.items[0]).toMatchObject({ title: 'China trade policy', url: 'https://crawler.example/article', summary: 'China export rules' });
       expect(result.structure).toMatchObject({ matched: 1, counts: { title: 1, url: 1 } });
+      vi.mocked(network.requestPublic).mockResolvedValueOnce({ status: 401, url: target, headers: { 'content-type': 'text/html' }, body: Buffer.from('<html><title>reuters.com</title><body>Please enable JS<script src="https://geo.captcha-delivery.com/c.js"></script></body></html>') });
+      await expect(crawler.collect(source, [])).rejects.toMatchObject({ code: 'captcha', status: 401 });
+      vi.mocked(network.requestPublic).mockImplementation(async (url, options) => ({ status: 200, url, headers: { 'content-type': 'text/html', 'set-cookie': ['fixture=verified; Path=/; Secure; HttpOnly', 'second=value; Path=/; Secure'] }, body: Buffer.from('<html><body><button style="position:absolute;left:10px;top:10px;width:200px;height:50px" onclick="document.querySelector(\'h2\').textContent=\'China manual fixture\'">Fixture action</button><article><h2>China browser fixture</h2><a href="/article">Read</a></article></body></html>') }));
+      const remote = await crawler.openVerification(source, 'fixture-owner');
+      await expect(crawler.verificationFrame(remote.id, 'different-owner')).rejects.toThrow('会话已结束');
+      await vi.waitFor(async () => expect((await crawler.verificationFrame(remote.id, 'fixture-owner')).loading).toBe(false), { timeout: 10000 });
+      await expect(crawler.verificationInput(remote.id, 'fixture-owner', { type: 'script', text: 'arbitrary code' })).rejects.toThrow('操作无效');
+      await crawler.verificationInput(remote.id, 'fixture-owner', { type: 'down', x: 50, y: 30 });
+      await crawler.verificationInput(remote.id, 'fixture-owner', { type: 'up', x: 50, y: 30 });
+      const preview = await crawler.finishVerification(remote.id, 'fixture-owner', []);
+      expect(preview.items[0].title).toBe('China manual fixture');
+      await expect(crawler.verificationFrame(remote.id, 'fixture-owner')).rejects.toThrow('会话已结束');
+      await crawler.collect(source, []);
+      expect(vi.mocked(network.requestPublic).mock.calls.at(-1)?.[1]?.headers?.cookie).toContain('fixture=verified');
+      expect(vi.mocked(network.requestPublic).mock.calls.at(-1)?.[1]?.headers?.cookie).toContain('second=value');
     } finally { await crawler.onModuleDestroy(); }
-  });
+  }, 15000);
 });

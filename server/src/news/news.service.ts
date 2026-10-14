@@ -16,6 +16,8 @@ import { NewsBridgeService } from './news-bridge.service';
 import { CollectionResult, SourceAdapterService } from './source-adapter.service';
 import { SourceFetchError } from './public-network';
 import { WebCrawlerService } from './web-crawler.service';
+import { configureSourceNetwork, sourceNetwork, validateSourceNetwork } from './source-network';
+import { chmod } from 'node:fs/promises';
 import { validateWebRules } from './admin-config';
 import { publicNewsScope, presentNews } from './radar-content';
 import { manualInput } from './manual-news';
@@ -47,6 +49,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit() {
     const stored = await this.prisma.setting.findUnique({ where: { key: ADMIN_CONFIG_KEY } });
     if (stored) this.config = restoreConfig(stored.value);
+    configureSourceNetwork(this.config.network);
     this.runtime.register('news', (payload, task) => this.analyzeBatch(payload, task), async (_payload, task) => {
       const unfinished = await this.prisma.newsAnalysis.findMany({ where: { queuedTaskId: task.id, status: { not: 'done' } } });
       for (const cache of unfinished) {
@@ -540,11 +543,22 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   async adminConfig() {
     const { apiKey, ...ai } = this.config.ai;
     const states = await this.sources(true);
-    return { ai: { ...ai, keyConfigured: !!apiKey, protocolPrompt: ANALYSIS_PROMPT },
+    const { proxyUrl, ...network } = sourceNetwork();
+    return { ai: { ...ai, keyConfigured: !!apiKey, protocolPrompt: ANALYSIS_PROMPT }, network: { ...network, proxyConfigured: !!proxyUrl },
       sources: this.config.sources.map(({ notes, api, ...s }) => ({ ...s, ...(api ? { api: { ...api, body: '', auth: { ...api.auth, value: '', keyConfigured: !!api.auth.value } } } : {}), state: states.find(state => state.id === s.id) })), rules: this.config.rules,
       status: await this.status(), localOnly: false };
   }
   adminAiKey() { return { apiKey: this.config.ai.apiKey }; }
+  async configureNetwork(body: unknown) {
+    const network = validateSourceNetwork(body, sourceNetwork());
+    if (!this.config.network) {
+      const databases = await this.prisma.$queryRawUnsafe<Array<{ name: string; file: string }>>('PRAGMA database_list');
+      const file = databases.find(database => database.name === 'main')?.file;
+      if (file) { const backup = `${file}.backup-network-${Date.now()}.db`; await this.prisma.$executeRawUnsafe(`VACUUM INTO '${backup.replaceAll("'", "''")}'`); await chmod(backup, 0o600); }
+    }
+    await this.updateConfig({ ...this.config, network }, undefined, async () => { configureSourceNetwork(network); await this.crawler.clearVerification(); });
+    return this.adminConfig();
+  }
   privateSource(id: string) {
     const source = this.config.sources.find(s => s.id === id);
     if (!source) throw new NotFoundException('来源不存在');
@@ -652,10 +666,30 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         samples: feed.samples.slice(0, 10).map(sample => ({ ...sample,
           fallbackVisible: sample.accepted && fallbackDecision({ ...sample, url: sample.url! }, 'preview', this.config.rules, source.id).visible })) };
     } catch (error) {
-      if (source.kind === 'api' || source.kind === 'web' || source.kind === 'telegram') return { ok: false, checkedAt: now, attempts: [], error: error instanceof SourceFetchError ? error.message : '来源连接或解析失败，请核对配置', code: error instanceof SourceFetchError ? error.code : 'adapter-error' };
+      if (source.kind === 'api' || source.kind === 'web' || source.kind === 'telegram') return { ok: false, checkedAt: now, attempts: [], error: error instanceof SourceFetchError ? error.message : '来源连接或解析失败，请核对配置', code: error instanceof SourceFetchError ? error.code : 'adapter-error', status: error instanceof SourceFetchError ? error.status : undefined };
       if (!(error instanceof FeedFetchError)) throw error;
       return { ok: false, checkedAt: now, attempts: error.attempts, error: '所有 RSS 地址都获取失败，请检查下方逐条结果。' };
     } finally { this.testingSource = false; }
+  }
+  async openSourceBrowser(body: unknown, owner: string) {
+    const previous = this.config.sources.find(s => s.id === (body as { id?: unknown } | null)?.id);
+    const source = validateSource(body, previous);
+    if (source.kind !== 'web') throw new BadRequestException('人工操作只适用于网页来源');
+    try { return await this.crawler.openVerification(source, owner); }
+    catch (error) { if (error instanceof SourceFetchError) throw new BadRequestException({ code: error.code, message: error.message }); throw error; }
+  }
+  sourceBrowserFrame(id: string, owner: string) { return this.crawler.verificationFrame(id, owner); }
+  sourceBrowserInput(id: string, owner: string, body: unknown) { return this.crawler.verificationInput(id, owner, body); }
+  closeSourceBrowser(id: string, owner: string) { return this.crawler.closeVerification(id, owner); }
+  async finishSourceBrowser(id: string, owner: string) {
+    try {
+      const result = await this.crawler.finishVerification(id, owner, this.config.rules);
+      return { ok: true, checkedAt: new Date(), attempts: [], structure: result.structure, rawCount: result.rawCount, checkedCount: result.checkedCount, acceptedCount: result.items.length,
+        samples: result.samples.slice(0, 10).map(sample => ({ ...sample, fallbackVisible: sample.accepted && !!sample.originalPublisher && fallbackDecision({ title: sample.title, summary: sample.summary, url: sample.url || '' }, 'preview', this.config.rules, result.sourceId).visible })) };
+    } catch (error) {
+      if (!(error instanceof SourceFetchError)) throw error;
+      return { ok: false, checkedAt: new Date(), attempts: [], code: error.code, error: error.message, status: error.status };
+    }
   }
   async configureRules(body: unknown) {
     const rules = validateRules(body, [...this.config.sources, ...this.config.removedSourceIds.map(id => ({ id }))]);

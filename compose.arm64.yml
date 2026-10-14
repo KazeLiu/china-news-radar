@@ -25,6 +25,9 @@ services:
       COLLECTOR_TOKEN: ${COLLECTOR_TOKEN:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       RSSHUB_BASE_URL: http://rsshub:3412
+      SOURCE_PROXY_URL: ${SOURCE_PROXY_URL:-}
+      RSS_PROXY_URL: ${RSS_PROXY_URL:-}
+      SOURCE_DNS_OVER_HTTPS: ${SOURCE_DNS_OVER_HTTPS:-false}
     volumes:
       - radar_data:/data
     healthcheck:

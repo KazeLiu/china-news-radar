@@ -16,8 +16,9 @@ class AdminGuard implements CanActivate {
     if (mutation || privateRead) {
       context.switchToHttp().getResponse().setHeader('Cache-Control', 'no-store');
       if (mutation) this.auth.checkOrigin(req);
-      await this.auth.session(req);
+      const session = await this.auth.session(req);
       req.adminAuthenticated = true;
+      req.adminSessionId = session!.tokenHash;
     }
     return true;
   }

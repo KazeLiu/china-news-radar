@@ -4,10 +4,11 @@ import { DEFAULT_EXCLUSIONS, FilterRule } from './content-filter';
 import { isDomesticUrl } from './rules';
 import { isLocalFeed } from './transports';
 import { randomUUID } from 'node:crypto';
+import { SourceNetworkConfig, validateSourceNetwork, sourceNetwork } from './source-network';
 
 export const ADMIN_CONFIG_KEY = 'news-admin-config-v1';
 export interface AiConfig { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; apiKey: string; instructions: string; intervalMs: number; autoAnalyzeNew: boolean; newsOutputTokens: number }
-export interface AdminConfig { version: 2; ai: AiConfig; sources: NewsSourceConfig[]; rules: FilterRule[]; removedSourceIds: string[] }
+export interface AdminConfig { version: 2; ai: AiConfig; sources: NewsSourceConfig[]; rules: FilterRule[]; removedSourceIds: string[]; network?: SourceNetworkConfig }
 export function readAiUsage(value?: string): number {
   if (value === undefined) return 0;
   const usage = Number(value);
@@ -158,5 +159,6 @@ export function restoreConfig(raw: string): AdminConfig {
   const removedSourceIds = value.removedSourceIds ?? [];
   if (!Array.isArray(removedSourceIds) || removedSourceIds.length > 1000 || removedSourceIds.some(id => typeof id !== 'string' || !/^[a-z][a-z0-9_-]*$/.test(id))) throw new BadRequestException('已删除来源记录无效');
   return { version: 2, ai: validateAi(value.ai, { ...defaults.ai, apiKey: '' }), sources, removedSourceIds,
+    ...(value.network === undefined ? {} : { network: validateSourceNetwork(value.network, { ...sourceNetwork(), proxyUrl: '' }) }),
     rules: validateRules(value.rules, [...sources, ...removedSourceIds.map(id => ({ id }))]) };
 }

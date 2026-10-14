@@ -22,11 +22,12 @@ export interface SourceSettings { id: string; name: string; englishName: string;
 export interface SourceTestResult {
   ok: boolean; checkedAt: string; feedUrl?: string; feedTitle?: string; error?: string; rawCount?: number; checkedCount?: number; acceptedCount?: number;
   attempts: { url: string; status: number | null; error: string | null }[];
-  structure?: Record<string, unknown>; code?: string;
+  structure?: Record<string, unknown>; code?: string; status?: number;
   samples?: { title: string; summary: string; url: string | null; publishedAt: string | null; accepted: boolean; reason: string | null; fallbackVisible: boolean; originalPublisher?: string | null; images?: string[] }[];
 }
 export interface FilterRule { id: string; enabled: boolean; sourceId: string; field: 'titleExact' | 'titleContains' | 'textContains' | 'urlPrefix' | 'urlExact'; value: string }
-export interface AdminSettings { ai: AiSettings; sources: SourceSettings[]; rules: FilterRule[]; localOnly: boolean; status: { aiMode: string; aiDailyUsed: number; aiDailyLimit: number; aiPending: number; aiFailed: number }; changed?: number; savedSourceId?: string }
+export interface NetworkSettings { mode: 'direct' | 'proxy'; proxyConfigured: boolean; secureDns: boolean }
+export interface AdminSettings { ai: AiSettings; network: NetworkSettings; sources: SourceSettings[]; rules: FilterRule[]; localOnly: boolean; status: { aiMode: string; aiDailyUsed: number; aiDailyLimit: number; aiPending: number; aiFailed: number }; changed?: number; savedSourceId?: string }
 export async function adminApi<T>(path: string, _token: string, body?: unknown, method = 'PUT'): Promise<T> {
   try { return await requestJson<T>(`/api/news/${path}`, { method: body === undefined ? 'GET' : method,
     credentials: 'same-origin', ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
