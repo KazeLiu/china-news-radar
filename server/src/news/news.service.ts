@@ -549,6 +549,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       status: await this.status(), localOnly: false };
   }
   adminAiKey() { return { apiKey: this.config.ai.apiKey }; }
+  adminNetworkPrivate() { return { proxyUrl: sourceNetwork().proxyUrl }; }
   async configureNetwork(body: unknown) {
     const network = validateSourceNetwork(body, sourceNetwork());
     if (!this.config.network) {
