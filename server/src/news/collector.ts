@@ -5,7 +5,7 @@ import { NewsSourceConfig } from './sources';
 import { DEFAULT_EXCLUSIONS, FilterRule, matchingExclusions } from './content-filter';
 import { load } from 'cheerio';
 import { sourcePublishedAt } from './source-date';
-import { requestPublic, sourceProxyAgent, SourceFetchError } from './public-network';
+import { requestPublic, SourceFetchError } from './public-network';
 
 export interface CollectedItem {
   title: string; summary: string; url: string; originalPublisher: string | null;
@@ -14,6 +14,8 @@ export interface CollectedItem {
   body?: string; images?: string;
   acquisitionKind?: string;
   sourceTitlePresent?: boolean;
+  sourceLinks?: string;
+  publishedAtEstimated?: boolean;
 }
 // rss-parser flattens XML nodes containing `_`; keeping the array preserves source attributes.
 interface ParsedFields { publisher?: { $?: { url?: string } }[]; 'content:encoded'?: string; 'content:encodedSnippet'?: string; author?: string; 'media:content'?: { $?: { url?: string; medium?: string; type?: string } }[]; 'media:thumbnail'?: { $?: { url?: string } }[] }
@@ -61,7 +63,7 @@ export async function parseFeed(xml: string, source: NewsSourceConfig, now = new
 }
 export async function requestFeed(source: NewsSourceConfig, etag?: string | null, lastModified?: string | null) {
   const response = await requestPublic(source.feedUrl!, {
-    agent: sourceProxyAgent(source.feedUrl!, true), allowRsshub: true,
+    useProxy: source.useProxy, allowRsshub: true,
     headers: { 'User-Agent': 'ChinaNewsRadar/1.0 (personal RSS reader)', Accept: 'application/rss+xml, application/xml, text/xml',
       ...(etag ? { 'If-None-Match': etag } : {}), ...(lastModified ? { 'If-Modified-Since': lastModified } : {}) },
   });

@@ -15,6 +15,7 @@ import { HotspotMedia } from './HotspotMedia';
 import type { Hotspot } from '../../types';
 import { BilingualText } from '../common/BilingualText';
 import { AiTitleBadge } from '../common/AiTitleBadge';
+import { NewsSourceLinks } from '../news/NewsSourceLinks';
 import { getNewsText } from '@/lib/newsText';
 import { useReadingPreference } from '@/providers/ReadingPreference';
 
@@ -165,6 +166,7 @@ export function HotspotCard({
             </div>
           )}
 
+          <NewsSourceLinks links={hotspot.sourceLinks || []} />
           {/* Media (X/Twitter photos & videos) */}
           {hotspot.media && hotspot.media.length > 0 && (
             <HotspotMedia media={hotspot.media} />

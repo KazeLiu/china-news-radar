@@ -168,6 +168,7 @@ model NewsItem {
   url                String
   originalPublisher  String?
   originalUrl        String?
+  sourceLinks        String @default("[]")
   author             String?
   topic              String
   eventKey           String
@@ -311,9 +312,9 @@ model AiRequest {
   elapsedMs Int?
   requestId String?
   errorJson String?
-  analyzedCount Int @default(0)
   inputJson String?
   outputJson String?
+  analyzedCount Int @default(0)
   translatedCount Int @default(0)
   sourceIds String @default("[]")
   @@index([startedAt])

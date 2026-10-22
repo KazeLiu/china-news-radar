@@ -1,18 +1,27 @@
 import { Injectable, OnModuleDestroy, OnModuleInit, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { Browser, BrowserContext, errors } from 'playwright-core';
 import { Camoufox, findInstalledVersion } from 'camoufox';
+import { isModelInstalled } from 'camoufox/dist/fpgen/index.js';
+import { getAddonPath } from 'camoufox/dist/addons.js';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NewsSourceConfig } from './sources';
 import { SourceAdapterService, CollectionResult, inspectRecords } from './source-adapter.service';
 import { FilterRule } from './content-filter';
 import { matchesHost } from './collector';
-import { resolvePublicTarget, SourceFetchError } from './public-network';
+import { resolvePublicTarget, sourceProxyAgent, SourceFetchError } from './public-network';
 import { checkPageAccess, clippedPageFragment, extractPage } from './web-parser';
 import { createCrawlerPage, sourceHosts, CrawlerPage } from './web-browser';
 import { randomUUID } from 'node:crypto';
+import { inspectWebPage } from './web-preview';
+import { BrowserConfig, defaultBrowserConfig } from './browser-config';
+import { captureStablePage, navigateCrawlerPage, readStablePage } from './web-page-readiness';
 
 type StorageState = Awaited<ReturnType<BrowserContext['storageState']>>;
+export interface LoadedWebPage {
+  url: string; status: number; html: string; screenshot: string; bytes: number; browserMode: string; loadedAt: Date;
+  loadMoreClicks: number; complete: boolean; stopReason: 'loaded' | 'no-more' | 'page-limit';
+}
 interface Verification extends CrawlerPage { id: string; owner: string; source: NewsSourceConfig; expiresAt: number; timer: ReturnType<typeof setTimeout>; loading: boolean; busy: boolean; error?: string }
 @Injectable()
 export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
@@ -24,9 +33,14 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
   private verificationOpening = false;
   private browserRevision = 0;
   private verified = new Map<string, { state: StorageState; timer: ReturnType<typeof setTimeout> }>();
+  private siteStates = new Map<string, { state: StorageState; expiresAt: number }>();
+  private settings = defaultBrowserConfig();
   constructor(private readonly adapters: SourceAdapterService) {}
   onModuleInit() { this.adapters.registerWeb((source, rules) => this.collect(source, rules)); }
   async onModuleDestroy() { this.stopped = true; this.waiting.splice(0).forEach(wake => wake()); await this.clearVerification(); if (this.browser) await (await this.browser).close(); }
+  private browserMode() { return process.env.CAMOUFOX_MODE || (process.platform === 'win32' ? 'headed' : 'virtual'); }
+  configureBrowser(settings?: BrowserConfig) { this.settings = settings ? { ...settings } : defaultBrowserConfig(); }
+  browserConfiguration() { return { ...this.settings, defaults: defaultBrowserConfig(), runtime: { engine: 'Camoufox', version: '156.0.1-beta.36', platform: process.platform, mode: this.browserMode() } }; }
   private getBrowser() {
     if (!this.browser) {
       const env = Object.fromEntries(['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'TEMP', 'TMP', 'LANG', 'APPDATA', 'LOCALAPPDATA', 'XDG_RUNTIME_DIR', 'DISPLAY'].flatMap(key => process.env[key] ? [[key, process.env[key]!]] : []));
@@ -35,48 +49,130 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
         const executablePath = process.env.CAMOUFOX_EXECUTABLE_PATH || (installed ? join(installed, process.platform === 'win32' ? 'camoufox.exe' : 'camoufox-bin') : '');
         if (!executablePath) throw new Error('Camoufox not installed');
         await access(executablePath);
-        // Supply launch options directly: replace only the engine, without identity spoofing,
-        // model/addon downloads or inherited credentials. The dead-end proxy blocks
-        // background traffic; routed page requests still use requestPublic and its proxy.
-        return Camoufox({ from_options: { headless: true, executablePath, env,
+        if (!isModelInstalled()) throw new SourceFetchError('browser-unavailable', '缺少 Camoufox 官方指纹模型，请运行 node scripts/install-camoufox.cjs 后重启后端');
+        await access(join(getAddonPath('UBO'), 'manifest.json'));
+        const mode = this.browserMode();
+        if (!['headed', 'headless', 'virtual'].includes(mode) || (mode === 'virtual' && process.platform !== 'linux')) throw new SourceFetchError('browser-unavailable', 'CAMOUFOX_MODE 应为 headed、headless 或 virtual；virtual 仅支持 Linux');
+        // Keep browser-wide background traffic blocked; each page context receives
+        // its own validated proxy without inheriting source credentials.
+        return Camoufox({ headless: mode === 'virtual' ? 'virtual' : mode === 'headless', os: process.platform === 'win32' ? 'windows' : 'linux', executable_path: executablePath, env,
           proxy: { server: 'http://127.0.0.1:9' },
-          firefoxUserPrefs: { 'media.peerconnection.enabled': false, 'network.http.http3.enable': false,
+          firefox_user_prefs: { 'media.peerconnection.enabled': false, 'network.http.http3.enable': false,
             'network.prefetch-next': false, 'network.dns.disablePrefetch': true, 'network.http.speculative-parallel-limit': 0,
-            'network.captive-portal-service.enabled': false, 'network.connectivity-service.enabled': false } } });
+            'network.captive-portal-service.enabled': false, 'network.connectivity-service.enabled': false } });
       })().then(browser => {
-          browser.on('disconnected', () => { this.browser = undefined; }); return browser;
-        }).catch(() => { this.browser = undefined; throw new SourceFetchError('browser-unavailable', 'Camoufox 启动失败，请安装项目固定浏览器包并检查系统依赖；不会回退到 Chromium'); });
+          browser.on('disconnected', () => { this.browser = undefined; this.siteStates.clear(); }); return browser;
+        }).catch(error => { this.browser = undefined; throw error instanceof SourceFetchError ? error : new SourceFetchError('browser-unavailable', 'Camoufox 启动失败，请运行 node scripts/install-camoufox.cjs 并检查系统依赖；Linux 虚拟显示需要 Xvfb，不会回退到 Chromium'); });
     }
     return this.browser;
   }
-  async collect(source: NewsSourceConfig, rules: FilterRule[], fragmentOnly = false): Promise<CollectionResult> {
-    const limit = source.web!.concurrency;
+  private async acquire(limit: number) {
     while (!this.stopped && this.activeLimits.length >= Math.min(limit, ...this.activeLimits)) await new Promise<void>(resolve => this.waiting.push(resolve));
     if (this.stopped) throw new SourceFetchError('stopped', '网页采集正在停止');
     this.activeLimits.push(limit);
+  }
+  private release(limit: number) { this.activeLimits.splice(this.activeLimits.indexOf(limit), 1); this.waiting.splice(0).forEach(wake => wake()); }
+  private siteState(source: NewsSourceConfig) {
+    const key = this.siteKey(source);
+    const saved = this.siteStates.get(key);
+    if (saved && saved.expiresAt <= Date.now()) { this.siteStates.delete(key); return; }
+    return saved?.state;
+  }
+  private async rememberSiteState(source: NewsSourceConfig, context: BrowserContext, revision: number) {
+    const target = new URL(source.target!);
+    const state = await context.storageState();
+    if (revision !== this.browserRevision) return;
+    // Keep only this public site's own state, in memory and within this browser identity.
+    state.cookies = state.cookies.filter(cookie => {
+      const domain = cookie.domain.replace(/^\./, '');
+      return target.hostname === domain || (cookie.domain.startsWith('.') && target.hostname.endsWith(`.${domain}`));
+    });
+    state.origins = state.origins.filter(origin => origin.origin === target.origin);
+    const key = this.siteKey(source);
+    if (!this.siteStates.has(key) && this.siteStates.size >= 20) this.siteStates.delete(this.siteStates.keys().next().value!);
+    this.siteStates.set(key, { state, expiresAt: Date.now() + 1800000 });
+  }
+  async loadPage(source: NewsSourceConfig): Promise<LoadedWebPage> {
+    const config = source.web!; const settings = this.settings;
+    await this.acquire(config.concurrency);
+    const revision = this.browserRevision;
+    let session: CrawlerPage | undefined; let deadline: ReturnType<typeof setTimeout> | undefined;
+    let phase = '启动浏览器';
+    try {
+      await resolvePublicTarget(source.target!, false, sourceProxyAgent(source.target!, false, source.useProxy));
+      session = await createCrawlerPage(await this.getBrowser(), source, false, this.siteState(source));
+      const current = session; const { page } = current;
+      const timeoutMs = config.timeoutSeconds * 1000;
+      const expiresAt = Date.now() + settings.sessionTimeoutSeconds * 1000;
+      const remaining = () => Math.max(1, Math.min(timeoutMs, expiresAt - Date.now()));
+      deadline = setTimeout(() => { current.controller.abort(); void current.context.close().catch(() => console.warn('网页加载超时上下文关闭失败')); }, expiresAt - Date.now());
+      const readHtml = () => readStablePage(current, settings, expiresAt);
+      phase = '页面导航与等待跳转';
+      let html = await navigateCrawlerPage(current, source.target!, timeoutMs, settings, expiresAt); let loadMoreClicks = 0;
+      let stopReason: LoadedWebPage['stopReason'] = config.loadMoreText ? 'page-limit' : 'loaded';
+      if (config.loadMoreText) {
+        phase = '加载更多';
+        const button = page.getByRole('button', { name: config.loadMoreText, exact: true });
+        for (let number = 1; number < config.maxPages; number++) {
+          if (!await button.count() || !await button.first().isVisible()) { stopReason = 'no-more'; break; }
+          const before = await page.locator(config.loadMoreContainer!).evaluate(node => node.childElementCount, undefined, { timeout: remaining() });
+          current.resources = 0;
+          await button.click({ timeout: remaining() });
+          // Observe the loading region growing, without extracting any article fields.
+          await page.waitForFunction(({ selector, before, text }) => {
+            const region = document.querySelector(selector);
+            const button = Array.from(document.querySelectorAll('button')).find(node => node.innerText.trim() === text);
+            return !!region && region.childElementCount > before && (!button || (!button.disabled && button.getAttribute('aria-busy') !== 'true'));
+          }, { selector: config.loadMoreContainer!, before, text: config.loadMoreText }, { timeout: remaining() });
+          loadMoreClicks++;
+          html = await readHtml();
+        }
+        if (!await button.count() || !await button.first().isVisible()) stopReason = 'no-more';
+      }
+      phase = '读取页面与截图';
+      const captured = await captureStablePage(current, settings, expiresAt, timeoutMs);
+      html = captured.html;
+      const screenshot = captured.screenshot;
+      await this.rememberSiteState(source, current.context, revision);
+      return { url: page.url(), status: current.status, html, bytes: Buffer.byteLength(html), screenshot: `data:image/jpeg;base64,${screenshot.toString('base64')}`,
+        browserMode: this.browserMode(), loadedAt: new Date(), loadMoreClicks, stopReason, complete: stopReason !== 'page-limit' };
+    } catch (error) {
+      if (error instanceof SourceFetchError && ['access-denied', 'captcha'].includes(error.code)) this.siteStates.delete(this.siteKey(source));
+      if (error instanceof SourceFetchError) throw error;
+      if (session?.failure) throw session.failure;
+      throw new SourceFetchError(session?.controller.signal.aborted || error instanceof errors.TimeoutError ? 'page-timeout' : 'browser-error',
+        session?.controller.signal.aborted || error instanceof errors.TimeoutError ? `网页在${phase}阶段超时（会话上限 ${settings.sessionTimeoutSeconds} 秒）` : `浏览器在${phase}阶段失败，请检查来源地址、页面状态与浏览器依赖`);
+    } finally {
+      clearTimeout(deadline); session?.controller.abort();
+      try { await session?.context.close(); } finally { this.release(config.concurrency); }
+    }
+  }
+  async collect(source: NewsSourceConfig, rules: FilterRule[], fragmentOnly = false): Promise<CollectionResult> {
+    if (source.web!.loadMoreText && !fragmentOnly) return inspectWebPage(await this.loadPage(source), source, rules);
+    const limit = source.web!.concurrency;
+    const settings = this.settings;
+    await this.acquire(limit);
+    const revision = this.browserRevision;
     const controller = new AbortController();
     let context: Awaited<ReturnType<Browser['newContext']>> | undefined;
     let deadline: ReturnType<typeof setTimeout> | undefined;
     try {
-      await resolvePublicTarget(source.target!);
+      await resolvePublicTarget(source.target!, false, sourceProxyAgent(source.target!, false, source.useProxy));
       const browser = await this.getBrowser();
       const saved = this.verified.get(this.sourceKey(source));
-      const session = await createCrawlerPage(browser, source, false, saved?.state);
+      const session = await createCrawlerPage(browser, source, false, saved?.state || this.siteState(source));
       context = session.context;
       const timeoutMs = source.web!.timeoutSeconds * 1000;
       const { page } = session; const allowedHosts = sourceHosts(source);
       controller.signal.addEventListener('abort', () => session.controller.abort(), { once: true });
+      const expiresAt = Date.now() + settings.sessionTimeoutSeconds * 1000;
+      deadline = setTimeout(() => { controller.abort(); void context?.close().catch(() => console.warn('网页超时上下文关闭失败')); }, settings.sessionTimeoutSeconds * 1000);
       let target: string | undefined = source.target!; const visited = new Set<string>(); let result: CollectionResult | undefined;
       let pageFragment = '';
       for (let number = 0; target && number < (fragmentOnly ? 1 : source.web!.maxPages); number++) {
         if (!matchesHost(target, allowedHosts)) throw new SourceFetchError('blocked-domain', '翻页链接超出来源域名');
-        deadline = setTimeout(() => { controller.abort(); void context?.close().catch(() => console.warn('网页超时上下文关闭失败')); }, timeoutMs);
         if (visited.has(target)) break; visited.add(target); session.failure = undefined; session.resources = 0;
-        try { await page.goto(target, { waitUntil: 'domcontentloaded' }); }
-        catch (error) { throw session.failure || (controller.signal.aborted || error instanceof errors.TimeoutError
-          ? new SourceFetchError('page-timeout', '页面未能在时间上限内加载') : new SourceFetchError('navigation-error', '浏览器页面导航失败，请检查目标地址与网站访问限制')); }
-        if (session.failure) throw session.failure;
-        let html = await page.content(); if (html.length > 3_000_000) throw new SourceFetchError('response-too-large', '页面超过解析大小上限');
+        let html = await navigateCrawlerPage(session, target, timeoutMs, settings, expiresAt);
         let extracted: ReturnType<typeof extractPage> | undefined;
         if (!fragmentOnly) {
           try { extracted = extractPage(html, page.url(), source.web!.rules, source.web!.maxItems); }
@@ -89,36 +185,39 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
                 const title = rules.title ? find(rules.title) : null; const body = rules.body ? find(rules.body) : null; const link = find(rules.link);
                 return !!(title?.getAttribute('content') || title?.textContent || body?.textContent || '').trim()
                   && !!(link?.getAttribute('href') || link?.getAttribute('data-url') || link?.getAttribute('content'));
-              }), source.web!.rules, { timeout: timeoutMs });
+              }), source.web!.rules, { timeout: Math.max(1, Math.min(timeoutMs, expiresAt - Date.now())) });
             } catch { throw error; }
-            html = await page.content(); if (html.length > 3_000_000) throw new SourceFetchError('response-too-large', '页面超过解析大小上限');
+            html = await readStablePage(session, settings, expiresAt);
             extracted = extractPage(html, page.url(), source.web!.rules, source.web!.maxItems);
           }
         }
-        clearTimeout(deadline);
         pageFragment ||= clippedPageFragment(html);
         if (fragmentOnly) { checkPageAccess(html); return { ...inspectRecords([], source, rules), pageFragment, structure: { fragmentLength: pageFragment.length }, status: session.status }; }
         const parsed = extracted!;
-        const inspected = inspectRecords(parsed.records, source, rules, { rules: source.web!.rules, matched: parsed.records.length, counts: parsed.counts, checkedAt: new Date().toISOString(), pages: number + 1, empty: parsed.empty }, page.url());
+        const inspected = { ...inspectRecords(parsed.records, source, rules, { rules: source.web!.rules, matched: parsed.matched, limited: parsed.limited, maxItems: source.web!.maxItems, counts: parsed.counts, checkedAt: new Date().toISOString(), pages: number + 1, empty: parsed.empty }, page.url()), rawCount: parsed.matched };
         result = result ? { ...inspected, items: [...result.items, ...inspected.items], samples: [...result.samples, ...inspected.samples], rawCount: result.rawCount + inspected.rawCount, checkedCount: result.checkedCount + inspected.checkedCount } : inspected;
         if (result.items.length >= source.web!.maxItems) break;
-        target = parsed.next; await resolvePublicTarget(target || page.url());
+        target = parsed.next; await resolvePublicTarget(target || page.url(), false, sourceProxyAgent(target || page.url(), false, source.useProxy));
       }
       const output = result!;
       output.items = [...new Map(output.items.map(item => [item.url, item])).values()].slice(0, source.web!.maxItems);
+      await this.rememberSiteState(source, session.context, revision);
       return { ...output, pageFragment, status: session.status };
     } catch (error) {
+      if (error instanceof SourceFetchError && ['access-denied', 'captcha'].includes(error.code)) this.siteStates.delete(this.siteKey(source));
       if (error instanceof SourceFetchError) throw error;
       throw new SourceFetchError(controller.signal.aborted ? 'page-timeout' : 'browser-error', controller.signal.aborted ? '页面处理超过时间上限，已关闭上下文' : '浏览器页面处理失败，请核对浏览器依赖和来源配置');
     } finally {
       clearTimeout(deadline); controller.abort();
       try { if (context) await context.close(); }
-      finally { this.activeLimits.splice(this.activeLimits.indexOf(limit), 1); this.waiting.splice(0).forEach(wake => wake()); }
+      finally { this.release(limit); }
     }
   }
-  private sourceKey(source: NewsSourceConfig) { return `${source.id}\n${source.target}`; }
+  private siteKey(source: NewsSourceConfig) { return `${new URL(source.target!).origin}\n${source.useProxy !== false ? 'shared' : 'direct'}`; }
+  private sourceKey(source: NewsSourceConfig) { return `${source.id}\n${source.target}\n${source.useProxy !== false ? 'shared' : 'direct'}`; }
   async clearVerification() {
     this.browserRevision++;
+    this.siteStates.clear();
     this.verified.forEach(saved => clearTimeout(saved.timer));
     this.verified.clear();
     if (this.verification) { const session = this.verification; this.verification = undefined; clearTimeout(session.timer); session.controller.abort(); await session.context.close(); }
@@ -133,7 +232,7 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
     this.verificationOpening = true;
     const revision = this.browserRevision;
     try {
-      await resolvePublicTarget(source.target!);
+      await resolvePublicTarget(source.target!, false, sourceProxyAgent(source.target!, false, source.useProxy));
       const browser = await this.getBrowser();
       const page = await createCrawlerPage(browser, source, true);
       if (revision !== this.browserRevision) { page.controller.abort(); await page.context.close(); throw new ConflictException('网络设置已改变，请重新打开浏览器'); }
@@ -141,14 +240,16 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
       const session = { ...page, id, owner, source, expiresAt: Date.now() + 600000, loading: true, busy: false } as Verification;
       this.verification = session;
       session.timer = setTimeout(() => { void this.closeVerification(id, owner).catch(() => console.warn('人工浏览器清理失败')); }, 600000);
+      const size = await session.page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
       void session.page.goto(source.target!, { waitUntil: 'domcontentloaded' }).catch(() => { session.error = session.failure?.message || '页面加载未完成，可查看画面后重试'; }).finally(() => { session.loading = false; });
-      return { id, sourceId: source.id, expiresAt: new Date(session.expiresAt).toISOString(), width: 1280, height: 800 };
+      return { id, sourceId: source.id, expiresAt: new Date(session.expiresAt).toISOString(), ...size };
     } finally { this.verificationOpening = false; }
   }
   async verificationFrame(id: string, owner: string) {
     const session = this.requireVerification(id, owner);
-    const screenshot = await session.page.screenshot({ type: 'jpeg', quality: 65, timeout: 5000 });
-    return { image: `data:image/jpeg;base64,${screenshot.toString('base64')}`, url: session.page.url(), loading: session.loading, error: session.failure?.message || session.error, expiresAt: new Date(session.expiresAt).toISOString() };
+    const size = await session.page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+    const screenshot = await session.page.screenshot({ type: 'jpeg', quality: 65, scale: 'css', timeout: 5000 });
+    return { image: `data:image/jpeg;base64,${screenshot.toString('base64')}`, ...size, url: session.page.url(), loading: session.loading, error: session.failure?.message || session.error, expiresAt: new Date(session.expiresAt).toISOString() };
   }
   async verificationInput(id: string, owner: string, input: unknown) {
     const session = this.requireVerification(id, owner);
@@ -158,7 +259,8 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
     session.busy = true;
     try {
       if (['click', 'move', 'down', 'up'].includes(body.type!)) {
-        if (!Number.isFinite(body.x) || !Number.isFinite(body.y) || body.x! < 0 || body.x! >= 1280 || body.y! < 0 || body.y! >= 800) throw new BadRequestException('点击坐标无效');
+        const size = await session.page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
+        if (!Number.isFinite(body.x) || !Number.isFinite(body.y) || body.x! < 0 || body.x! >= size.width || body.y! < 0 || body.y! >= size.height) throw new BadRequestException('点击坐标无效');
         await session.page.mouse.move(body.x!, body.y!);
         if (body.type === 'click') await session.page.mouse.click(body.x!, body.y!);
         if (body.type === 'down') await session.page.mouse.down();
@@ -184,11 +286,12 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
     if (session.busy || session.loading) throw new ConflictException('页面仍在加载，请稍后继续');
     session.busy = true;
     try {
+      await session.responseCheck;
+      if (session.failure) throw session.failure;
       const html = await session.page.content();
       if (html.length > 3_000_000) throw new SourceFetchError('response-too-large', '页面超过解析大小上限');
       try { checkPageAccess(html); }
       catch (error) { if (error instanceof SourceFetchError) throw new SourceFetchError(error.code, error.message, session.status); throw error; }
-      if (session.failure) throw session.failure;
       const key = this.sourceKey(session.source);
       if (this.verified.has(key)) clearTimeout(this.verified.get(key)!.timer);
       if (this.verified.size >= 20) { const oldest = this.verified.keys().next().value!; clearTimeout(this.verified.get(oldest)!.timer); this.verified.delete(oldest); }

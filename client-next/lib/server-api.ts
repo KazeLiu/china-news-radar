@@ -107,7 +107,7 @@ export interface NewsArticle {
   id: string; title: string; titleZh: string | null; summary: string; summaryZh: string | null; body: string;
   sourceTitlePresent: boolean; titleGenerated: boolean;
   displaySummary?: string | null;
-  images: string; originalPublisher: string | null; originalUrl: string | null; isManual: boolean;
+  images: string; sourceLinks: string[]; originalPublisher: string | null; originalUrl: string | null; isManual: boolean;
   publishedAt: string | null; firstSeenAt: string;
 }
 export async function fetchArticleSSR(id: string): Promise<NewsArticle | null> {

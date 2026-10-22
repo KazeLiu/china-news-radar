@@ -4,7 +4,7 @@ import { adminApi, type SourceSettings, type SourceTestResult } from './admin-ap
 import styles from './admin.module.css';
 
 interface Session { id: string; sourceId: string; expiresAt: string; width: number; height: number }
-interface Frame { image: string; url: string; loading: boolean; error?: string }
+interface Frame { image: string; width: number; height: number; url: string; loading: boolean; error?: string }
 export function SourceBrowserDialog({ source, onClose, onResult, onSourceId }: { source: SourceSettings; onClose: () => void; onResult: (result: SourceTestResult) => void; onSourceId: (id: string) => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -62,13 +62,13 @@ export function SourceBrowserDialog({ source, onClose, onResult, onSourceId }: {
   }
   function position(event: React.PointerEvent<HTMLElement>) {
     const rect = event.currentTarget.getBoundingClientRect();
-    return { x: Math.max(0, Math.min(1279, (event.clientX - rect.left) / rect.width * 1280)), y: Math.max(0, Math.min(799, (event.clientY - rect.top) / rect.height * 800)) };
+    return { x: Math.max(0, Math.min(frame!.width - 1, (event.clientX - rect.left) / rect.width * frame!.width)), y: Math.max(0, Math.min(frame!.height - 1, (event.clientY - rect.top) / rect.height * frame!.height)) };
   }
   return <dialog ref={dialog} className={styles.browserDialog} aria-labelledby="source-browser-title" onCancel={event => { event.preventDefault(); if (!busy) void close(); }}>
     <div className={styles.sectionTitle}><div><h2 id="source-browser-title">远程采集浏览器 · {source.name}</h2><p>这是后端的独立 Camoufox。你可以点击、拖动、滚动或输入文字；只用于公开页面验证，请勿登录私人账号或付款。</p></div><button type="button" disabled={busy} onClick={() => void close()}>关闭窗口</button></div>
     {!session ? <><p>会话十分钟后自动关闭。完成后仅在后端内存中保留本来源验证状态三十分钟，重启或修改采集网络后清除。</p><button type="button" className={styles.primary} disabled={busy} onClick={() => void open()}>{busy ? '正在启动…' : '打开远程浏览器'}</button></> : <>
       <div className={styles.browserAddress}>{frame?.url || source.target}<span>{frame?.loading ? '页面正在加载…' : '可操作'} · 截止 {new Date(session.expiresAt).toLocaleTimeString()}</span></div>
-      {frame ? <div className={styles.browserScreen} role="application" tabIndex={0} aria-label="远程网页操作区，可点击拖动，键盘支持方向键、Tab、回车和空格" onKeyDown={event => {
+      {frame ? <div className={styles.browserScreen} style={{ aspectRatio: `${frame.width}/${frame.height}` }} role="application" tabIndex={0} aria-label="远程网页操作区，可点击拖动，键盘支持方向键、Tab、回车和空格" onKeyDown={event => {
         const key = event.key === ' ' ? 'Space' : event.key === 'Tab' && event.shiftKey ? 'Shift+Tab' : event.key;
         if (['Enter', 'Tab', 'Shift+Tab', 'Backspace', 'Delete', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(key) && key !== 'Escape') { event.preventDefault(); void input({ type: 'key', key }); }
       }} onPointerDown={event => { event.currentTarget.focus(); event.currentTarget.setPointerCapture(event.pointerId); void input({ type: 'down', ...position(event) }); }} onPointerMove={event => {
@@ -77,7 +77,7 @@ export function SourceBrowserDialog({ source, onClose, onResult, onSourceId }: {
       }} onPointerUp={event => { void input({ type: 'up', ...position(event) }); }} onPointerCancel={event => { void input({ type: 'up', ...position(event) }); }}>
         {/* The image is a private, changing browser frame, not a cacheable site asset. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={frame.image} alt="后端采集浏览器实时画面" width={1280} height={800} draggable={false} />
+        <img src={frame.image} alt="后端采集浏览器实时画面" width={frame.width} height={frame.height} draggable={false} />
       </div> : <p role="status">正在读取画面…</p>}
       <div className={styles.actions}><button type="button" disabled={busy || frame?.loading} onClick={() => void input({ type: 'scroll', delta: -500 })}>向上滚动</button><button type="button" disabled={busy || frame?.loading} onClick={() => void input({ type: 'scroll', delta: 500 })}>向下滚动</button><button type="button" disabled={busy || frame?.loading} onClick={() => void input({ type: 'key', key: 'Tab' })}>Tab</button><button type="button" disabled={busy || frame?.loading} onClick={() => void input({ type: 'key', key: 'Enter' })}>回车</button><button type="button" disabled={busy || frame?.loading} onClick={() => void input({ type: 'reload' })}>重新加载</button></div>
       <div className={styles.browserText}><label>向当前焦点输入文字<input value={text} maxLength={500} onChange={event => setText(event.target.value)} /></label><button type="button" disabled={busy || frame?.loading || !text} onClick={() => { void input({ type: 'text', text }); setText(''); }}>发送文字</button></div>

@@ -4,6 +4,7 @@ import * as cheerio from 'cheerio';
 import type { SearchResult } from '../types';
 import { findOldestDateInText, parseLooseDate, extractDateFromUrl } from '../utils/date-parser';
 import { withRetry } from '../utils/retry';
+import { requestPublic, SourceFetchError } from '../news/public-network';
 
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -34,12 +35,12 @@ export class SearchService {
     return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
   }
 
-  async searchBing(query: string, strict = false): Promise<SearchResult[]> {
+  async searchBing(query: string, strict = false, network?: { useProxy?: boolean }): Promise<SearchResult[]> {
     await this.bingLimiter.wait();
 
     try {
       const response = await withRetry(
-        () => axios.get('https://www.bing.com/search', {
+        () => network ? this.sourceRequest(`https://www.bing.com/search?${new URLSearchParams({ q: query, count: '20' })}`, network, false) : axios.get('https://www.bing.com/search', {
           params: { q: query, count: 20 },
           headers: {
             'User-Agent': this.getRandomUserAgent(),
@@ -49,7 +50,7 @@ export class SearchService {
           },
           timeout: 15000,
         }),
-        { retries: 2, delayMs: 800, label: `Bing "${query}"` },
+        { retries: 2, delayMs: 800, label: `Bing "${query}"`, isRetryable: network ? error => error instanceof SourceFetchError && (!error.status || error.status >= 500 || error.status === 429) : undefined },
       );
 
       const $ = cheerio.load(response.data);
@@ -80,19 +81,19 @@ export class SearchService {
       console.log(`Bing search for "${query}": found ${results.length} results`);
       return results;
     } catch (error) {
-      if (strict) throw new Error('Bing 来源连接或解析失败');
+      if (strict) throw error instanceof SourceFetchError ? error : new Error('Bing 来源连接或解析失败');
       console.error('Bing search error:', error);
       return [];
     }
   }
 
-  async searchHackerNews(query: string, strict = false): Promise<SearchResult[]> {
+  async searchHackerNews(query: string, strict = false, network?: { useProxy?: boolean }): Promise<SearchResult[]> {
     await this.hackernewsLimiter.wait();
 
     try {
       const oneDayAgo = Math.floor((Date.now() - 24 * 3600 * 1000) / 1000);
       const response = await withRetry(
-        () => axios.get<any>('https://hn.algolia.com/api/v1/search', {
+        () => network ? this.sourceRequest(`https://hn.algolia.com/api/v1/search?${new URLSearchParams({ query, tags: 'story', hitsPerPage: '20', numericFilters: `created_at_i>${oneDayAgo}` })}`, network, true) : axios.get<any>('https://hn.algolia.com/api/v1/search', {
           params: {
             query,
             tags: 'story',
@@ -101,7 +102,7 @@ export class SearchService {
           },
           timeout: 15000,
         }),
-        { retries: 2, delayMs: 500, label: `HN "${query}"` },
+        { retries: 2, delayMs: 500, label: `HN "${query}"`, isRetryable: network ? error => error instanceof SourceFetchError && (!error.status || error.status >= 500 || error.status === 429) : undefined },
       );
 
       const results: SearchResult[] = response.data.hits
@@ -121,10 +122,19 @@ export class SearchService {
       console.log(`Hacker News search for "${query}": found ${results.length} results`);
       return results;
     } catch (error) {
-      if (strict) throw new Error('Hacker News 来源连接或解析失败');
+      if (strict) throw error instanceof SourceFetchError ? error : new Error('Hacker News 来源连接或解析失败');
       console.error('Hacker News search error:', error);
       return [];
     }
+  }
+
+  private async sourceRequest(url: string, network: { useProxy?: boolean }, json: boolean): Promise<{ data: any }> {
+    const response = await requestPublic(url, { ...network, headers: { 'User-Agent': this.getRandomUserAgent(), Accept: json ? 'application/json' : 'text/html', 'Accept-Language': 'en-US,en;q=0.5' } });
+    if (response.status < 200 || response.status >= 300) throw new SourceFetchError('http-error', `搜索来源返回 HTTP ${response.status}`, response.status);
+    const body = response.body.toString('utf8');
+    if (!json) return { data: body };
+    try { return { data: JSON.parse(body) }; }
+    catch { throw new SourceFetchError('invalid-structure', '搜索来源未返回有效 JSON'); }
   }
 
   deduplicateResults(allResults: SearchResult[]): SearchResult[] {

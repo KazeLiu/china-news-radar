@@ -18,6 +18,7 @@ import { requestJson } from '../../services/http';
 import { HotspotMedia } from '../hotspot/HotspotMedia';
 import { BilingualText } from '../common/BilingualText';
 import { AiTitleBadge } from '../common/AiTitleBadge';
+import { NewsSourceLinks } from '../news/NewsSourceLinks';
 import { getNewsText } from '@/lib/newsText';
 import { useReadingPreference } from '@/providers/ReadingPreference';
 
@@ -120,6 +121,7 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
             </p>
           </div>
         )}
+        <NewsSourceLinks links={item.sourceLinks || []} />
         {item.media && item.media.length > 0 && <HotspotMedia media={item.media} />}
 
         {/* Engagement metrics — only when there are any */}

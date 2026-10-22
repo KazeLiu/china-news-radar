@@ -36,6 +36,7 @@ export interface Hotspot {
   displaySummary?: string | null;
   originalPublisher?: string;
   originalUrl?: string;
+  sourceLinks?: string[];
   firstSeenAt?: string;
   updatedAt?: string;
   distribution?: string;

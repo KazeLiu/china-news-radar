@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import type { SearchResult, Tweet, TwitterSearchResponse, TwitterFilterConfig, MediaItem } from '../types';
+import { requestPublic, SourceFetchError } from '../news/public-network';
 
 const TWITTER_API_BASE = 'https://api.twitterapi.io';
+
+export class TwitterApiError extends Error {
+  constructor(readonly status?: number) { super(status ? `TwitterAPI.io 返回 HTTP ${status}` : 'TwitterAPI.io 请求或解析失败'); }
+}
 
 /** Map a tweet's extendedEntities.media to our MediaItem schema. */
 function extractTweetMedia(tweet: Tweet): MediaItem[] | undefined {
@@ -105,7 +110,7 @@ export class TwitterService {
     return parts.join(' ');
   }
 
-  private async makeTwitterRequest(endpoint: string, params: Record<string, string> = {}, configuredKey?: string): Promise<any> {
+  private async makeTwitterRequest(endpoint: string, params: Record<string, string> = {}, configuredKey?: string, network?: { useProxy?: boolean }): Promise<any> {
     const apiKey = configuredKey ?? process.env.TWITTER_API_KEY;
     if (!apiKey || apiKey.includes('your_') || apiKey === 'placeholder') {
       return { tweets: [] };
@@ -116,12 +121,19 @@ export class TwitterService {
     const url = new URL(`${TWITTER_API_BASE}${endpoint}`);
     Object.entries(params).forEach(([key, value]) => url.searchParams.append(key, value));
 
+    if (network) {
+      const response = await requestPublic(url.href, { ...network, headers: { 'X-API-Key': apiKey, Accept: 'application/json' } });
+      if (response.status < 200 || response.status >= 300) throw new TwitterApiError(response.status);
+      try { return JSON.parse(response.body.toString('utf8')); }
+      catch { throw new TwitterApiError(); }
+    }
+
     const response = await fetch(url.toString(), {
       headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
     });
 
     if (!response.ok) {
-      throw new Error(`Twitter API error: ${response.status} ${response.statusText}`);
+      throw new TwitterApiError(response.status);
     }
 
     return response.json();
@@ -132,12 +144,13 @@ export class TwitterService {
     queryType: 'Top' | 'Latest',
     cursor?: string,
     apiKey?: string,
+    network?: { useProxy?: boolean },
   ): Promise<{ tweets: Tweet[]; nextCursor?: string }> {
     const data = (await this.makeTwitterRequest('/twitter/tweet/advanced_search', {
       query,
       queryType,
       ...(cursor ? { cursor } : {}),
-    }, apiKey)) as TwitterSearchResponse;
+    }, apiKey, network)) as TwitterSearchResponse;
 
     return {
       tweets: data.tweets && Array.isArray(data.tweets) ? data.tweets : [],
@@ -145,7 +158,7 @@ export class TwitterService {
     };
   }
 
-  async searchTwitter(query: string, options?: { apiKey?: string; strict?: boolean }): Promise<SearchResult[]> {
+  async searchTwitter(query: string, options?: { apiKey?: string; strict?: boolean; network?: { useProxy?: boolean } }): Promise<SearchResult[]> {
     try {
       const topQuery = this.buildAdvancedQuery(query, 'Top');
       const latestQuery = this.buildAdvancedQuery(query, 'Latest');
@@ -153,10 +166,10 @@ export class TwitterService {
       console.log(`Twitter advanced queries:\n  Top: ${topQuery}\n  Latest: ${latestQuery}`);
 
       const [topPage1, latestPage1] = await Promise.allSettled([
-        this.fetchTweetPage(topQuery, 'Top', undefined, options?.apiKey),
-        this.fetchTweetPage(latestQuery, 'Latest', undefined, options?.apiKey),
+        this.fetchTweetPage(topQuery, 'Top', undefined, options?.apiKey, options?.network),
+        this.fetchTweetPage(latestQuery, 'Latest', undefined, options?.apiKey, options?.network),
       ]);
-      if (options?.strict && topPage1.status === 'rejected' && latestPage1.status === 'rejected') throw new Error('X API 两个查询均失败，请核对密钥、权限与服务状态');
+      if (options?.strict && topPage1.status === 'rejected' && latestPage1.status === 'rejected') throw topPage1.reason;
 
       const allTweets: Tweet[] = [];
       const seenIds = new Set<string>();
@@ -182,7 +195,7 @@ export class TwitterService {
 
       if (topNextCursor) {
         try {
-          const topPage2 = await this.fetchTweetPage(topQuery, 'Top', topNextCursor, options?.apiKey);
+          const topPage2 = await this.fetchTweetPage(topQuery, 'Top', topNextCursor, options?.apiKey, options?.network);
           addTweets(topPage2.tweets);
         } catch (e) {
           console.warn('Twitter Top page 2 failed:', e);
@@ -216,7 +229,7 @@ export class TwitterService {
         },
       }));
     } catch (error) {
-      if (options?.strict) throw new Error('X API 获取失败，请核对已保存的密钥、权限和服务状态');
+      if (options?.strict) throw error instanceof TwitterApiError || error instanceof SourceFetchError ? error : new TwitterApiError();
       console.error('Twitter search error:', error);
       return [];
     }

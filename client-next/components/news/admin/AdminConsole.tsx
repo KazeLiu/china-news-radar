@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Bot, FileText, History, ListFilter, Moon, Radio, Rss, Sun } from 'lucide-react';
+import { ArrowLeft, Bot, FileText, Globe, History, ListFilter, Moon, Radio, Rss, Sun, Network } from 'lucide-react';
 import { useTheme } from '@/providers/ThemeProvider';
 import { adminApi, type AdminSettings } from './admin-api';
 import { AiSettingsForm } from './AiSettingsForm';
@@ -10,6 +10,7 @@ import { AiTestPanel } from './AiTestPanel';
 import { AiQueuePanel } from './AiQueuePanel';
 import { SourceSettingsForm } from './SourceSettingsForm';
 import { NetworkSettingsForm } from './NetworkSettingsForm';
+import { BrowserSettingsForm } from './BrowserSettingsForm';
 import { RulesSettingsForm } from './RulesSettingsForm';
 import { NewsManagementPanel } from './NewsManagementPanel';
 import { LogsPanel } from './LogsPanel';
@@ -17,8 +18,8 @@ import { TelegramAccountPanel } from './TelegramAccountPanel';
 import base from '../news.module.css';
 import styles from './admin.module.css';
 
-type Tab = 'ai' | 'sources' | 'telegram' | 'rules' | 'news' | 'logs';
-const tabs = [{ id: 'ai' as const, label: 'AI 配置', Icon: Bot }, { id: 'sources' as const, label: '来源配置', Icon: Rss }, { id: 'telegram' as const, label: 'Telegram 账号', Icon: Radio }, { id: 'rules' as const, label: '过滤规则', Icon: ListFilter }, { id: 'news' as const, label: '新闻管理', Icon: FileText }, { id: 'logs' as const, label: '日志统计', Icon: History }];
+type Tab = 'ai' | 'sources' | 'network' | 'browser' | 'telegram' | 'rules' | 'news' | 'logs';
+const tabs = [{ id: 'ai' as const, label: 'AI 配置', Icon: Bot }, { id: 'sources' as const, label: '来源配置', Icon: Rss }, { id: 'network' as const, label: '代理设置', Icon: Network }, { id: 'browser' as const, label: '浏览器设置', Icon: Globe }, { id: 'telegram' as const, label: 'Telegram 账号', Icon: Radio }, { id: 'rules' as const, label: '过滤规则', Icon: ListFilter }, { id: 'news' as const, label: '新闻管理', Icon: FileText }, { id: 'logs' as const, label: '日志统计', Icon: History }];
 async function loadAdminSettings(token: string) {
   return adminApi<AdminSettings>('admin/config', token);
 }
@@ -36,7 +37,7 @@ export function AdminConsole() {
     const expired = (event: Event) => { setConfig(null); setError((event as CustomEvent<string>).detail); };
     window.addEventListener('admin:expired', expired);
     const selected = new URLSearchParams(window.location.search).get('tab');
-    queueMicrotask(() => { if (!cancelled && (selected === 'sources' || selected === 'telegram' || selected === 'rules' || selected === 'news' || selected === 'logs')) setTab(selected); });
+    queueMicrotask(() => { if (!cancelled && (selected === 'sources' || selected === 'network' || selected === 'browser' || selected === 'telegram' || selected === 'rules' || selected === 'news' || selected === 'logs')) setTab(selected); });
     adminApi<{ initialized: boolean; authenticated: boolean }>('admin/auth/session', '').then(async session => {
       if (cancelled) return;
       setInitialized(session.initialized);
@@ -62,7 +63,7 @@ export function AdminConsole() {
         await adminApi(path, token, body, 'PATCH'); next = await adminApi<AdminSettings>('admin/config', token);
       } else next = await adminApi<AdminSettings>(path, token, body, method);
       setConfig(next);
-      setNotice(method === 'DELETE' ? '来源已删除，已停止采集，已有新闻和收藏已保留。' : path === 'admin/rules' ? '规则已保存，已有记录已重新筛选，收藏和时间已保留。' : '配置已保存并生效。');
+      if (!next.collectedSourceId && !next.importedSources) setNotice(method === 'DELETE' ? '来源已删除，已停止采集，已有新闻和收藏已保留。' : path === 'admin/rules' ? '规则已保存，已有记录已重新筛选，收藏和时间已保留。' : '配置已保存并生效。');
       return next;
     } catch (e) { setError(e instanceof Error ? e.message : '保存失败'); return false; }
     finally { setBusy(false); }
@@ -77,9 +78,11 @@ export function AdminConsole() {
         <nav className={styles.tabs} aria-label="后台配置导航">{tabs.map(({ id, label, Icon }) => <button key={id} aria-pressed={tab === id} className={tab === id ? styles.activeTab : ''} disabled={busy} onClick={() => { setTab(id); setNotice(''); window.history.replaceState(null, '', `/admin?tab=${id}`); }}><Icon size={18} />{label}</button>)}</nav>
         <div hidden={tab !== 'ai'}><AiSettingsForm initial={config.ai} busy={busy} onSave={save} /><AiQueuePanel /><AiTestPanel token={token} busy={busy} keyConfigured={config.ai.keyConfigured} onUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
         {tab === 'telegram' && <TelegramAccountPanel sources={config.sources} />}
-        <div hidden={tab !== 'sources'}><NetworkSettingsForm initial={config.network} busy={busy} onSave={save} /><SourceSettingsForm sources={config.sources} token={token} busy={busy} onSave={save} aiKeyConfigured={config.ai.keyConfigured} onAiUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
+        <div hidden={tab !== 'sources'}><SourceSettingsForm sources={config.sources} network={config.network} token={token} busy={busy} onSave={save} aiKeyConfigured={config.ai.keyConfigured} onAiUsage={usage => setConfig(current => current ? { ...current, status: { ...current.status, aiDailyUsed: usage.used, aiDailyLimit: usage.limit } } : current)} /></div>
+        {tab === 'network' && <NetworkSettingsForm initial={config.network} busy={busy} onSave={save} />}
+        {tab === 'browser' && (config.browser ? <BrowserSettingsForm initial={config.browser} busy={busy} onSave={save} /> : <p className={styles.error} role="alert">后端尚未加载浏览器设置，请重启后端后刷新页面。</p>)}
         <div hidden={tab !== 'rules'}><RulesSettingsForm initial={config.rules} sources={config.sources} token={token} busy={busy} onSave={save} /></div>
-        {tab === 'news' && <NewsManagementPanel />}
+        {tab === 'news' && <NewsManagementPanel sources={config.sources} />}
         {tab === 'logs' && <LogsPanel sources={config.sources} />}
         <p className={styles.footnote}>配置和会话保存在本站数据库。账号初始化或重置后，旧会话立即失效。</p>
       </>}

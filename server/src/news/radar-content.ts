@@ -7,6 +7,7 @@ export function publicNewsScope(where: Prisma.NewsItemWhereInput = {}): Prisma.N
 }
 export function presentNews<T extends Omit<NewsItem, 'body'>>(item: T) {
   return { ...item, titleZh: item.displayTitle ?? item.aiGeneratedTitle ?? item.titleZh, summaryZh: item.displaySummary ?? item.summaryZh,
+    sourceLinks: JSON.parse(item.sourceLinks),
     images: item.hiddenImages ? '[]' : item.images, originalPublisher: item.originalPublisher || (item.isManual ? '管理员录入' : null),
     url: item.isManual && !item.originalPublisher ? `/articles/${item.id}` : item.originalUrl || item.url };
 }
@@ -20,6 +21,7 @@ export function presentHotspot<T extends { media?: string | null; newsItem?: New
   const { newsItem: news, ...base } = item;
   const media = (() => { if (news?.hiddenImages) return null; try { return item.media ? JSON.parse(item.media) : null; } catch { return null; } })();
   return { ...base, media, ...(news ? { newsItemId: news.id, originalTitle: news.sourceTitlePresent ? news.title : '', sourceTitlePresent: news.sourceTitlePresent, titleGenerated: news.titleGenerated, originalSummary: news.summary, displaySummary: news.displaySummary,
+    sourceLinks: JSON.parse(news.sourceLinks),
     originalPublisher: news.originalPublisher || (news.isManual ? '管理员录入' : null), originalUrl: news.originalUrl, url: news.isManual && !news.originalPublisher ? `/articles/${news.id}` : news.originalUrl || news.url,
     firstSeenAt: news.firstSeenAt, updatedAt: news.updatedAt, saved: news.saved, aiStatus: news.aiStatus, decisionBy: news.decisionBy,
     scoringStatus: item.qualityScore != null ? 'scored' : news.aiStatus === 'done' ? 'unscored' : 'rules',

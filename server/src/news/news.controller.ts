@@ -37,15 +37,23 @@ export class NewsController {
   @Get('admin/config') config(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminConfig(); }
   @Get('admin/network/private') @Header('Cache-Control', 'no-store') networkPrivate(@Req() req: AdminRequest) { requireAdmin(req); return this.news.adminNetworkPrivate(); }
   @Put('admin/network') network(@Body() body: unknown) { return this.news.configureNetwork(body); }
+  @Put('admin/browser') browser(@Body() body: unknown) { return this.news.configureBrowser(body); }
   @Put('admin/ai') ai(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureAi(body); }
   @Post('admin/ai/test') testAi(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testAi(body); }
   @Post('admin/ai/history') history(@Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.startHistory(); }
   @Put('admin/sources') configureSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureSource(body); }
+  @Get('admin/sources/export') @Header('Cache-Control', 'no-store') exportSources(@Req() req: AdminRequest) { requireAdmin(req); return this.news.exportSources(); }
+  @Post('admin/sources/import/preview') @Header('Cache-Control', 'no-store') previewSourceImport(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.previewSourceImport(body); }
+  @Post('admin/sources/import') @Header('Cache-Control', 'no-store') importSources(@Body() body: Parameters<NewsService['importSources']>[0], @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.importSources(body); }
   @Get('admin/sources/:id/private') @Header('Cache-Control', 'no-store') privateSource(@Param('id') id: string, @Req() req: AdminRequest) { requireAdmin(req); return this.news.privateSource(id); }
   @Delete('admin/sources/:id') deleteSource(@Param('id') id: string, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.deleteSource(id); }
   @Post('admin/sources/test') testSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testSource(body); }
-  @Post('admin/sources/rules/assist') assistRules(@Body() body: unknown) { return this.news.generateParserRules(body); }
-  @Post('admin/sources/rules/apply') applyRules(@Body() body: Parameters<NewsService['applyParserRules']>[0]) { return this.news.applyParserRules(body); }
+  @Post('admin/sources/:id/collect') collectSource(@Param('id') id: string, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.collectSource(id); }
+  @Post('admin/sources/page') @Header('Cache-Control', 'no-store') previewPage(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.previewWebPage(body, req.adminSessionId!); }
+  @Post('admin/sources/rules/test') @Header('Cache-Control', 'no-store') testWebRules(@Body() body: Parameters<NewsService['testWebRules']>[0], @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testWebRules(body, req.adminSessionId!); }
+  @Post('admin/sources/rules/assist') assistRules(@Body() body: unknown, @Req() req: AdminRequest) { return this.news.generateParserRules(body, req.adminSessionId!); }
+  @Post('admin/sources/rules/preview') previewParserRules(@Body() body: Parameters<NewsService['previewParserRules']>[0], @Req() req: AdminRequest) { return this.news.previewParserRules(body, req.adminSessionId!); }
+  @Post('admin/sources/rules/apply') applyRules(@Body() body: Parameters<NewsService['applyParserRules']>[0], @Req() req: AdminRequest) { return this.news.applyParserRules(body, req.adminSessionId!); }
   @Post('admin/sources/:id/rules/restore') restoreRules(@Param('id') id: string) { return this.news.restoreParserRules(id); }
   @Put('admin/rules') rules(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureRules(body); }
   @Post('admin/rules/preview') preview(@Body() body: Parameters<NewsService['previewRules']>[0], @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.previewRules(body); }

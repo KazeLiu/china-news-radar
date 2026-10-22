@@ -29,17 +29,27 @@ export interface AiTestResult {
 }
 export interface ApiSourceSettings { method: 'GET' | 'POST'; body: string; auth: { type: 'none' | 'bearer' | 'header'; header: string; value: string; keyConfigured?: boolean }; mapping: { items: string; title: string; summary: string; url: string; publishedAt: string; author: string; images: string; body: string } }
 export interface WebRules { mode: 'metadata' | 'css'; item: string; title: string; summary: string; link: string; date: string; image: string; body: string; author: string; next: string }
-export interface WebSourceSettings { rules: WebRules; previousRules?: WebRules; timeoutSeconds: number; maxItems: number; maxPages: number; concurrency: number }
-export interface SourceSettings { id: string; name: string; englishName: string; kind: string; website: string; feedUrl?: string; feedUrls?: string[]; publisherHosts: string[]; description: string; pollSeconds: number; forceChina?: boolean; state?: Source; target?: string; logo?: string; notes?: string; channel?: string; adapter?: string; api?: ApiSourceSettings; web?: WebSourceSettings; timeZone?: string }
+export interface WebSourceSettings { rules: WebRules; previousRules?: WebRules; loadMoreText?: string; loadMoreContainer?: string; parseInstructions?: string; timeoutSeconds: number; maxItems: number; maxPages: number; concurrency: number }
+export interface SourceSettings { id: string; name: string; englishName: string; kind: string; website: string; feedUrl?: string; feedUrls?: string[]; publisherHosts: string[]; description: string; pollSeconds: number; forceChina?: boolean; useProxy?: boolean; state?: Source; target?: string; logo?: string; notes?: string; channel?: string; adapter?: string; api?: ApiSourceSettings; web?: WebSourceSettings; timeZone?: string; sortOrder?: number; editedAt?: string | null }
+export interface SourceDocument { format: 'china-radar-sources'; version: 1; sources: Record<string, unknown>[] }
+export interface SourceImportPreview { revision: string; document: SourceDocument; added: number; updated: number; sources: { id: string; name: string; kind: string; action: 'add' | 'update'; warnings: string[] }[] }
+export interface WebPagePreview {
+  snapshotId: string; sourceId: string; loadedAt: string; expiresAt: string;
+  url: string; status: number; html: string; screenshot: string; bytes: number; browserMode: string;
+  loadMoreClicks: number; complete: boolean; stopReason: 'loaded' | 'no-more' | 'page-limit';
+}
 export interface SourceTestResult {
   ok: boolean; checkedAt: string; feedUrl?: string; feedTitle?: string; error?: string; rawCount?: number; checkedCount?: number; acceptedCount?: number; duplicateCount?: number;
   attempts: RssAddressStatus[];
   structure?: Record<string, unknown>; code?: string; status?: number;
-  samples?: { title: string; summary: string; url: string | null; publishedAt: string | null; accepted: boolean; reason: string | null; fallbackVisible: boolean; originalPublisher?: string | null; images?: string[] }[];
+  page?: WebPagePreview;
+  samples?: { title: string; summary: string; url: string | null; publishedAt: string | null; publishedAtEstimated?: boolean; accepted: boolean; reason: string | null; fallbackVisible: boolean; originalPublisher?: string | null; images?: string[] }[];
 }
 export interface FilterRule { id: string; enabled: boolean; sourceId: string; field: 'titleExact' | 'titleContains' | 'textContains' | 'urlPrefix' | 'urlExact'; value: string }
-export interface NetworkSettings { mode: 'direct' | 'proxy'; proxyConfigured: boolean; secureDns: boolean }
-export interface AdminSettings { ai: AiSettings; network: NetworkSettings; sources: SourceSettings[]; rules: FilterRule[]; localOnly: boolean; status: { aiMode: string; aiDailyUsed: number; aiDailyLimit: number; aiPending: number; aiFailed: number }; changed?: number; savedSourceId?: string }
+export interface NetworkSettings { mode: 'direct' | 'proxy'; proxyConfigured: boolean; secureDns: boolean; telegramUseProxy: boolean }
+export interface BrowserPreferences { initialWaitSeconds: number; navigationQuietSeconds: number; sessionTimeoutSeconds: number }
+export interface BrowserSettings extends BrowserPreferences { defaults: BrowserPreferences; runtime: { engine: string; version: string; platform: string; mode: string } }
+export interface AdminSettings { ai: AiSettings; network: NetworkSettings; browser: BrowserSettings; sources: SourceSettings[]; rules: FilterRule[]; localOnly: boolean; status: { aiMode: string; aiDailyUsed: number; aiDailyLimit: number; aiPending: number; aiFailed: number }; changed?: number; savedSourceId?: string; collectedSourceId?: string; importedSources?: { added: number; updated: number }; ok?: boolean; error?: string }
 export async function adminApi<T>(path: string, _token: string, body?: unknown, method = 'PUT'): Promise<T> {
   try { return await requestJson<T>(`/api/news/${path}`, { method: body === undefined ? 'GET' : method,
     credentials: 'same-origin', ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
@@ -50,9 +60,9 @@ export async function adminApi<T>(path: string, _token: string, body?: unknown, 
 }
 export type SaveSettings = (path: string, body: unknown, method?: string) => Promise<AdminSettings | false>;
 export interface ManagedNews {
-  id: string; title: string; sourceTitlePresent: boolean; titleGenerated: boolean; aiGeneratedTitle: string | null; summary: string; body: string; titleZh: string | null; summaryZh: string | null;
+  id: string; sourceId: string; title: string; sourceTitlePresent: boolean; titleGenerated: boolean; aiGeneratedTitle: string | null; summary: string; body: string; titleZh: string | null; summaryZh: string | null;
   displayTitle: string | null; displaySummary: string | null; url: string; originalUrl: string | null; originalPublisher: string | null;
-  images: string; publishedAt: string | null; firstSeenAt: string; updatedAt: string; isManual: boolean;
+  images: string; sourceLinks: string; publishedAt: string | null; firstSeenAt: string; updatedAt: string; isManual: boolean;
   publicationStatus: 'draft' | 'published'; hiddenArticle: boolean; hiddenImages: boolean; visible: boolean; aiStatus: string; aiReason: string | null;
   deletedAt: string | null;
 }

@@ -3,10 +3,11 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import Image from 'next/image';
 import { Eye, EyeOff, Image as ImageIcon, ImageOff, RotateCcw, Trash2, X } from 'lucide-react';
-import { adminApi, type ManagedNews } from './admin-api';
+import { adminApi, type ManagedNews, type SourceSettings } from './admin-api';
 import { waitForAiTask, type AiTicket } from '@/services/ai-tasks';
 import { HotspotMedia } from '../../hotspot/HotspotMedia';
 import { AiTitleBadge } from '../../common/AiTitleBadge';
+import { NewsSourceLinks } from '../NewsSourceLinks';
 import styles from './admin.module.css';
 
 const emptyForm = () => ({ title: '', summary: '', body: '', url: '', publisher: '', publishedAt: '', images: '' });
@@ -24,7 +25,7 @@ function NewsDialog({ title, busy, onClose, children, compact = false }: { title
     <div className={styles.dialogBody}>{children}</div>
   </dialog>;
 }
-export function NewsManagementPanel() {
+export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings, 'id' | 'name'>[] }) {
   const [page, setPage] = useState<Page>({ items: [], total: 0, nextOffset: null });
   const [state, setState] = useState('all'); const [query, setQuery] = useState(''); const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<ManagedNews | null>(null); const [form, setForm] = useState<Form>(emptyForm);
@@ -40,6 +41,7 @@ export function NewsManagementPanel() {
   const editable = !selected || (selected.isManual && !selected.deletedAt);
   const images = selected ? JSON.parse(selected.images) as string[] : [];
   const trashView = page.items.length ? !!page.items[0].deletedAt : state === 'deleted';
+  const sourceName = (item: ManagedNews) => item.isManual ? '管理员录入' : sources.find(source => source.id === item.sourceId)?.name || item.sourceId;
   useEffect(() => { if (selectAll.current) selectAll.current.indeterminate = selectedIds.length > 0 && selectedIds.length < page.items.length; }, [selectedIds, page.items.length]);
   async function load(nextOffset = offset): Promise<void> {
     const next = await adminApi<Page>(`admin/items?${new URLSearchParams({ state, q: query, offset: String(nextOffset) })}`, '');
@@ -125,11 +127,12 @@ export function NewsManagementPanel() {
         const thumbnail = (JSON.parse(item.images) as string[])[0];
         return <article key={item.id} className={styles.newsRow}>
           <label className={`${styles.check} ${styles.newsSelect}`}><input type="checkbox" aria-label={`选择新闻：${item.displayTitle ?? item.aiGeneratedTitle ?? item.titleZh ?? item.title}`} checked={selectedIds.includes(item.id)} disabled={busy} onChange={e => setSelectedIds(ids => e.target.checked ? [...ids, item.id] : ids.filter(id => id !== item.id))} /></label>
-          <button type="button" className={styles.newsOpen} disabled={busy} aria-haspopup="dialog" onClick={() => openEditor(item)}>
+          <div className={styles.newsRowContent}><button type="button" className={styles.newsOpen} disabled={busy} aria-haspopup="dialog" onClick={() => openEditor(item)}>
             <span className={styles.newsThumbnail} aria-hidden="true">{thumbnail && <Image key={thumbnail} src={thumbnail} alt="" unoptimized width={120} height={80} loading="lazy" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} />}</span>
             <span className={styles.newsCopy}><strong>{item.displayTitle ?? item.aiGeneratedTitle ?? item.titleZh ?? item.title}<AiTitleBadge generated={item.titleGenerated} /></strong><span>{item.deletedAt ? '回收站' : item.publicationStatus === 'draft' ? '草稿' : '已发布'} · {item.isManual ? '手动录入' : '自动采集'}</span>
+              <small>来源：{sourceName(item)}</small>
               <small>{beijing(item.firstSeenAt)}</small>{item.deletedAt && <small>60 天保留至：{beijing(new Date(item.deletedAt).getTime() + 60 * 86400000)}</small>}</span>
-          </button>
+          </button><div className={styles.newsSourceLinks}><NewsSourceLinks links={JSON.parse(item.sourceLinks)} /></div></div>
           <div className={styles.visibilityActions}>
             {item.deletedAt ? <button type="button" disabled={busy} onClick={() => confirmBatch('restore', [item])}><RotateCcw size={18} />恢复</button> : <>
               <button type="button" className={`${styles.visibilityToggle} ${item.hiddenArticle ? styles.visibilityHidden : ''}`} disabled={busy} aria-pressed={item.hiddenArticle} aria-haspopup="dialog" aria-label={item.hiddenArticle ? '恢复文章' : '隐藏文章'} title={item.hiddenArticle ? '文章已隐藏，点击恢复' : '文章显示中，点击隐藏'} onClick={() => confirmBatch(item.hiddenArticle ? 'showArticle' : 'hideArticle', [item])}>{item.hiddenArticle ? <EyeOff size={18} /> : <Eye size={18} />}文章</button>
@@ -143,6 +146,7 @@ export function NewsManagementPanel() {
     </>}
     {editorOpen && <NewsDialog title={selected ? selected.deletedAt ? '已删除新闻（只读）' : selected.isManual ? '编辑手动新闻' : '采集原文与展示预览' : '新增手动新闻'} busy={busy} onClose={closeEditor}>
     {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
+    {selected && <><p>采集来源：{sourceName(selected)}</p><NewsSourceLinks links={JSON.parse(selected.sourceLinks)} /></>}
     {!selected && <form className={styles.fields} onSubmit={e => { e.preventDefault(); void action(async () => {
       const result = await adminApi<{ item: ManagedNews; reused: boolean }>('admin/items/import', '', { url: importUrl }, 'POST');
       choose(result.item); setNotice(result.reused ? '已打开同 URL 的原记录，未重复录入。' : '网页内容已保存为草稿，没有调用 AI。');
@@ -155,7 +159,7 @@ export function NewsManagementPanel() {
     </form>
     {selected && <section className={styles.testResult}><h3>展示预览与操作</h3>
       <p>{selected.deletedAt ? '回收站，仅管理员可见' : selected.publicationStatus === 'draft' ? '草稿，仅管理员可见' : selected.hiddenArticle ? '文章已隐藏' : selected.visible ? '符合展示规则' : '未通过内容筛选'} · AI：{selected.aiStatus}</p>{selected.aiReason && <p>{selected.aiReason}</p>}
-      <div className={styles.previewArticle}><h4>{display.title}<AiTitleBadge generated={selected.titleGenerated} /></h4>{!selected.sourceTitlePresent && <small>来源没有原始标题；采集标题为正文截取的临时兜底，完整正文仍单独保存。</small>}<p>{display.summary}</p><small>出处：{selected.originalPublisher || '管理员录入'} · {selected.hiddenImages ? '全部图片已隐藏' : `图片 ${images.length} 张`}</small>
+      <div className={styles.previewArticle}><h4>{display.title}<AiTitleBadge generated={selected.titleGenerated} /></h4>{!selected.sourceTitlePresent && <small>来源没有原始标题；采集标题为正文截取的临时兜底，完整正文仍单独保存。</small>}<p>{display.summary}</p><small>出处：{selected.originalPublisher || (selected.isManual ? '管理员录入' : '未识别发布者')} · {selected.hiddenImages ? '全部图片已隐藏' : `图片 ${images.length} 张`}</small>
         {!selected.hiddenImages && <HotspotMedia media={images.map(url => ({ type: 'photo', url }))} />}
         <details><summary>查看保存的完整正文</summary><p>{selected.body || '未取得正文'}</p></details></div>
       {selected.isManual && !selected.deletedAt && <><div className={styles.fields}><label>展示标题<input maxLength={1200} value={display.title} disabled={busy || dirty} onChange={e => setDisplay({ ...display, title: e.target.value })} /></label><label>展示摘要<textarea maxLength={8000} value={display.summary} disabled={busy || dirty} rows={4} onChange={e => setDisplay({ ...display, summary: e.target.value })} /></label></div><div className={styles.actions}>

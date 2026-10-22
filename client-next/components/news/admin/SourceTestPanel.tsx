@@ -2,16 +2,30 @@ import type { SourceTestResult } from './admin-api';
 import styles from './admin.module.css';
 
 export function SourceTestPanel({ result, onAnalyze }: { result: SourceTestResult; onAnalyze?: (sample: { title: string; summary: string }) => void }) {
+  if (result.page) {
+    const page = result.page;
+    return <div className={styles.testResult}>
+      <h3 role="status">{page.complete ? '网页加载完成' : '已加载页面，达到页数上限'}</h3>
+      <p>HTTP {page.status} · Camoufox {page.browserMode} · HTML {(page.bytes / 1024).toFixed(1)} KiB · 点击加载更多 {page.loadMoreClicks} 次</p>
+      <p>页面快照已保存，后续规则生成、文章预览和保存共用这份 HTML，有效期 30 分钟。</p>
+      {!page.complete && <p className={styles.error}>加载更多按钮仍存在，当前返回的是已展开部分，尚未完整展开。</p>}
+      <a href={page.url} target="_blank" rel="noopener noreferrer">{page.url}</a>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={page.screenshot} alt="Camoufox 加载完成后的网页画面" style={{ display: 'block', maxWidth: '100%', height: 'auto', marginTop: 16 }} />
+      <details className={styles.details}><summary>查看渲染后的完整 HTML</summary><label>HTML 源码<textarea readOnly rows={12} value={page.html} /></label></details>
+    </div>;
+  }
   const merged = result.duplicateCount !== undefined;
   return <div className={styles.testResult} role="status">
     <h3>{result.ok ? result.rawCount === 0 ? '连接成功，当前没有内容' : result.acceptedCount === 0 ? '连接成功，样例未通过基础检查' : '连接与解析成功' : '来源预览未完成'}</h3>
     <p>{result.ok ? `${result.feedTitle || '来源'}：返回 ${result.rawCount} 条，检查 ${result.checkedCount} 条，${merged ? '合并去重后 ' : '其中 '}${result.acceptedCount} 条通过来源、时间和排除规则${result.duplicateCount ? `，折叠 ${result.duplicateCount} 条重复记录` : ''}。` : `${result.status ? `HTTP ${result.status} · ` : ''}${result.code ? `${result.code}：` : ''}${result.error}`}</p>
     {result.ok && result.attempts.some(attempt => attempt.error) && <p className={styles.error}>部分 RSS 地址未成功，以下样例来自成功地址；失败或退避不会丢弃其他地址的结果。</p>}
+    {result.structure?.limited === true && <p role="status">解析规则匹配了 {String(result.structure.matched)} 条，当前“单次条数上限”为 {String(result.structure.maxItems)}。调高上限后重新预览即可，不需要重新加载网页或再次调用 AI。</p>}
     {result.structure && <details className={styles.details} open><summary>解析结构与字段映射</summary><pre>{JSON.stringify(result.structure, null, 2)}</pre></details>}
     <ol className={styles.attempts}>{result.attempts.map((attempt, index) => <li key={attempt.url}>
       <strong>RSS 地址 {index + 1} · {attempt.skipped ? '暂不请求：' : ''}{attempt.error || (attempt.status === 304 ? 'HTTP 304，该地址未变化' : `HTTP ${attempt.status}，获取成功`)}</strong><span>{attempt.url}</span>
     </li>)}</ol>
-    {result.ok && <p>下面展示前 10 条解析样例。测试不保存新闻、不调用 AI；“关键词兜底”仅用于说明未开启 AI 时的展示结果。</p>}
+    {result.ok && <p>下面展示 {result.samples?.length || 0} 条解析样例。预览不保存新闻、不调用 AI；“关键词兜底”仅用于说明未开启 AI 时的展示结果。</p>}
     {result.samples?.map((sample, index) => <article className={styles.sample} key={`${sample.url}-${index}`}>
       <h4>{sample.title || '无标题'}</h4>
       <span className={!sample.accepted ? styles.sampleExcluded : styles.sampleAccepted}>{!sample.accepted ? sample.reason : sample.fallbackVisible ? '通过基础检查 · 关键词兜底会展示' : '通过基础检查 · 关键词兜底不展示'}</span>
@@ -21,7 +35,7 @@ export function SourceTestPanel({ result, onAnalyze }: { result: SourceTestResul
       {sample.originalPublisher === null && <small>出处未识别，不进入公共资讯。</small>}
       {sample.images?.slice(0, 4).map(url => <img key={url} src={url} alt="来源提供的新闻图片预览" loading="lazy" style={{ maxWidth: 200, maxHeight: 140, objectFit: 'contain' }} />)}
       {sample.url && <a href={sample.url} target="_blank" rel="noopener noreferrer">{sample.url}</a>}
-      <small>发布时间：{sample.publishedAt ? new Date(sample.publishedAt).toLocaleString('zh-CN') : '来源未提供有效时间'}</small>
+      <small>发布时间：{sample.publishedAt ? new Date(sample.publishedAt).toLocaleString('zh-CN') : '来源未提供有效时间'}{sample.publishedAtEstimated && '（按采集时间补全）'}</small>
     </article>)}
   </div>;
 }

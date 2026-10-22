@@ -24,8 +24,9 @@ const proxyDns = new Map<string, { expiresAt: number; pending: Promise<Address[]
 let proxyUrl: string | undefined;
 let proxyAgent: HttpsProxyAgent<string> | undefined;
 
-export function sourceProxyAgent(raw: string, allowRsshub = false) {
-  if (allowRsshub && isLocalFeed(raw)) return undefined;
+export function sourceProxyAgent(raw: string, allowRsshub = false, useProxy?: boolean) {
+  // null is an explicit direct connection; undefined retains the shared default.
+  if (useProxy === false || allowRsshub && isLocalFeed(raw)) return null;
   const network = sourceNetwork();
   const configured = network.mode === 'proxy' ? network.proxyUrl : '';
   if (!configured) return undefined;
@@ -65,7 +66,7 @@ function lookupThroughProxy(hostname: string, agent: HttpsProxyAgent<string>): P
   return pending;
 }
 
-export async function resolvePublicTarget(raw: string, allowRsshub = false, agent: http.Agent | undefined = sourceProxyAgent(raw, allowRsshub)) {
+export async function resolvePublicTarget(raw: string, allowRsshub = false, agent: http.Agent | null | undefined = sourceProxyAgent(raw, allowRsshub)) {
   let url: URL;
   try { url = new URL(raw); } catch { throw new SourceFetchError('invalid-target', '采集目标不是有效地址'); }
   const hostname = url.hostname.replace(/^\[|\]$/g, '');
@@ -81,14 +82,14 @@ export async function resolvePublicTarget(raw: string, allowRsshub = false, agen
   return { url, address: (addresses.find(entry => entry.family === 4) || addresses[0]).address };
 }
 export interface PublicResponse { status: number; headers: http.IncomingHttpHeaders; body: Buffer; url: string }
-interface RequestOptions { method?: string; headers?: Record<string, string>; body?: string | Buffer; timeoutMs?: number; maxBytes?: number; allowRsshub?: boolean; signal?: AbortSignal; followRedirects?: boolean; agent?: http.Agent }
+interface RequestOptions { method?: string; headers?: Record<string, string>; body?: string | Buffer; timeoutMs?: number; maxBytes?: number; allowRsshub?: boolean; signal?: AbortSignal; followRedirects?: boolean; agent?: http.Agent | null; useProxy?: boolean }
 function requestResolved(url: URL, address: string, options: RequestOptions): Promise<PublicResponse> {
   const maxBytes = options.maxBytes ?? 3_000_000;
   return new Promise<PublicResponse>((resolve, reject) => {
     const transport = url.protocol === 'https:' ? https : http;
     // Resolve and validate once, then connect to that address to prevent DNS rebinding.
     const settings: https.RequestOptions = { protocol: url.protocol, hostname: address, servername: url.hostname, port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search,
-      method: options.method || 'GET', signal: options.signal, agent: options.agent, timeout: options.timeoutMs ?? 15000,
+      method: options.method || 'GET', signal: options.signal, agent: options.agent ?? undefined, timeout: options.timeoutMs ?? 15000,
       headers: { 'User-Agent': 'ChinaRadar/1.0', ...options.headers, Host: url.host, 'Accept-Encoding': 'identity' } };
     const request = transport.request(settings, response => {
       const chunks: Buffer[] = []; let length = 0;
@@ -117,7 +118,7 @@ function requestResolved(url: URL, address: string, options: RequestOptions): Pr
   });
 }
 export async function requestPublic(raw: string, options: RequestOptions = {}, redirects = 0, initialOrigin?: string): Promise<PublicResponse> {
-  const agent = options.allowRsshub && isLocalFeed(raw) ? undefined : options.agent ?? sourceProxyAgent(raw, options.allowRsshub);
+  const agent = options.allowRsshub && isLocalFeed(raw) ? null : options.agent !== undefined ? options.agent : sourceProxyAgent(raw, options.allowRsshub, options.useProxy);
   const { url, address } = await resolvePublicTarget(raw, options.allowRsshub, agent);
   const origin = initialOrigin || url.origin;
   const result = await requestResolved(url, address, { ...options, agent, headers: url.origin === origin ? options.headers : {} });
