@@ -68,8 +68,12 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     this.runtime.register('news', (payload, task) => this.analyzeBatch(payload, task), async (_payload, task) => {
       const unfinished = await this.prisma.newsAnalysis.findMany({ where: { queuedTaskId: task.id, status: { not: 'done' } } });
       for (const cache of unfinished) {
-        const updated = await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'failed', queuedTaskId: null, error: task.errorJson } });
-        await this.prisma.$transaction(tx => this.applyCache(tx, updated));
+        const updated = await this.prisma.$transaction(async tx => {
+          const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: task.id, status: { not: 'done' } }, data: { status: 'failed', queuedTaskId: null, error: task.errorJson } });
+          if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: cache.key } }));
+          return changed.count;
+        });
+        if (!updated) continue;
         await this.logAnalysisKey(cache.key, 'failed', 'news/fallback', undefined, task.id);
         await this.announceAnalysis(cache.key);
       }
@@ -213,7 +217,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   async analyzeManual(id: string) {
     const item = await this.requireItem(id);
-    if (!item.isManual || item.hiddenArticle) throw new BadRequestException('只能分析未隐藏的手动新闻');
+    if (item.hiddenArticle) throw new BadRequestException('新闻已隐藏，请先恢复文章显示再分析');
     if (matchingExclusions(item, this.config.rules, item.sourceId).length) throw new BadRequestException('新闻命中排除规则，请先调整内容或规则');
     const cache = await this.findCached(item);
     if (cache?.status === 'done') {
@@ -231,14 +235,22 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       const changed = await tx.newsItem.updateMany({ where: { id, deletedAt: null, updatedAt: item.updatedAt }, data: { analysisKey: key, aiStatus: 'pending', updatedAt: item.updatedAt } });
       if (!changed.count) throw new ConflictException('分析素材已修改，请重新提交');
       await tx.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: true }, update: {} });
-      await tx.newsAnalysis.updateMany({ where: { key, status: { not: 'done' }, queuedTaskId: null }, data: { status: 'pending', attempts: 0, error: null } });
+      const queued = await tx.newsAnalysis.findUniqueOrThrow({ where: { key } });
+      if (queued.queuedTaskId) {
+        const task = await tx.aiTask.findUnique({ where: { id: queued.queuedTaskId } });
+        if (!task || ['done', 'failed'].includes(task.status)) await tx.newsAnalysis.updateMany({ where: { key, queuedTaskId: queued.queuedTaskId, status: { not: 'done' } }, data: { queuedTaskId: null } });
+      }
+      await tx.newsAnalysis.updateMany({ where: { key, status: { not: 'done' }, queuedTaskId: null }, data: { status: 'pending', attempts: 0, error: null, retryAt: null, leaseUntil: null } });
       const prepared = await tx.newsAnalysis.findUniqueOrThrow({ where: { key } });
       if (prepared.status === 'done') await this.applyCache(tx, prepared);
       return prepared;
     });
     if (prepared.status === 'done') return { cached: true };
     if (prepared.queuedTaskId) return { taskId: prepared.queuedTaskId, status: 'queued' };
-    return this.queueBatch([key]);
+    const ticket = await this.queueBatch([key]);
+    const linked = await this.prisma.newsAnalysis.findUniqueOrThrow({ where: { key } });
+    if (linked.status === 'done') return { cached: true };
+    return linked.queuedTaskId ? { taskId: linked.queuedTaskId, status: 'queued' } : ticket;
   }
   async publishManual(id: string) {
     const item = await this.requireItem(id);
@@ -447,10 +459,12 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   private async prepareAnalysis() {
     if (this.stopped || this.configBusy) return;
-    const abandoned = await this.prisma.$queryRaw<Array<{ key: string }>>`SELECT a.key FROM NewsAnalysis a JOIN AiTask t ON a.queuedTaskId = t.id WHERE t.status IN ('failed', 'done') AND a.status != 'done'`;
+    const abandoned = await this.prisma.$queryRaw<Array<{ key: string; queuedTaskId: string }>>`SELECT a.key, a.queuedTaskId FROM NewsAnalysis a JOIN AiTask t ON a.queuedTaskId = t.id WHERE t.status IN ('failed', 'done') AND a.status != 'done'`;
     for (const cache of abandoned) {
-      const updated = await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'failed', queuedTaskId: null, error: '任务失败，已有原文保留，请在任务列表查看安全原因' } });
-      await this.prisma.$transaction(tx => this.applyCache(tx, updated));
+      await this.prisma.$transaction(async tx => {
+        const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: cache.queuedTaskId, status: { not: 'done' } }, data: { status: 'failed', queuedTaskId: null, error: '任务失败，已有原文保留，请在任务列表查看安全原因' } });
+        if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: cache.key } }));
+      });
     }
     await this.showOverdueFallbacks();
     if (this.config.ai.autoAnalyzeNew) await this.enqueueAnalysis();
@@ -532,14 +546,14 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (keys.length) await this.queueBatch(keys);
   }
   private analysisEligible(item: NewsItem) {
-    return !item.deletedAt && !item.hiddenArticle && (item.isManual || !!item.originalPublisher) && !matchingExclusions(item, this.config.rules, item.sourceId).length;
+    return !item.deletedAt && !item.hiddenArticle && !matchingExclusions(item, this.config.rules, item.sourceId).length;
   }
   async startHistory() {
     if (!this.aiEnabled) throw new BadRequestException('请先保存并启用 AI 配置');
     const records = await this.prisma.newsItem.findMany({ where: { deletedAt: null, isManual: false, hiddenArticle: false, aiStatus: { notIn: ['done', 'excluded'] } } });
     let prepared = 0;
     for (const item of records) {
-      if (!item.originalPublisher || matchingExclusions(item, this.config.rules, item.sourceId).length) continue;
+      if (matchingExclusions(item, this.config.rules, item.sourceId).length) continue;
       const cache = await this.findCached(item);
       if (cache?.status === 'done' || cache?.queuedTaskId) continue;
       const key = analysisKey(item);
@@ -617,6 +631,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (!this.config.ai.apiKey) throw new BadRequestException('请先保存 API Key，再测试调用');
     return this.runtime.enqueue('test', input, { maxAttempts: 1 });
   }
+  aiModels(body: Parameters<AiRuntimeService['models']>[0]) { return this.runtime.models(body); }
   private async runAiTest(input: ReturnType<typeof analysisInput>) {
     const checkedAt = new Date(); const start = Date.now();
     try {
@@ -631,7 +646,6 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     } catch (problem) {
       const day = new Date().toISOString().slice(0, 10);
       const usage = readAiUsage((await this.prisma.setting.findUnique({ where: { key: `news-ai-usage-${day}` } }))?.value);
-  aiModels(body: Parameters<AiRuntimeService['models']>[0]) { return this.runtime.models(body); }
       const response = problem instanceof BadRequestException ? problem.getResponse() : null;
       const error = response ? { code: 'configuration', message: typeof response === 'string' ? response : (response as { message: string }).message } : aiTestError(problem, this.config.ai.apiKey);
       return { checkedAt, model: this.config.ai.model, input, elapsedMs: Date.now() - start, usage: { used: usage, limit: this.dailyLimit }, ok: false, error };

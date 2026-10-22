@@ -58,6 +58,7 @@ export function AiQueuePanel() {
       <button type="button" disabled={loading} onClick={refresh}>{loading ? '读取中…' : '刷新记录'}</button></div>
     {queue && <>
       <p>{queue.paused ? '队列已暂停' : '队列运行中'} · 排队 {queue.queued} · 处理中 {queue.running} · 历史积压 {queue.historical}</p>
+      <p>单个任务最多三次实际请求；重试耗尽后保留失败状态，不会重新自动入队。可在“新闻管理”单篇重试，或明确启动历史未完成新闻。</p>
       <div className={styles.actions}>
         <button type="button" disabled={busy} className={styles.secondary} onClick={() => void action('admin/ai/queue', { paused: !queue.paused }, 'PUT')}>{queue.paused ? '继续队列' : '暂停队列'}</button>
         <button type="button" disabled={busy} className={styles.secondary} onClick={() => setConfirmHistory(true)}>处理历史未完成新闻</button>
