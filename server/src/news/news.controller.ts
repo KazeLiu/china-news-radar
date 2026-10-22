@@ -40,6 +40,7 @@ export class NewsController {
   @Put('admin/browser') browser(@Body() body: unknown) { return this.news.configureBrowser(body); }
   @Put('admin/ai') ai(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureAi(body); }
   @Post('admin/ai/test') testAi(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.testAi(body); }
+  @Post('admin/ai/models') @Header('Cache-Control', 'no-store') aiModels(@Body() body: Parameters<NewsService['aiModels']>[0], @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.aiModels(body); }
   @Post('admin/ai/history') history(@Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.startHistory(); }
   @Put('admin/sources') configureSource(@Body() body: unknown, @Req() req: AdminRequest) { sameOrigin(req); requireAdmin(req); return this.news.configureSource(body); }
   @Get('admin/sources/export') @Header('Cache-Control', 'no-store') exportSources(@Req() req: AdminRequest) { requireAdmin(req); return this.news.exportSources(); }

@@ -631,6 +631,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     } catch (problem) {
       const day = new Date().toISOString().slice(0, 10);
       const usage = readAiUsage((await this.prisma.setting.findUnique({ where: { key: `news-ai-usage-${day}` } }))?.value);
+  aiModels(body: Parameters<AiRuntimeService['models']>[0]) { return this.runtime.models(body); }
       const response = problem instanceof BadRequestException ? problem.getResponse() : null;
       const error = response ? { code: 'configuration', message: typeof response === 'string' ? response : (response as { message: string }).message } : aiTestError(problem, this.config.ai.apiKey);
       return { checkedAt, model: this.config.ai.model, input, elapsedMs: Date.now() - start, usage: { used: usage, limit: this.dailyLimit }, ok: false, error };

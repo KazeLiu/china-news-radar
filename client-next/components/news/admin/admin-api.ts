@@ -10,8 +10,11 @@ export interface AiRequestSummary {
 export interface AiRequestPage { items: AiRequestSummary[]; total: number; page: number; pageSize: number; totalPages: number; retentionDays: number }
 export interface AiRequestDetail extends AiRequestSummary {
   sourceIds: string[];
-  input: { model: string; temperature: number; max_tokens: number; response_format?: { type: string }; messages: { role: string; content: string }[] } | null;
-  output: { choices?: { message?: { content?: string | null }; finish_reason?: string }[]; [key: string]: unknown } | null;
+  input: { model: string; max_output_tokens?: number; store?: boolean; stream?: boolean; text?: { format?: { type: string } }; input?: { role: string; content: string }[];
+    temperature?: number; max_tokens?: number; response_format?: { type: string }; messages?: { role: string; content: string }[] } | null;
+  output: { status?: string; incomplete_details?: { reason?: string } | null; output_text?: string;
+    output?: { type: string; role?: string; status?: string; content?: { type: string; text?: string; refusal?: string }[] }[];
+    choices?: { message?: { content?: string | null }; finish_reason?: string }[]; [key: string]: unknown } | null;
   error: { code: string; message: string; detail?: string; status?: number; requestId?: string } | null;
 }
 export interface AiTestResult {
