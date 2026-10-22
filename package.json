@@ -8,6 +8,8 @@
     }
   },
   "scripts": {
-    "doctor": "npx react-doctor@latest"
+    "doctor": "npx react-doctor@latest",
+    "telegram:login": "pnpm --filter radar-telegram-collector login",
+    "telegram:start": "pnpm --filter radar-telegram-collector start"
   }
 }

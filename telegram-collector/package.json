@@ -1,0 +1,8 @@
+{
+  "name": "radar-telegram-collector",
+  "version": "1.0.0",
+  "private": true,
+  "engines": { "node": ">=22.15" },
+  "scripts": { "login": "node login.cjs", "start": "node main.cjs" },
+  "dependencies": { "teleproto": "1.230.0" }
+}

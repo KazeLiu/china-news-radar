@@ -14,7 +14,9 @@ import { NewsAuditInterceptor } from './news/news-audit.interceptor';
 import { NewsTrashService } from './news/news-trash.service';
 import { TelegramAccountController } from './news/telegram-account.controller';
 import { TelegramAccountService } from './news/telegram-account.service';
+import { TelegramLocalService } from './news/telegram-local.service';
+import { TelegramControlService } from './news/telegram-control.service';
 
 @Global()
-@Module({ imports: [PrismaModule, GatewayModule, ServicesModule], controllers: [NewsController, SourceLogoController, TelegramAccountController], providers: [NewsService, NewsBridgeService, NewsEditorialService, EmailService, SourceAdapterService, WebCrawlerService, NewsAuditInterceptor, NewsTrashService, TelegramAccountService], exports: [NewsService, NewsBridgeService, NewsEditorialService] })
+@Module({ imports: [PrismaModule, GatewayModule, ServicesModule], controllers: [NewsController, SourceLogoController, TelegramAccountController], providers: [NewsService, NewsBridgeService, NewsEditorialService, EmailService, SourceAdapterService, WebCrawlerService, NewsAuditInterceptor, NewsTrashService, TelegramAccountService, TelegramLocalService, TelegramControlService], exports: [NewsService, NewsBridgeService, NewsEditorialService] })
 export class RadarModule {}

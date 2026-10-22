@@ -5,6 +5,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY rsshub-service/package.json ./rsshub-service/package.json
 COPY server/package.json ./server/package.json
 COPY client-next/package.json ./client-next/package.json
+COPY telegram-collector/package.json ./telegram-collector/package.json
 ENV PUPPETEER_SKIP_DOWNLOAD=true PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN pnpm install --filter radar-rsshub --prod --frozen-lockfile
 COPY rsshub-service ./rsshub-service

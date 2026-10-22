@@ -11,15 +11,21 @@ def message_payload(channel, message):
     text = message.raw_text or ''
     if not text or len(text) > 20000:
         return None
-    links = re.findall(r'https?://[^\s<>]+', text)
+    links = []
     utf16 = text.encode('utf-16-le')
     for entity in message.entities or []:
         if getattr(entity, 'url', None):
-            links.append(entity.url)
+            links.append((entity.offset, entity.url))
         elif type(entity).__name__ == 'MessageEntityUrl':
-            links.append(utf16[entity.offset * 2:(entity.offset + entity.length) * 2].decode('utf-16-le', errors='replace'))
+            links.append((entity.offset, utf16[entity.offset * 2:(entity.offset + entity.length) * 2].decode('utf-16-le', errors='replace')))
+    for match in re.finditer(r'https?://[^\s<>]+', text):
+        links.append((len(text[:match.start()].encode('utf-16-le')) // 2, match.group()))
+    urls = [url for _, url in sorted(links, key=lambda item: item[0])]
+    webpage = getattr(getattr(message, 'media', None), 'webpage', None)
+    if getattr(webpage, 'url', None):
+        urls.append(webpage.url)
     return {'channel': channel, 'messageId': message.id, 'text': text,
-            'publishedAt': message.date.isoformat(), 'links': list(dict.fromkeys(links))[:30]}
+            'publishedAt': message.date.isoformat(), 'links': list(dict.fromkeys(urls))[:30]}
 
 
 class Outbox:

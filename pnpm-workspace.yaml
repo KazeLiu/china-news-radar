@@ -3,6 +3,7 @@ packages:
   - 'server'
   - 'client-next'
   - 'rsshub-service'
+  - 'telegram-collector'
 
 # Dependencies allowed to run install/postinstall build scripts
 allowBuilds:

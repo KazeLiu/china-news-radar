@@ -1,0 +1,12 @@
+.panel{margin-top:28px}.panel p{font-size:14px;line-height:1.8}
+.nextStep{padding:18px 20px;border-left:3px solid var(--blue);background:var(--blueBg);border-radius:6px;margin:12px 0 24px}
+.nextStep>strong{display:block;font-size:17px;line-height:1.6}.nextStep>p{margin:8px 0 0;color:var(--ink)}
+.steps{list-style:none;counter-reset:telegram-step;margin:0;padding:0}.steps>li{counter-increment:telegram-step;padding:24px 0;border-top:1px solid var(--line)}
+.stepHeading{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.stepHeading h3{margin:0;font-size:16px;line-height:1.7}
+.steps>li>.stepHeading h3::before{content:counter(telegram-step) ". ";color:var(--blue)}.stepHeading>span{font-size:14px;color:var(--muted)}
+.stepHeading a{color:var(--blue);min-height:44px;display:inline-flex;align-items:center}.actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.steps form{display:grid;gap:12px;margin:16px 0}.steps form>button{justify-self:start}.steps form p{margin:0}
+.panel .failure{color:var(--red);overflow-wrap:anywhere}.failure small{display:block;margin-top:6px}.panel .feedback{color:var(--ink);overflow-wrap:anywhere}
+.panel .timestamp{font-size:13px;color:var(--muted)}.channels{border-top:1px solid var(--line);padding-top:20px}.channels ul{list-style:none;margin:0;padding:0}
+.channels li{display:flex;flex-direction:column;gap:8px;padding:16px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere;line-height:1.6}.channels li>span,.channels li>small{color:var(--muted);font-size:14px}
+@media(max-width:760px){.panel p,.stepHeading>span{font-size:15px}.nextStep{padding:16px}.nextStep>strong{font-size:16px}.actions>button{flex:1}}

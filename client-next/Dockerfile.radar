@@ -5,6 +5,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY server/package.json ./server/package.json
 COPY client-next/package.json ./client-next/package.json
 COPY rsshub-service/package.json ./rsshub-service/package.json
+COPY telegram-collector/package.json ./telegram-collector/package.json
 RUN pnpm install --filter client-next --frozen-lockfile
 COPY client-next ./client-next
 ARG INTERNAL_API_URL=http://server:3001
