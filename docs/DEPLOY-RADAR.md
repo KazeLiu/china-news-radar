@@ -84,7 +84,7 @@ OPENAI_MODEL=gpt-4o-mini
 AI_DAILY_LIMIT=100
 ```
 
-`OPENAI_BASE_URL` 为空时使用 OpenAI API，可填可信的 OpenAI-compatible endpoint；模型名需与服务匹配。RSS 与启用的 Telegram 新闻仅发送标题与有限摘要，不发送账号凭据、session 或私聊。每日调用次数按 UTC 存入 SQLite，包含失败尝试，重启不会重置；这是次数限制，不是金额上限。没有密钥时采用规则展示原文。
+`OPENAI_BASE_URL` 为空时使用 OpenAI API，可填可信的 Responses 服务前缀，例如 `https://example.com/v1`，不要包含 `/responses`。新闻、日报、档案、解析辅助和后台测试统一调用 `POST /responses`，不回退 Chat Completions。后台可用当前地址与 Key 刷新 `GET /models` 并选择模型，未提供目录时也可手动填模型 ID。RSS 与启用的 Telegram 新闻仅发送标题与有限摘要，不发送账号凭据、session 或私聊。每日调用次数按 UTC 保存，包含失败尝试，重启不重置；这是次数限制，不是金额上限。没有密钥时采用规则展示原文。
 
 重新创建服务：`docker compose -f compose.arm64.yml up -d server`。启用后处理新内容和近 7 天候选；已完成缓存不会因模型切换或刷新重做。慢队列超过 15 秒时先按规则暂显，后续以 AI 结果更新。JSON 契约、有限重试和费用控制见 [AI 处理说明](AI-ANALYSIS.md)。
 
