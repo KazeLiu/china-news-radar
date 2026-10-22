@@ -2,6 +2,18 @@ import type { Source, RssAddressStatus } from '../NewsSourceRow';
 import { requestJson } from '@/services/http';
 
 export interface AiSettings { enabled: boolean; baseUrl: string; model: string; dailyLimit: number; instructions: string; keyConfigured: boolean; protocolPrompt: string; intervalMs: number; autoAnalyzeNew: boolean; newsOutputTokens: number }
+export interface AiRequestSummary {
+  id: string; taskId: string; kind: string; model: string; attempt: number; status: string;
+  startedAt: string; finishedAt: string | null; elapsedMs: number | null; requestId: string | null;
+  analyzedCount: number; translatedCount: number;
+}
+export interface AiRequestPage { items: AiRequestSummary[]; total: number; page: number; pageSize: number; totalPages: number; retentionDays: number }
+export interface AiRequestDetail extends AiRequestSummary {
+  sourceIds: string[];
+  input: { model: string; temperature: number; max_tokens: number; response_format?: { type: string }; messages: { role: string; content: string }[] } | null;
+  output: { choices?: { message?: { content?: string | null }; finish_reason?: string }[]; [key: string]: unknown } | null;
+  error: { code: string; message: string; detail?: string; status?: number; requestId?: string } | null;
+}
 export interface AiTestResult {
   ok: boolean; checkedAt: string; model: string; elapsedMs: number;
   input: { title: string; summary: string; truncated: boolean }; usage: { used: number; limit: number };

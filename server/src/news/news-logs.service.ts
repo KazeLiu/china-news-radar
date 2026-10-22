@@ -18,7 +18,7 @@ export class NewsLogsService implements OnModuleInit {
     const before = new Date(Date.now() - 7 * 86400000);
     await this.prisma.$transaction(async tx => {
       await tx.newsOperationLog.deleteMany({ where: { startedAt: { lt: before } } });
-      await tx.aiRequest.deleteMany({ where: { startedAt: { lt: before }, task: { is: { status: { in: ['done', 'failed'] } } } } });
+      await tx.aiRequest.deleteMany({ where: { startedAt: { lt: before }, status: { not: 'running' } } });
       const linked = await tx.newsAnalysis.findMany({ where: { queuedTaskId: { not: null } }, select: { queuedTaskId: true } });
       await tx.aiTask.deleteMany({ where: { status: { in: ['done', 'failed'] }, finishedAt: { lt: before }, requests: { none: {} },
         id: { notIn: linked.map(cache => cache.queuedTaskId!) }, OR: [{ status: 'done' }, { failureHandled: true }, { kind: { notIn: ['news', 'profile'] } }] } });

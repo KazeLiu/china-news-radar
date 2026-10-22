@@ -11,6 +11,8 @@ class NewsLogsController {
 class AiTasksController {
   constructor(private readonly ai: AiRuntimeService) {}
   @Get('tasks/:id') task(@Param('id') id: string) { return this.ai.task(id); }
+  @Get('requests') requests(@Query() query: { page?: string }) { return this.ai.requests(query); }
+  @Get('requests/:id') request(@Param('id') id: string) { return this.ai.request(id); }
   @Get('queue') queue() { return this.ai.queueStatus(); }
   @Put('queue') pause(@Body() body: { paused?: unknown }) { return this.ai.pause(body.paused); }
 }

@@ -312,6 +312,8 @@ model AiRequest {
   requestId String?
   errorJson String?
   analyzedCount Int @default(0)
+  inputJson String?
+  outputJson String?
   translatedCount Int @default(0)
   sourceIds String @default("[]")
   @@index([startedAt])
