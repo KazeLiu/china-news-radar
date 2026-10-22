@@ -15,7 +15,7 @@ if (role === 'server') {
   Object.assign(process.env, {
     DATABASE_URL: `file:${database.replaceAll('\\', '/')}`,
     PORT: '3421', HOST: '127.0.0.1', CLIENT_URL: 'http://localhost:3420', PUBLIC_SITE_URL: 'http://localhost:3420',
-    RADAR_MODE: 'news', COLLECTOR_ENABLED: 'false', AI_ANALYSIS_ENABLED: 'false', SMTP_HOST: '', NOTIFY_EMAIL: '',
+    RADAR_MODE: 'news', COLLECTOR_ENABLED: 'true', AI_ANALYSIS_ENABLED: 'false', SMTP_HOST: '', NOTIFY_EMAIL: '',
     RADAR_LOCAL_PREVIEW: 'true',
   });
   if (!process.env.COLLECTOR_TOKEN) process.env.COLLECTOR_TOKEN = require('node:crypto').randomBytes(32).toString('hex');
