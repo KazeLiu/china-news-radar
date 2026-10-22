@@ -23,6 +23,16 @@ node scripts/init-db.cjs
 
 后台账号通过交互命令初始化或重置，见 [管理员登录](ADMIN-ACCESS.md)。不要在命令参数中放密码。本轮没有为新空库创建默认账号。
 
+## Windows 双击启动或重启
+
+依赖和数据库准备好后，双击项目根目录的 `启动预览.cmd`；需要重新加载后端代码时双击 `重启预览.cmd`。后台地址为 `http://localhost:3420/admin`，前端和后端分别使用 3420、3421 端口。关闭启动窗口不会关闭服务，也不依赖 Codex 会话。
+
+启动会复用已运行的本脚本进程；重启只结束 PID、启动时间和命令行均匹配的本项目进程及其子进程。端口被其他程序占用时明确报错，不按端口杀进程。启动失败请查看 `.cache/preview/server.log`、`server.error.log`、`client.log` 和 `client.error.log`；重新启动对应进程时会覆盖其启动日志。
+
+数据库默认读取 `server/.env` 的 `DATABASE_URL`，也可在 Git 忽略的根目录 `preview.local` 写入 `{"databaseUrl":"file:D:/path/to/radar.db"}` 指定本机副本。文件路径相对 `server/prisma` 解析；不自动创建空库、安装依赖或升级数据库。当前电脑的原预览数据已复制到 `server/prisma/preview/radar.db`，不再依赖临时目录；新闻、译文、账号和后台配置一起保留，原副本未删除。换电脑后必须自行转移数据，并重新配置本机路径，不能只拉代码。
+
+此入口不启动定时 RSS 采集或邮件通知，不修改数据库中的 AI 开关和额度；没有已保存配置时默认关闭 AI，管理员已有设置仍有效。Telegram 后台服务隐藏启动并待命，按账号页保存的采集开关和有效 session 恢复工作；首次登录在账号页完成。它不会自动打开浏览器，也不会执行测试或构建。
+
 ## 网页能力需要独立 Camoufox
 
 ```powershell

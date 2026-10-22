@@ -30,6 +30,7 @@ services:
       SOURCE_PROXY_URL: ${SOURCE_PROXY_URL:-}
       RSS_PROXY_URL: ${RSS_PROXY_URL:-}
       SOURCE_DNS_OVER_HTTPS: ${SOURCE_DNS_OVER_HTTPS:-false}
+      CAMOUFOX_MODE: ${CAMOUFOX_MODE:-virtual}
     volumes:
       - radar_data:/data
     healthcheck:
@@ -63,6 +64,8 @@ services:
         INTERNAL_API_URL: http://server:3001
     restart: unless-stopped
     init: true
+    environment:
+      INTERNAL_API_URL: http://server:3001
     depends_on:
       server:
         condition: service_healthy

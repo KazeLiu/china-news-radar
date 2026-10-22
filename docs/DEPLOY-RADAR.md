@@ -90,7 +90,7 @@ AI_DAILY_LIMIT=100
 
 ## 可选 Telegram 个人账号
 
-Telegram Bot 无法自行订阅任意频道。这里使用普通账号的 Telethon 客户端，仅监听后台启用且账号已订阅的公开频道。程序不会自动加入频道、读取私聊、发送消息或批量抓取成员。
+Telegram Bot 无法自行订阅任意频道。这里使用普通账号的 Node.js MTProto 客户端（teleproto 1.230.0），仅监听后台启用且账号已订阅的公开频道。依赖随项目 pnpm 工作区安装，不需要 Python 或 pip。程序不会自动加入频道、读取私聊、发送消息或批量抓取成员。
 
 先阅读 [API 条款](https://core.telegram.org/api/terms) 和 [内容许可条款](https://telegram.org/tos/content-licensing)，确认个人读取及所选模型处理的使用范围。频道信息不是天然的一手信源：识别海外媒体/机构原始链接；仅有国内链接的消息过滤，出处不明保留为待确认线索。管理员启用统一 AI 时，频道新闻也会分析和按需翻译。
 
@@ -104,29 +104,31 @@ TG_API_HASH=
 COLLECTOR_TOKEN=
 ```
 
-先构建 worker，并在你的交互终端登录：
+先构建并启动后台服务；更新配置开关后需要重新创建后端：
 
 ```bash
-docker compose -f compose.arm64.yml up -d server
+docker compose -f compose.arm64.yml build server client
 docker compose -f compose.arm64.yml --profile telegram build telegram
-docker compose -f compose.arm64.yml --profile telegram run --rm --no-deps telegram python login.py
+docker compose -f compose.arm64.yml --profile telegram up -d server client telegram
 ```
 
-手机号、验证码与两步验证密码直接输入终端，不经过网页。登录脚本通过认证、禁止缓存的后端专用接口读取 API 凭据，环境变量可作为兼容入口；不自动订阅。请在官方客户端订阅目标公开频道，再在后台填写来源名称与公开用户名、启用来源。一个来源对应一个频道，名称仅用于展示。session 文件具有登录权限，不要提交、公开或发送给别人。
+打开 HTTPS 站点的 `/admin` → “Telegram 账号”，保存 API 凭据与注册手机号（含 `+国家区号`）。后台服务显示“已连接”后点击“开始登录”，在网页按需输入验证码；仅 Telegram 明确要求时输入两步验证密码，空密码不能跳过。成功后自动采集，不需要 Docker 交互终端。Windows 与 Linux 共用此流程，操作见 [后台说明](ADMIN.md)。手机号持久保存，验证码和密码仅在限时授权内使用，不入库、不回显、不记日志。请先在官方客户端订阅目标公开频道，再在后台填写来源名称与公开用户名、启用来源。一个来源对应一个频道，名称仅用于展示。
 
-重新创建后端，在网页“来源管理”启用想监听的频道，然后启动 worker：
+后台服务状态与错误可在页面查看；进程退出时再查看容器日志：
 
 ```bash
-docker compose -f compose.arm64.yml up -d server
-docker compose -f compose.arm64.yml --profile telegram up -d telegram
 docker compose -f compose.arm64.yml logs --tail=40 telegram
 ```
 
-worker 仅使用已授权 session，不会后台索要验证码；缺配置就退出。启动时每频道最多补最近一天的 25 条消息，之后接收新消息和编辑事件。FloodWait 会等待，入库失败存入本地队列并指数退避。每 60 秒刷新来源、订阅匹配与 API 凭据，凭据变化仅重连采集器；新增来源不要求重启项目。后台“Telegram 账号”显示独立的 session、心跳和频道匹配状态；来源的成功时间仍指收到并入库消息。未订阅或用户名不匹配时显示明确状态。真实账号收取、断线和 FloodWait 尚需现场验证。
+后台服务缺账号配置或有效 session 时保持待命，等待网页发起登录；不会自行索要验证码或反复发送验证码。授权十分钟过期，错误验证码或密码只重试当前输入；取消、账号或代理配置变更、服务重启会结束本次授权。暂停采集保留 session，重启按已保存开关恢复；已保存 session 的账号与手机号不一致时明确要求重新登录。
+
+每次连接时每频道最多补最近 24 小时的 25 条消息，之后接收新消息和编辑。SDK 处理短时间 FloodWait，超过阈值时停止本轮补抓并显示等待秒数；投递失败保留在本地队列并退避。来源与订阅匹配每 60 秒刷新，账号与代理控制约两秒检查。后台显示授权阶段、错误代码、服务心跳和频道结果；来源成功时间仍指收到并处理消息。
+
+持久卷 `telegram_data` 中 `/state/reader.node-session` 具有登录权限，不要公开或删除。沿用卷内 UID 10001 与原有 `outbox.db`，保留未投递消息。旧 Telethon session 保留但不自动转换，切换 Node.js 后需重新授权。一个 session 只运行一个采集器；如需显式终端登录，先停止 `telegram` 服务，再运行 `docker compose -f compose.arm64.yml --profile telegram run --rm --no-deps telegram node login.cjs`，完成后重新启动后台服务。真实账号登录、重启恢复与 ARM64 容器仍需目标环境验收。
 
 ## 本地开发与验证
 
-需要 Node 22、pnpm 9.12.1；可选 worker 使用 Python 3.12。根目录安装依赖，再复制 server 配置：
+需要 Node.js 22.15 或更新版本、pnpm 9.12.1；Telegram worker 共用 Node.js，依赖由同一次安装准备。根目录安装依赖，再复制 server 配置：
 
 ```bash
 pnpm install --frozen-lockfile
@@ -147,6 +149,11 @@ pnpm --filter client-next exec eslint components/news/NewsReader.tsx app/page.ts
 pnpm --filter client-next build
 node scripts/check-rss.cjs
 node scripts/check-api.cjs
+```
+
+只有维护保留的旧 Python 入口时，才运行以下检查；它们不验证默认 Node.js 采集器：
+
+```bash
 cd telegram-collector
 python -m unittest test_common.py
 python -m py_compile main.py login.py common.py
