@@ -101,7 +101,7 @@ function MediaTile({
         loading="lazy"
         alt={isVideo ? '报道视频预览' : '报道配图'}
         sizes="(max-width: 768px) 50vw, 25vw"
-        className="object-contain transition-transform group-hover/media:scale-[1.02]"
+        className={cn(isVideo ? 'object-contain' : 'object-cover', 'transition-transform group-hover/media:scale-[1.02]')}
         onError={(e) => {
           // Hide broken images so layout doesn't show a broken icon
           (e.currentTarget as HTMLImageElement).style.display = 'none';
