@@ -39,7 +39,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 45s
-    mem_limit: 2g
+    mem_limit: 4g
   rsshub:
     build:
       context: .

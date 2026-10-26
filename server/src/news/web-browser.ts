@@ -13,18 +13,21 @@ export function navigationInterrupted(error: unknown) {
   return error instanceof Error && /NS_BINDING_ABORTED|navigation (?:was |is )?interrupted|interrupted by another navigation|Execution context was destroyed|Cannot find context with specified id|(?:page|frame) is navigating/i.test(error.message);
 }
 export function sourceHosts(source: NewsSourceConfig) { return [new URL(source.target!).hostname.replace(/^www\./, ''), ...source.publisherHosts]; }
-export async function createCrawlerPage(browser: Browser, source: NewsSourceConfig, interactive = false, storageState?: Awaited<ReturnType<BrowserContext['storageState']>>): Promise<CrawlerPage> {
-  const controller = new AbortController();
+export async function createCrawlerPage(browser: Browser, source: NewsSourceConfig, interactive = false, storageState?: Awaited<ReturnType<BrowserContext['storageState']>>, controller = new AbortController()): Promise<CrawlerPage> {
   const timeoutMs = source.web!.timeoutSeconds * 1000;
   let session: CrawlerPage | undefined; let pendingOrigin = '';
   const proxy = await createBrowserProxy(controller.signal, Math.min(timeoutMs, 15000), (origin, error) => {
     if (session && pendingOrigin && origin === pendingOrigin) session.failure ||= error;
   }, source.useProxy);
   let context: BrowserContext | undefined;
+  const closeOnAbort = () => { void context?.close().catch(() => console.warn('已取消的浏览器上下文关闭失败')); };
+  controller.signal.addEventListener('abort', closeOnAbort, { once: true });
   try {
+    controller.signal.throwIfAborted();
     // The SDK initializes window geometry; a second fixed viewport can stall Firefox.
     context = await browser.newContext({ serviceWorkers: 'block', acceptDownloads: false, viewport: null, storageState, proxy: { server: proxy.server } });
-    context.on('close', () => controller.abort());
+    controller.signal.throwIfAborted();
+    context.on('close', () => { controller.signal.removeEventListener('abort', closeOnAbort); controller.abort(new SourceFetchError('browser-closed', '采集浏览器上下文已关闭，本次任务已结束')); });
     context.setDefaultNavigationTimeout(timeoutMs); context.setDefaultTimeout(timeoutMs);
     await context.addInitScript(() => {
       for (const key of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'WebTransport']) Object.defineProperty(globalThis, key, { value: undefined, configurable: false });
@@ -55,7 +58,7 @@ export async function createCrawlerPage(browser: Browser, source: NewsSourceConf
           if (navigationInterrupted(error)) { current.navigating = true; current.lastNavigationAt = Date.now(); }
           else {
             current.failure = error instanceof SourceFetchError ? error : new SourceFetchError('connection-error', '读取浏览器页面响应失败', response.status());
-            if (current.failure.code === 'response-too-large') controller.abort();
+            if (current.failure.code === 'response-too-large') controller.abort(current.failure);
           }
         }
       }).finally(() => { if (current.responseCheck === check) current.responsePending = false; });
