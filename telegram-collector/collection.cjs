@@ -25,7 +25,11 @@ async function runCollector(current, shutdown) {
     const subscribed = new Map();
     for await (const dialog of client.iterDialogs({})) {
       const entity = dialog.entity;
-      if (entity instanceof Api.Channel && entity.broadcast && entity.username) subscribed.set(entity.username.toLowerCase(), entity);
+      if (!(entity instanceof Api.Channel) || !entity.broadcast) continue;
+      if (entity.username) subscribed.set(entity.username.toLowerCase(), entity);
+      for (const alias of entity.usernames || []) {
+        if (alias.active) subscribed.set(alias.username.toLowerCase(), entity);
+      }
     }
     selected.clear();
     matches = sources.map(source => {
