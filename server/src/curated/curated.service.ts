@@ -40,7 +40,7 @@ export class CuratedService {
 
     const where: any = {
       ...(newsMode() ? {} : { isCurated: true }),
-      isClusterMain: true,
+      ...(source ? {} : { isClusterMain: true }),
       // Filter by actual publish time, not DB ingestion time. An old article
       // scraped today by Bing would otherwise leak into "今日精选" — its createdAt
       // is today but publishedAt was days/weeks ago. Fall back to createdAt only

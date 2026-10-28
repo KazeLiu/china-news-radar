@@ -17,17 +17,21 @@ interface PageSnapshot extends PageContent {
 }
 export class WebPreviewCache {
   private pages = new Map<string, PageSnapshot>();
+  private timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private remove(id: string) { this.pages.delete(id); clearTimeout(this.timers.get(id)); this.timers.delete(id); }
   capture(source: NewsSourceConfig, page: PageContent, owner: string) {
-    for (const [id, saved] of this.pages) if (saved.expiresAt <= Date.now()) this.pages.delete(id);
-    if (this.pages.size >= 10) this.pages.delete(this.pages.keys().next().value!);
+    for (const [id, saved] of this.pages) if (saved.expiresAt <= Date.now()) this.remove(id);
+    if (this.pages.size >= 10) this.remove(this.pages.keys().next().value!);
     const saved: PageSnapshot = { html: page.html, url: page.url, status: page.status, loadMoreClicks: page.loadMoreClicks,
       id: randomUUID(), owner, context: webLoadContext(source), loadedAt: page.loadedAt, expiresAt: Date.now() + 30 * 60_000 };
     this.pages.set(saved.id, saved);
+    const timer = setTimeout(() => this.remove(saved.id), Math.max(0, saved.expiresAt - Date.now()));
+    timer.unref(); this.timers.set(saved.id, timer);
     return { snapshotId: saved.id, sourceId: source.id, loadedAt: saved.loadedAt, expiresAt: new Date(saved.expiresAt) };
   }
   forTask(id: string) {
     const page = this.pages.get(id);
-    if (!page || page.expiresAt <= Date.now()) { this.pages.delete(id); throw new ConflictException('页面快照已过期或后端已重启，请重新测试加载网页'); }
+    if (!page || page.expiresAt <= Date.now()) { this.remove(id); throw new ConflictException('页面快照已过期或后端已重启，请重新测试加载网页'); }
     return page;
   }
   require(id: unknown, source: NewsSourceConfig, owner: string) {
@@ -37,7 +41,7 @@ export class WebPreviewCache {
     if (page.context !== webLoadContext(source)) throw new ConflictException('网址或页面加载配置已修改，请重新测试加载网页');
     return page;
   }
-  clear() { this.pages.clear(); }
+  clear() { this.pages.clear(); this.timers.forEach(timer => clearTimeout(timer)); this.timers.clear(); }
 }
 
 export function inspectWebPage(page: PageContent, source: NewsSourceConfig, rules: FilterRule[]): CollectionResult {

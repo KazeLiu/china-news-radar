@@ -35,6 +35,9 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NewsService.name);
   private timer?: ReturnType<typeof setInterval>;
   private analysisTimer?: ReturnType<typeof setInterval>;
+  private preparingAnalysis = false;
+  private enqueueingAnalysis?: Promise<void>;
+  private startingHistory = false;
   private busy = false;
   private stopped = false;
   private config = defaultConfig();
@@ -82,7 +85,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     this.runtime.register('parser', payload => this.runParserAssistant(payload));
     for (const source of this.config.sources) await this.prisma.newsSource.upsert({ where: { id: source.id }, create: { id: source.id, enabled: source.enabled }, update: {} });
     await this.reapplyFilters();
-    await this.bridge?.rebuild();
+    await this.bridge?.repairMissing();
     this.startAnalysisTimer();
     if (process.env.COLLECTOR_ENABLED !== 'false') {
       this.timer = setInterval(() => { void this.tick(); }, 15_000);
@@ -458,26 +461,35 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     return this.config.sources.filter(s => s.kind === 'telegram' && states.some(state => state.id === s.id)).map(s => ({ sourceId: s.id, channel: s.channel }));
   }
   private async prepareAnalysis() {
-    if (this.stopped || this.configBusy) return;
-    const abandoned = await this.prisma.$queryRaw<Array<{ key: string; queuedTaskId: string }>>`SELECT a.key, a.queuedTaskId FROM NewsAnalysis a JOIN AiTask t ON a.queuedTaskId = t.id WHERE t.status IN ('failed', 'done') AND a.status != 'done'`;
-    for (const cache of abandoned) {
-      await this.prisma.$transaction(async tx => {
-        const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: cache.queuedTaskId, status: { not: 'done' } }, data: { status: 'failed', queuedTaskId: null, error: '任务失败，已有原文保留，请在任务列表查看安全原因' } });
-        if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: cache.key } }));
-      });
-    }
-    await this.showOverdueFallbacks();
-    if (this.config.ai.autoAnalyzeNew) await this.enqueueAnalysis();
+    if (this.stopped || this.configBusy || this.preparingAnalysis) return;
+    this.preparingAnalysis = true;
+    try {
+      const abandoned = await this.prisma.$queryRaw<Array<{ key: string; queuedTaskId: string }>>`SELECT a.key, a.queuedTaskId FROM NewsAnalysis a JOIN AiTask t ON a.queuedTaskId = t.id WHERE t.status IN ('failed', 'done') AND a.status != 'done' LIMIT 100`;
+      for (const cache of abandoned) {
+        await this.prisma.$transaction(async tx => {
+          const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: cache.queuedTaskId, status: { not: 'done' } }, data: { status: 'failed', queuedTaskId: null, error: '任务失败，已有原文保留，请在任务列表查看安全原因' } });
+          if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: cache.key } }));
+        });
+      }
+      await this.showOverdueFallbacks();
+      if (this.config.ai.autoAnalyzeNew) await this.enqueueAnalysis();
+    } finally { this.preparingAnalysis = false; }
   }
   private async showOverdueFallbacks() {
     // Slow providers or a long queue must not hide timely rule-matched news indefinitely.
-    const overdue = await this.prisma.newsItem.findMany({ where: { deletedAt: null, aiStatus: 'pending', decisionBy: { in: ['rules', 'source-forced-rules'] }, firstSeenAt: { lte: new Date(Date.now() - 15_000) } } });
-    for (const item of overdue) {
-      const args = { where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt }, data: { ...this.fallbackDecision(item, 'pending', this.config.rules, item.sourceId), decisionBy: this.forceChina(item.sourceId) ? 'source-forced-rules-waiting' : 'rules-waiting', updatedAt: item.updatedAt } };
-      if (this.bridge) await this.prisma.$transaction(async tx => { await tx.newsItem.updateMany(args); await this.bridge!.sync(tx, item.id); });
-      else await this.prisma.newsItem.updateMany(args);
-      await this.logAnalysis(item, 'rules', 'news/waiting');
-      await this.bridge?.announce(item.id);
+    let cursor: string | undefined;
+    const cutoff = new Date(Date.now() - 15_000);
+    while (!this.stopped) {
+      const overdue = await this.prisma.newsItem.findMany({ where: { deletedAt: null, aiStatus: 'pending', decisionBy: { in: ['rules', 'source-forced-rules'] }, firstSeenAt: { lte: cutoff }, ...(cursor ? { id: { gt: cursor } } : {}) }, orderBy: { id: 'asc' }, take: 100 });
+      for (const item of overdue) {
+        const args = { where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt, aiStatus: 'pending', decisionBy: item.decisionBy }, data: { ...this.fallbackDecision(item, 'pending', this.config.rules, item.sourceId), decisionBy: this.forceChina(item.sourceId) ? 'source-forced-rules-waiting' : 'rules-waiting', updatedAt: item.updatedAt } };
+        const changed = await this.updateItem(args);
+        if (!changed.count) continue;
+        await this.logAnalysis(item, 'rules', 'news/waiting');
+        await this.bridge?.announce(item.id);
+      }
+      if (overdue.length < 100) break;
+      cursor = overdue[overdue.length - 1].id;
     }
   }
   private async applyCache(tx: Prisma.TransactionClient, job: NewsAnalysis) {
@@ -528,51 +540,89 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   private async queueBatch(keys: string[], chunkSize = 20, previousTaskId?: string) {
     const activeKey = `news:${createHash('sha256').update([...keys].sort().join(',')).digest('hex')}`;
-    const ticket = await this.runtime.enqueue('news', { keys, chunkSize }, { activeKey });
-    await this.prisma.newsAnalysis.updateMany({ where: { key: { in: keys }, status: { not: 'done' }, OR: [{ queuedTaskId: null }, ...(previousTaskId ? [{ queuedTaskId: previousTaskId }] : [])] }, data: { queuedTaskId: ticket.taskId } });
+    const ticket = await this.runtime.enqueue('news', { keys, chunkSize }, { activeKey }, (tx, taskId) =>
+      tx.newsAnalysis.updateMany({ where: { key: { in: keys }, status: { not: 'done' }, OR: [{ queuedTaskId: null }, ...(previousTaskId ? [{ queuedTaskId: previousTaskId }] : [])] }, data: { queuedTaskId: taskId } }));
     return ticket;
   }
-  private async enqueueAnalysis() {
+  private enqueueAnalysis(): Promise<void> {
+    if (!this.enqueueingAnalysis) this.enqueueingAnalysis = this.enqueuePendingAnalysis().finally(() => { this.enqueueingAnalysis = undefined; });
+    return this.enqueueingAnalysis;
+  }
+  private async enqueuePendingAnalysis() {
     if (!this.aiEnabled || this.configBusy) return;
-    const caches = await this.prisma.newsAnalysis.findMany({ where: { historical: false, queuedTaskId: null, status: 'pending', attempts: { lt: 3 } }, orderBy: { createdAt: 'asc' } });
+    let cursor: { key: string; createdAt: Date } | undefined;
     let keys: string[] = []; let inputs: unknown[] = [];
-    for (const cache of caches) {
-      const linked = await this.prisma.newsItem.findMany({ where: { analysisKey: cache.key } });
-      if (!linked.some(item => !item.isManual && this.analysisEligible(item))) continue;
-      const input = { id: cache.key, ...JSON.parse(cache.inputJson) };
-      if (keys.length && (keys.length >= 20 || JSON.stringify({ items: [...inputs, input] }).length > 6000)) { await this.queueBatch(keys); keys = []; inputs = []; }
-      keys.push(cache.key); inputs.push(input);
+    while (!this.stopped && !this.configBusy && this.aiEnabled) {
+      const caches = await this.prisma.newsAnalysis.findMany({ where: { historical: false, queuedTaskId: null, status: 'pending', attempts: { lt: 3 },
+        ...(cursor ? { OR: [{ createdAt: { gt: cursor.createdAt } }, { createdAt: cursor.createdAt, key: { gt: cursor.key } }] } : {}) }, orderBy: [{ createdAt: 'asc' }, { key: 'asc' }], take: 100 });
+      if (!caches.length) break;
+      const eligibleKeys = await this.eligibleAnalysisKeys(caches.map(cache => cache.key), false);
+      for (const cache of caches) {
+        if (!eligibleKeys.has(cache.key)) continue;
+        const input = { id: cache.key, ...JSON.parse(cache.inputJson) };
+        if (keys.length && (keys.length >= 20 || JSON.stringify({ items: [...inputs, input] }).length > 6000)) { await this.queueBatch(keys); keys = []; inputs = []; }
+        keys.push(cache.key); inputs.push(input);
+      }
+      cursor = caches[caches.length - 1];
+      if (caches.length < 100) break;
     }
     if (keys.length) await this.queueBatch(keys);
   }
-  private analysisEligible(item: NewsItem) {
+  private analysisEligible(item: Pick<NewsItem, 'title' | 'summary' | 'url' | 'originalUrl' | 'sourceId' | 'deletedAt' | 'hiddenArticle'>) {
     return !item.deletedAt && !item.hiddenArticle && !matchingExclusions(item, this.config.rules, item.sourceId).length;
+  }
+  private async eligibleAnalysisKeys(keys: string[], includeManual = true) {
+    const eligible = new Set<string>();
+    let cursor: string | undefined;
+    while (keys.length && eligible.size < keys.length) {
+      const items = await this.prisma.newsItem.findMany({ where: { analysisKey: { in: keys }, deletedAt: null, hiddenArticle: false,
+        ...(!includeManual ? { isManual: false } : {}), ...(cursor ? { id: { gt: cursor } } : {}) }, orderBy: { id: 'asc' }, take: 100,
+        select: { id: true, analysisKey: true, title: true, summary: true, url: true, originalUrl: true, sourceId: true, deletedAt: true, hiddenArticle: true } });
+      for (const item of items) if (this.analysisEligible(item)) eligible.add(item.analysisKey!);
+      if (items.length < 100) break;
+      cursor = items[items.length - 1].id;
+    }
+    return eligible;
   }
   async startHistory() {
     if (!this.aiEnabled) throw new BadRequestException('请先保存并启用 AI 配置');
-    const records = await this.prisma.newsItem.findMany({ where: { deletedAt: null, isManual: false, hiddenArticle: false, aiStatus: { notIn: ['done', 'excluded'] } } });
-    let prepared = 0;
-    for (const item of records) {
-      if (matchingExclusions(item, this.config.rules, item.sourceId).length) continue;
-      const cache = await this.findCached(item);
-      if (cache?.status === 'done' || cache?.queuedTaskId) continue;
-      const key = analysisKey(item);
-      await this.prisma.$transaction(async tx => {
-        await tx.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: false }, update: { historical: false, status: 'pending', attempts: 0, error: null, retryAt: null, leaseUntil: null } });
-        await tx.newsItem.updateMany({ where: { id: item.id, contentHash: item.contentHash }, data: { analysisKey: key, aiStatus: 'pending', updatedAt: item.updatedAt } });
-        await this.bridge?.sync(tx, item.id);
-      });
-      prepared++;
-    }
-    await this.enqueueAnalysis();
-    return { prepared, ...await this.runtime.queueStatus() };
+    if (this.startingHistory) throw new ConflictException('正在准备历史分析，请稍后查看队列');
+    this.startingHistory = true;
+    try {
+      let cursor: string | undefined;
+      let prepared = 0;
+      while (!this.stopped) {
+        const records = await this.prisma.newsItem.findMany({ where: { deletedAt: null, isManual: false, hiddenArticle: false, aiStatus: { notIn: ['done', 'excluded'] }, ...(cursor ? { id: { gt: cursor } } : {}) }, orderBy: { id: 'asc' }, take: 100 });
+        if (!records.length) break;
+        for (const item of records) {
+          if (matchingExclusions(item, this.config.rules, item.sourceId).length) continue;
+          const cache = await this.findCached(item);
+          if (cache?.status === 'done' || cache?.queuedTaskId) continue;
+          const key = analysisKey(item);
+          const changed = await this.prisma.$transaction(async tx => {
+            const current = await tx.newsAnalysis.findUnique({ where: { key } });
+            if (current?.status === 'done' || current?.queuedTaskId) return false;
+            const changed = await tx.newsItem.updateMany({ where: { id: item.id, contentHash: item.contentHash, analysisKey: item.analysisKey, aiStatus: item.aiStatus, deletedAt: null, hiddenArticle: false }, data: { analysisKey: key, aiStatus: 'pending', updatedAt: item.updatedAt } });
+            if (!changed.count) return false;
+            await tx.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: false }, update: { historical: false, status: 'pending', attempts: 0, error: null, retryAt: null, leaseUntil: null } });
+            await this.bridge?.sync(tx, item.id);
+            return true;
+          });
+          if (changed) prepared++;
+        }
+        cursor = records[records.length - 1].id;
+        if (records.length < 100) break;
+      }
+      await this.enqueueAnalysis();
+      return { prepared, ...await this.runtime.queueStatus() };
+    } finally { this.startingHistory = false; }
   }
   private async analyzeBatch(payload: { keys: string[]; chunkSize: number }, task: AiTask) {
     const caches = await this.prisma.newsAnalysis.findMany({ where: { key: { in: payload.keys }, queuedTaskId: task.id, status: { not: 'done' }, attempts: { lt: 3 } } });
     const eligible: NewsAnalysis[] = [];
+    const eligibleKeys = await this.eligibleAnalysisKeys(caches.map(cache => cache.key));
     for (const cache of caches) {
-      const linked = await this.prisma.newsItem.findMany({ where: { analysisKey: cache.key } });
-      if (linked.some(item => this.analysisEligible(item))) eligible.push(cache);
+      if (eligibleKeys.has(cache.key)) eligible.push(cache);
       else await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'obsolete', queuedTaskId: null } });
     }
     const selected = eligible.slice(0, payload.chunkSize);
@@ -709,11 +759,15 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   async configureAi(body: unknown) {
     const ai = validateAi(body, this.config.ai);
     await this.updateConfig({ ...this.config, ai }, undefined, async () => { if (!this.aiEnabled) {
-      const pending = await this.prisma.newsItem.findMany({ where: { aiStatus: 'pending' } });
-      for (const item of pending) await this.updateItem({ where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt },
-        data: { ...this.fallbackDecision(item, 'disabled', this.config.rules, item.sourceId), updatedAt: item.updatedAt } });
+      let cursor: string | undefined;
+      while (true) {
+        const pending = await this.prisma.newsItem.findMany({ where: { aiStatus: 'pending', ...(cursor ? { id: { gt: cursor } } : {}) }, orderBy: { id: 'asc' }, take: 100 });
+        for (const item of pending) await this.updateItem({ where: { id: item.id, analysisKey: item.analysisKey, updatedAt: item.updatedAt, aiStatus: 'pending' },
+          data: { ...this.fallbackDecision(item, 'disabled', this.config.rules, item.sourceId), updatedAt: item.updatedAt } });
+        if (pending.length < 100) break;
+        cursor = pending[pending.length - 1].id;
+      }
     } });
-    await this.bridge?.rebuild();
     return this.adminConfig();
   }
   private inspectWebPreview(page: Parameters<typeof inspectWebPage>[0], source: NewsSourceConfig) {
@@ -959,6 +1013,9 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     }
   }
   private async reapplyFilters() {
+    const revision = JSON.stringify(this.config.rules);
+    const marker = 'news-applied-filters';
+    if ((await this.prisma.setting.findUnique({ where: { key: marker } }))?.value === revision) return 0;
     let cursor: string | undefined; let changed = 0;
     while (true) {
       const page = await this.prisma.newsItem.findMany({ where: cursor ? { id: { gt: cursor } } : {}, orderBy: { id: 'asc' }, take: 200 });
@@ -981,6 +1038,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       cursor = page[page.length - 1].id;
       if (page.length < 200) break;
     }
+    await this.prisma.setting.upsert({ where: { key: marker }, create: { key: marker, value: revision }, update: { value: revision } });
     return changed;
   }
 }

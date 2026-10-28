@@ -16,8 +16,8 @@ export function contentScope(where: Prisma.HotspotWhereInput = {}): Prisma.Hotsp
     ? { newsItem: { is: publicNewsScope() } }
     : { newsItemId: null }] };
 }
-export const newsInclude = () => newsMode() ? { newsItem: true } as const : {};
-export function presentHotspot<T extends { media?: string | null; newsItem?: NewsItem | null; qualityScore?: number | null }>(item: T) {
+export const newsInclude = () => newsMode() ? { newsItem: { omit: { body: true } } } as const : {};
+export function presentHotspot<T extends { media?: string | null; newsItem?: Omit<NewsItem, 'body'> | null; qualityScore?: number | null }>(item: T) {
   const { newsItem: news, ...base } = item;
   const media = (() => { if (news?.hiddenImages) return null; try { return item.media ? JSON.parse(item.media) : null; } catch { return null; } })();
   return { ...base, media, ...(news ? { newsItemId: news.id, originalTitle: news.sourceTitlePresent ? news.title : '', sourceTitlePresent: news.sourceTitlePresent, titleGenerated: news.titleGenerated, originalSummary: news.summary, displaySummary: news.displaySummary,

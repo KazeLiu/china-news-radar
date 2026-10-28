@@ -11,6 +11,11 @@ import { SourceAdapterService } from '../src/news/source-adapter.service';
 import { WebCrawlerService } from '../src/news/web-crawler.service';
 import { ADMIN_CONFIG_KEY, AiConfig, defaultConfig } from '../src/news/admin-config';
 
+export function completedResponse(content: string) {
+  return { status: 'completed', incomplete_details: null, output_text: content,
+    output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: content, annotations: [] }] }] };
+}
+
 export function runtimeFixtures() {
   const server = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const work = mkdtempSync(path.join(tmpdir(), 'radar-tests-'));
@@ -36,10 +41,12 @@ export function runtimeFixtures() {
       const logs = new NewsLogsService(db);
       const runtime = new AiRuntimeService(db, logs);
       const adapters = { configured: () => true } as unknown as SourceAdapterService;
-      const news = new NewsService(db, runtime, adapters, {} as WebCrawlerService, logs);
+      const crawler = { configureBrowser: () => {} } as unknown as WebCrawlerService;
+      const news = new NewsService(db, runtime, adapters, crawler, logs);
       // Register real handlers, then stop automatic timers. Each test drives one queue step explicitly.
       runtime.onModuleInit(); runtime.onModuleDestroy();
       await news.onModuleInit(); news.onModuleDestroy();
+      news['stopped'] = false; // Timers stay stopped; tests explicitly drive preparation methods.
       instances.push({ db, news, runtime });
       return { db, service: news, runtime, logs, usageKey, config,
         async saveConfig() { await db.setting.update({ where: { key: ADMIN_CONFIG_KEY }, data: { value: JSON.stringify(config) } }); },

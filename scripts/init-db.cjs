@@ -11,6 +11,7 @@ async function main() {
   const { PrismaClient } = require('../server/node_modules/@prisma/client');
   const db = new PrismaClient();
   let migrateTelegramTitles = false;
+  let schemaCurrent = false;
   try {
     const existing = await db.$queryRawUnsafe("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
     if (existing.some(t => t.name === 'NewsItem')) {
@@ -18,6 +19,7 @@ async function main() {
       migrateTelegramTitles = !columns.some(column => column.name === 'sourceTitlePresent');
     }
     const stored = existing.some(t => t.name === 'Setting') ? await db.setting.findUnique({ where: { key: 'schema-fingerprint' } }) : null;
+    schemaCurrent = stored?.value === fingerprint;
     const savedConfig = existing.some(t => t.name === 'Setting') ? await db.setting.findUnique({ where: { key: 'news-admin-config-v1' } }) : null;
     const config = savedConfig ? JSON.parse(savedConfig.value) : null;
     if (existing.length && (stored?.value !== fingerprint || (config && config.version !== 2))) {
@@ -41,7 +43,7 @@ async function main() {
     }
   } finally { await db.$disconnect(); }
   const prismaCli = require.resolve('prisma/build/index.js', { paths: [path.join(__dirname, '../server')] });
-  const result = spawnSync(process.execPath, [prismaCli, 'db', 'push', '--skip-generate'], { cwd: path.join(__dirname, '../server'), stdio: 'inherit' });
+  const result = schemaCurrent ? { status: 0 } : spawnSync(process.execPath, [prismaCli, 'db', 'push', '--skip-generate'], { cwd: path.join(__dirname, '../server'), stdio: 'inherit' });
   process.exitCode = result.status ?? 1;
   if (result.status === 0) {
     const updated = new PrismaClient();

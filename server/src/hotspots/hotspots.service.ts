@@ -3,7 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TwitterService } from '../services/twitter.service';
 import { SearchService } from '../services/search.service';
 import { AiService } from '../services/ai.service';
-import { sortHotspots } from '../utils/sortHotspots';
+import { hotPage, importancePage } from './ranked-page';
 import { contentScope, newsInclude, newsMode, presentHotspot } from '../news/radar-content';
 
 /**
@@ -82,9 +82,10 @@ export class HotspotsService {
       search,
     } = query;
 
-    const pageNum = parseInt(page);
-    const limitNum = parseInt(limit);
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
     const skip = (pageNum - 1) * limitNum;
+    if (!Number.isSafeInteger(pageNum) || pageNum < 1 || !Number.isInteger(limitNum) || limitNum < 1 || limitNum > 100 || skip > 100000) throw new BadRequestException('分页参数无效，每页最多 100 条，偏移最多 100000 条');
 
     const where: any = {
       // Fallback scores: T2=50, T1.5=55 (all-5s × tier multiplier when scoring errors out).
@@ -141,7 +142,7 @@ export class HotspotsService {
     }
 
     const order = sortOrder === 'asc' ? 'asc' : 'desc';
-    const needsMemorySort = sortBy === 'importance' || sortBy === 'hot';
+    const ranked = sortBy === 'importance' || sortBy === 'hot';
 
     let orderBy: any;
     switch (sortBy) {
@@ -155,20 +156,22 @@ export class HotspotsService {
       default: orderBy = [{ publishedAt: order }, { createdAt: order }]; break;
     }
 
+    const scope = contentScope(where);
+    const ids = ranked ? await (sortBy === 'importance' ? importancePage : hotPage)(this.prisma, scope, skip, limitNum, order) : undefined;
     const [rawHotspots, total] = await Promise.all([
       this.prisma.hotspot.findMany({
-        where: contentScope(where),
+        where: ids ? { AND: [scope, { id: { in: ids } }] } : scope,
         orderBy,
-        ...(needsMemorySort ? {} : { skip, take: limitNum }),
+        ...(ranked ? {} : { skip, take: limitNum }),
         include: { keyword: { select: { id: true, text: true, category: true } }, ...newsInclude() },
       }),
       this.prisma.hotspot.count({ where: contentScope(where) }),
     ]);
 
     let hotspots;
-    if (needsMemorySort) {
-      const sorted = sortHotspots(rawHotspots, sortBy, order as 'asc' | 'desc');
-      hotspots = sorted.slice(skip, skip + limitNum);
+    if (ids) {
+      const positions = new Map(ids.map((id, index) => [id, index]));
+      hotspots = rawHotspots.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
     } else {
       hotspots = rawHotspots;
     }

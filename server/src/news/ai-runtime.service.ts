@@ -76,20 +76,26 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
     const content = await this.requestRaw(params.messages, params.max_tokens);
     return { choices: [{ message: { content } }], usage: null };
   }
-  async enqueue(kind: string, payload: unknown, options: { activeKey?: string; maxAttempts?: number } = {}): Promise<AiTicket> {
+  async enqueue(kind: string, payload: unknown, options: { activeKey?: string; maxAttempts?: number } = {}, attach?: (tx: Prisma.TransactionClient, taskId: string) => Promise<unknown>): Promise<AiTicket> {
     if (!this.handlers.has(kind)) throw new BadRequestException('任务类型尚未注册');
-    if (options.activeKey) {
-      const existing = await this.prisma.aiTask.findUnique({ where: { activeKey: options.activeKey } });
-      if (existing) return { taskId: existing.id, status: existing.status };
-    }
     try {
-      const task = await this.prisma.aiTask.create({ data: { kind, payload: JSON.stringify(payload), activeKey: options.activeKey, maxAttempts: options.maxAttempts ?? 3 } });
-      await this.logs.record({ kind: 'task', route: `ai-task/${kind}/queued`, taskId: task.id, status: 'queued', elapsedMs: 0,
+      const { task, created } = await this.prisma.$transaction(async tx => {
+        const existing = options.activeKey ? await tx.aiTask.findUnique({ where: { activeKey: options.activeKey } }) : null;
+        const task = existing || await tx.aiTask.create({ data: { kind, payload: JSON.stringify(payload), activeKey: options.activeKey, maxAttempts: options.maxAttempts ?? 3 } });
+        // Publish the runnable task and its materials together, before the worker can claim it.
+        if (attach) await attach(tx, task.id);
+        return { task, created: !existing };
+      });
+      if (created) await this.logs.record({ kind: 'task', route: `ai-task/${kind}/queued`, taskId: task.id, status: 'queued', elapsedMs: 0,
         ...(kind === 'news' ? { detailsJson: JSON.stringify({ inputCount: (payload as { keys: string[] }).keys.length }) } : {}) });
       return { taskId: task.id, status: task.status };
     } catch (error) {
       if ((error as { code?: string }).code === 'P2002' && options.activeKey) {
-        const task = await this.prisma.aiTask.findUniqueOrThrow({ where: { activeKey: options.activeKey } });
+        const task = await this.prisma.$transaction(async tx => {
+          const existing = await tx.aiTask.findUniqueOrThrow({ where: { activeKey: options.activeKey } });
+          if (attach) await attach(tx, existing.id);
+          return existing;
+        });
         return { taskId: task.id, status: task.status };
       }
       throw error;

@@ -89,6 +89,9 @@ model Hotspot {
   media          String?   // JSON array of {type:'photo'|'video', url, previewUrl?}
 
   @@unique([url, source])
+  @@index([clusterKey])
+  @@index([importance, createdAt])
+  @@index([publishedAt, createdAt])
 }
 
 model Notification {
@@ -205,6 +208,7 @@ model NewsItem {
   @@index([topic, sourceId])
   @@index([analysisKey])
   @@index([deletedAt])
+  @@index([aiStatus, firstSeenAt])
 }
 
 model NewsDeletedUrl {
@@ -228,6 +232,8 @@ model NewsAnalysis {
   queuedTaskId String?
 
   @@index([status, retryAt])
+  @@index([queuedTaskId])
+  @@index([historical, status, queuedTaskId, createdAt, key])
 }
 
 model NewsKeywordMatch {
@@ -318,6 +324,7 @@ model AiRequest {
   translatedCount Int @default(0)
   sourceIds String @default("[]")
   @@index([startedAt])
+  @@index([taskId])
 }
 
 model NewsOperationLog {

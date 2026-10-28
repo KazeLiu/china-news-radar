@@ -1,21 +1,21 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { APIError } from 'openai';
 import { analysisInput, analysisKey } from './analysis';
-import { runtimeFixtures } from '../../test-utils/runtime-fixture';
+import { completedResponse, runtimeFixtures } from '../../test-utils/runtime-fixture';
 
 const model = vi.hoisted(() => ({ create: vi.fn() }));
 vi.mock('openai', async importOriginal => ({ ...await importOriginal<typeof import('openai')>(), default: class {
-  chat = { completions: { create: model.create } };
+  responses = { create: model.create };
 } }));
 const result = { version: 2, scoring: { relevance: 8, novelty: 7, audience: 8, quality: 7, importance: 'high', tags: ['贸易'] }, relation: 'related', topics: ['policy', 'economy'], type: 'report', language: 'en', reason: '中国相关政策', translation: { title: '中国相关政策', summary: '新规定。' } };
 const store = runtimeFixtures();
 beforeAll(() => store.prepare(), 30000);
 afterAll(() => store.close());
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
-function response(results: unknown) { return { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(results) } }] }; }
+function response(results: unknown) { return completedResponse(JSON.stringify(results)); }
 async function fixture(usage = '0') {
   vi.stubEnv('COLLECTOR_ENABLED', 'false');
-  model.create.mockReset().mockImplementation(async params => response({ results: JSON.parse(params.messages.at(-1).content).items.map((input: { id: string }) => ({ id: input.id, ...result })) }));
+  model.create.mockReset().mockImplementation(async params => response({ results: JSON.parse(params.input.at(-1).content).items.map((input: { id: string }) => ({ id: input.id, ...result })) }));
   const f = await store.create({}, usage);
   const originalTime = new Date('2026-10-10T00:00:00Z');
   const item = await f.db.newsItem.create({ data: { id: '1', sourceId: 'reuters', topic: 'policy', title: 'China trade policy', summary: 'New rules', url: 'https://reuters.com/world/story', originalPublisher: 'Reuters', updatedAt: originalTime, firstSeenAt: originalTime, saved: true, visible: false, contentHash: 'original', eventKey: 'event' } });
@@ -99,7 +99,7 @@ describe('persistent unified AI worker', () => {
     model.create.mockResolvedValueOnce(response({ results: [{ id: key, ...result }] })); await f.run();
     expect((await f.db.newsAnalysis.findUniqueOrThrow({ where: { key } })).status).toBe('done'); expect((await f.readJob()).status).toBe('pending');
     await f.db.aiTask.update({ where: { id: f.ticket.taskId }, data: { availableAt: new Date(0) } }); await f.run();
-    const retry = JSON.parse(model.create.mock.calls[1][0].messages.at(-1).content).items;
+    const retry = JSON.parse(model.create.mock.calls[1][0].input.at(-1).content).items;
     expect(retry.map((item: { id: string }) => item.id)).toEqual([f.key]); expect(await f.usage()).toBe('2');
   });
   it('keeps manual drafts private until publication and restores without reanalysis', async () => {

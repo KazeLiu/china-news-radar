@@ -106,7 +106,7 @@ export class NewsEditorialService implements OnModuleInit {
           relatedCompanies: names(result.relatedCompanies), relatedPeople: names(result.relatedPeople), tags: names(result.tags) };
       } else if (existing && JSON.parse(existing.data).generationStatus !== 'pending') return;
       await this.prisma.newsEntityProfile.upsert({ where: { keywordId }, create: { keywordId, data: JSON.stringify(data) }, update: { data: JSON.stringify(data), generatedAt: new Date() } });
-      await this.bridge.rebuild();
+      await this.bridge.rematchKeyword(keywordId);
     });
   }
 }

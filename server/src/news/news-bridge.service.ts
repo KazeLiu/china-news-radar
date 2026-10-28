@@ -9,6 +9,14 @@ import { presentHotspot, publicNewsScope } from './radar-content';
 import { ORIGINAL_PUBLISHERS } from './sources';
 import { EmailService } from '../services/email.service';
 
+type MatchText = { title: string; summary: string; titleZh: string | null; summaryZh: string | null; aiGeneratedTitle: string | null };
+function matchesKeyword(item: MatchText, keyword: { text: string; newsProfile: { data: string } | null }) {
+  const text = `${item.title} ${item.summary} ${item.titleZh || ''} ${item.summaryZh || ''} ${item.aiGeneratedTitle || ''}`.normalize('NFKC').toLowerCase();
+  let aliases: string[] = [];
+  try { aliases = JSON.parse(keyword.newsProfile?.data || '{}').aliases || []; } catch { /* Keep the literal keyword. */ }
+  return [keyword.text, ...aliases].some(alias => alias && text.includes(alias.normalize('NFKC').toLowerCase()));
+}
+
 export function publisherTier(publisher: string | null): SourceTier {
   if (['美国财政部', '美国商务部', '欧盟委员会'].includes(publisher || '')) return 'T1';
   return ORIGINAL_PUBLISHERS.some(source => source.name === publisher && source.name !== 'Truth Social 原帖') ? 'T1.5' : 'T2';
@@ -38,22 +46,19 @@ export class NewsBridgeService {
     const hotspot = await tx.hotspot.upsert({ where: { newsItemId: id }, create: { id: `news:${id}`, notifyEligible, ...data }, update: data });
     await this.matchItem(tx, item);
     for (const clusterKey of new Set([item.eventKey, previous?.clusterKey].filter((key): key is string => !!key))) {
-      const mains = await tx.hotspot.findMany({ where: { clusterKey, newsItem: { is: publicNewsScope() } },
+      const main = await tx.hotspot.findFirst({ where: { clusterKey, newsItem: { is: publicNewsScope() } },
         orderBy: [{ qualityScore: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }], select: { id: true } });
-      await tx.hotspot.updateMany({ where: { clusterKey, newsItemId: { not: null } }, data: { isClusterMain: false } });
-      if (mains[0]) await tx.hotspot.update({ where: { id: mains[0].id }, data: { isClusterMain: true } });
+      await tx.hotspot.updateMany({ where: { clusterKey, newsItemId: { not: null }, isClusterMain: true, ...(main ? { id: { not: main.id } } : {}) }, data: { isClusterMain: false } });
+      if (main) await tx.hotspot.updateMany({ where: { id: main.id, isClusterMain: false }, data: { isClusterMain: true } });
     }
     return hotspot;
   }
 
   private async matchItem(tx: Prisma.TransactionClient, item: { id: string; title: string; summary: string; titleZh: string | null; summaryZh: string | null; aiGeneratedTitle: string | null }) {
     const keywords = await tx.keyword.findMany({ where: { isActive: true }, include: { newsProfile: true } });
-    const text = `${item.title} ${item.summary} ${item.titleZh || ''} ${item.summaryZh || ''} ${item.aiGeneratedTitle || ''}`.normalize('NFKC').toLowerCase();
     await tx.newsKeywordMatch.deleteMany({ where: { newsItemId: item.id } });
     for (const keyword of keywords) {
-      let aliases: string[] = [];
-      try { aliases = JSON.parse(keyword.newsProfile?.data || '{}').aliases || []; } catch { /* Keep the literal keyword. */ }
-      if ([keyword.text, ...aliases].some(alias => alias && text.includes(alias.normalize('NFKC').toLowerCase())))
+      if (matchesKeyword(item, keyword))
         await tx.newsKeywordMatch.create({ data: { newsItemId: item.id, keywordId: keyword.id } });
     }
   }
@@ -68,6 +73,38 @@ export class NewsBridgeService {
       if (items.length < 100) break;
       cursor = items[items.length - 1].id;
     } while (true);
+  }
+
+  async repairMissing() {
+    // Existing rows are maintained in the same transaction as their NewsItem.
+    // Only missing projections need recovery during ordinary startup.
+    const keywords = await this.prisma.keyword.findMany({ where: { entityCard: { is: null } }, select: { id: true, text: true } });
+    for (const keyword of keywords) await this.prisma.entityCard.upsert({ where: { keywordId: keyword.id }, create: { keywordId: keyword.id, name: keyword.text }, update: {} });
+    while (true) {
+      const items = await this.prisma.newsItem.findMany({ where: { deletedAt: null, hotspot: { is: null } }, orderBy: { id: 'asc' }, take: 100, select: { id: true } });
+      for (const item of items) await this.prisma.$transaction(tx => this.sync(tx, item.id));
+      if (items.length < 100) break;
+    }
+  }
+
+  async rematchKeyword(keywordId: string) {
+    let cursor: string | undefined;
+    while (true) {
+      const page = await this.prisma.$transaction(async tx => {
+        const keyword = await tx.keyword.findUnique({ where: { id: keywordId }, include: { newsProfile: true } });
+        if (!keyword) return [];
+        await tx.entityCard.upsert({ where: { keywordId }, create: { keywordId, name: keyword.text }, update: { name: keyword.text } });
+        if (!keyword.isActive) { await tx.newsKeywordMatch.deleteMany({ where: { keywordId } }); return []; }
+        const items = await tx.newsItem.findMany({ where: { deletedAt: null, ...(cursor ? { id: { gt: cursor } } : {}) }, orderBy: { id: 'asc' }, take: 100,
+          select: { id: true, title: true, summary: true, titleZh: true, summaryZh: true, aiGeneratedTitle: true } });
+        await tx.newsKeywordMatch.deleteMany({ where: { keywordId, newsItemId: { in: items.map(item => item.id) } } });
+        const matches = items.filter(item => matchesKeyword(item, keyword)).map(item => ({ keywordId, newsItemId: item.id }));
+        if (matches.length) await tx.newsKeywordMatch.createMany({ data: matches });
+        return items;
+      });
+      if (page.length < 100) break;
+      cursor = page[page.length - 1].id;
+    }
   }
 
   async announce(id: string) {

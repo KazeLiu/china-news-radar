@@ -5,6 +5,7 @@ import { Duplex } from 'node:stream';
 import { requestPublic, resolvePublicTarget, sourceProxyAgent, SourceFetchError } from './public-network';
 
 export async function createBrowserProxy(signal: AbortSignal, timeoutMs: number, onFailure: (origin: string, error: SourceFetchError) => void, useProxy?: boolean) {
+  signal.throwIfAborted();
   const sockets = new Set<Duplex>();
   const requests = new Set<http.ClientRequest>();
   const failure = (error: unknown) => error instanceof SourceFetchError ? error : new SourceFetchError('connection-error', '浏览器连接未完成，请检查采集网络与来源代理配置');
@@ -94,6 +95,8 @@ export async function createBrowserProxy(signal: AbortSignal, timeoutMs: number,
     requests.forEach(request => request.destroy()); sockets.forEach(socket => socket.destroy()); server.close(() => resolve());
   });
   signal.addEventListener('abort', () => { void close(); }, { once: true });
+  // Cancellation can arrive while server.listen is pending, before the listener is attached.
+  if (signal.aborted) { await close(); signal.throwIfAborted(); }
   return {
     server: `http://127.0.0.1:${(server.address() as net.AddressInfo).port}`,
     close,

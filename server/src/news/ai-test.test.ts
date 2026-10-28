@@ -2,11 +2,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { NewsController } from './news.controller';
 import { NewsService } from './news.service';
 import { APIConnectionTimeoutError, APIConnectionError, APIError } from 'openai';
-import { runtimeFixtures } from '../../test-utils/runtime-fixture';
+import { completedResponse, runtimeFixtures } from '../../test-utils/runtime-fixture';
 
 const model = vi.hoisted(() => ({ create: vi.fn(), options: vi.fn() }));
 vi.mock('openai', async importOriginal => ({ ...await importOriginal<typeof import('openai')>(), default: class {
-  chat = { completions: { create: model.create } };
+  responses = { create: model.create };
   constructor(options: unknown) { model.options(options); }
 } }));
 const sample = { title: 'China announces new trade measures', summary: 'New import rules.' };
@@ -16,7 +16,7 @@ beforeAll(() => store.prepare(), 30000);
 afterAll(() => store.close());
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
 async function fixture(used = '0', enabled = true, apiKey = 'test-only-key') {
-  model.create.mockReset().mockResolvedValue({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(analysis) } }] });
+  model.create.mockReset().mockResolvedValue(completedResponse(JSON.stringify(analysis)));
   vi.stubEnv('COLLECTOR_ENABLED', 'false');
   const f = await store.create({ enabled, apiKey, dailyLimit: 5 }, used);
   return { ...f, async test(input: unknown = sample) {
@@ -31,9 +31,9 @@ describe('administrator AI test', () => {
     const output = await f.test({ title: `<b>${sample.title}</b>`, summary: sample.summary });
     expect(output).toMatchObject({ ok: true, model: 'saved-model', input: sample, result: analysis, preview: { visible: true, decisionBy: 'ai' }, usage: { used: 1, limit: 5 } });
     expect(model.create).toHaveBeenCalledOnce();
-    expect(model.create.mock.calls[0][0]).toMatchObject({ model: 'saved-model', response_format: { type: 'json_object' } });
-    expect(model.create.mock.calls[0][0].messages[0].content).toContain('关注贸易政策');
-    expect(model.create.mock.calls[0][0].messages.at(-1).content).toBe(JSON.stringify({ ...sample, truncated: false }));
+    expect(model.create.mock.calls[0][0]).toMatchObject({ model: 'saved-model', text: { format: { type: 'json_object' } } });
+    expect(model.create.mock.calls[0][0].input[0].content).toContain('关注贸易政策');
+    expect(model.create.mock.calls[0][0].input.at(-1).content).toBe(JSON.stringify({ ...sample, truncated: false }));
     expect(model.options).toHaveBeenCalledWith(expect.objectContaining({ timeout: 120000, maxRetries: 0 }));
     expect(await f.usage()).toBe('1'); expect(await f.db.aiRequest.count()).toBe(1);
     expect(await f.db.newsItem.count()).toBe(0); expect(await f.db.newsAnalysis.count()).toBe(0);
@@ -79,20 +79,20 @@ describe('administrator AI test', () => {
     const output = await f.test(); expect(output.error).not.toHaveProperty('requestId'); expect(JSON.stringify(output)).not.toContain('test-only-key');
   });
   it('explains invalid JSON and includes a safe request identifier', async () => {
-    const f = await fixture(); model.create.mockResolvedValueOnce({ _request_id: 'req-invalid-json', choices: [{ finish_reason: 'stop', message: { content: 'not JSON' } }] });
+    const f = await fixture(); model.create.mockResolvedValueOnce({ ...completedResponse('not JSON'), _request_id: 'req-invalid-json' });
     expect(await f.test()).toMatchObject({ ok: false, error: { code: 'invalid-response', detail: expect.stringContaining('JSON'), requestId: 'req-invalid-json' } });
   });
   it('explains truncation before parsing', async () => {
-    const f = await fixture(); model.create.mockResolvedValueOnce({ choices: [{ finish_reason: 'length', message: { content: '{' } }] });
+    const f = await fixture(); model.create.mockResolvedValueOnce({ ...completedResponse('{'), status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } });
     expect(await f.test()).toMatchObject({ ok: false, error: { code: 'invalid-response', detail: expect.stringContaining('截断') } });
   });
   it.each(['not JSON', JSON.stringify({ ...analysis, translation: { title: '标题', summary: '' } })])('rejects invalid results without caching', async content => {
-    const f = await fixture(); model.create.mockResolvedValue({ choices: [{ finish_reason: 'stop', message: { content } }] });
+    const f = await fixture(); model.create.mockResolvedValue(completedResponse(content));
     expect(await f.test()).toMatchObject({ ok: false, error: { code: 'invalid-response' } });
     expect(await f.db.newsAnalysis.count()).toBe(0); expect(await f.usage()).toBe('1');
   });
   it('previews uncertain rule fallback without another translation request', async () => {
-    const f = await fixture(); model.create.mockResolvedValue({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...analysis, language: 'zh-Hans', translation: null, relation: 'uncertain' }) } }] });
+    const f = await fixture(); model.create.mockResolvedValue(completedResponse(JSON.stringify({ ...analysis, language: 'zh-Hans', translation: null, relation: 'uncertain' })));
     expect(await f.test()).toMatchObject({ ok: true, preview: { visible: true, decisionBy: 'ai-uncertain-rules' }, result: { translation: null } });
     expect(model.create).toHaveBeenCalledOnce();
   });
@@ -103,7 +103,7 @@ describe('administrator AI test', () => {
     expect(first.taskId).not.toBe(second.taskId); expect(await f.usage()).toBe('0');
     const pending = f.run(); await vi.waitFor(() => expect(model.create).toHaveBeenCalledOnce());
     expect((await f.runtime.task(second.taskId)).status).toBe('queued'); expect(await f.usage()).toBe('1');
-    finish({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(analysis) } }] }); await pending; await f.run();
+    finish(completedResponse(JSON.stringify(analysis))); await pending; await f.run();
     expect(await f.usage()).toBe('2'); expect(model.create).toHaveBeenCalledTimes(2);
   });
   it('requires a guard-authenticated administrator and rejects foreign origins', () => {

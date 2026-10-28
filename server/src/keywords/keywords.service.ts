@@ -47,7 +47,7 @@ export class KeywordsService {
       if (error.code === 'P2002') throw new ConflictException('Keyword already exists');
       throw error;
     }
-    await this.bridge?.rebuild();
+    await this.bridge?.rematchKeyword(keyword.id);
     const task = await this.entitiesService.createForKeyword(keyword.id, keyword.text);
     return { ...keyword, ...(task || {}) };
   }
@@ -65,7 +65,7 @@ export class KeywordsService {
         },
       });
       if (data.text) await this.prisma.entityCard.updateMany({ where: { keywordId: id }, data: { name: keyword.text } });
-      await this.bridge?.rebuild();
+      if (data.text !== undefined || data.isActive !== undefined) await this.bridge?.rematchKeyword(id);
       return keyword;
     } catch (error: any) {
       if (error.code === 'P2025') throw new NotFoundException('Keyword not found');
@@ -77,14 +77,13 @@ export class KeywordsService {
     const keyword = await this.prisma.keyword.findUnique({ where: { id } });
     if (!keyword) throw new NotFoundException('Keyword not found');
     const updated = await this.prisma.keyword.update({ where: { id }, data: { isActive: !keyword.isActive } });
-    await this.bridge?.rebuild();
+    await this.bridge?.rematchKeyword(id);
     return updated;
   }
 
   async remove(id: string) {
     try {
       await this.prisma.keyword.delete({ where: { id } });
-      await this.bridge?.rebuild();
     } catch (error: any) {
       if (error.code === 'P2025') throw new NotFoundException('Keyword not found');
       throw error;

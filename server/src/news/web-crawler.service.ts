@@ -33,7 +33,7 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
   private verificationOpening = false;
   private browserRevision = 0;
   private verified = new Map<string, { state: StorageState; timer: ReturnType<typeof setTimeout> }>();
-  private siteStates = new Map<string, { state: StorageState; expiresAt: number }>();
+  private siteStates = new Map<string, { state: StorageState; expiresAt: number; timer: ReturnType<typeof setTimeout> }>();
   private settings = defaultBrowserConfig();
   constructor(private readonly adapters: SourceAdapterService) {}
   onModuleInit() { this.adapters.registerWeb((source, rules) => this.collect(source, rules)); }
@@ -61,7 +61,7 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
             'network.prefetch-next': false, 'network.dns.disablePrefetch': true, 'network.http.speculative-parallel-limit': 0,
             'network.captive-portal-service.enabled': false, 'network.connectivity-service.enabled': false } });
       })().then(browser => {
-          browser.on('disconnected', () => { if (this.browser === pending) { this.browser = undefined; this.siteStates.clear(); this.verified.forEach(saved => clearTimeout(saved.timer)); this.verified.clear(); } }); return browser;
+          browser.on('disconnected', () => { if (this.browser === pending) { this.browser = undefined; this.clearSiteStates(); this.verified.forEach(saved => clearTimeout(saved.timer)); this.verified.clear(); } }); return browser;
         }).catch(error => { if (this.browser === pending) this.browser = undefined; throw error instanceof SourceFetchError ? error : new SourceFetchError('browser-unavailable', 'Camoufox 启动失败，请运行 node scripts/install-camoufox.cjs 并检查系统依赖；Linux 虚拟显示需要 Xvfb，不会回退到 Chromium'); });
       this.browser = pending;
     }
@@ -75,7 +75,7 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
   private release(limit: number) { this.activeLimits.splice(this.activeLimits.indexOf(limit), 1); this.waiting.splice(0).forEach(wake => wake()); }
   private resetBrowser(pending: Promise<Browser> | undefined) {
     if (!pending || this.browser !== pending) return;
-    this.browser = undefined; this.siteStates.clear();
+    this.browser = undefined; this.clearSiteStates();
     this.verified.forEach(saved => clearTimeout(saved.timer)); this.verified.clear();
     void pending.then(browser => browser.close({ reason: '网页采集会话未正常结束，重新建立浏览器' }))
       .catch(() => console.warn('异常浏览器关闭失败，后续任务将重新建立浏览器'));
@@ -125,10 +125,18 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
       } finally { clearTimeout(cleanupDeadline); this.release(limit); }
     }
   }
+  private forgetSiteState(key: string) {
+    clearTimeout(this.siteStates.get(key)?.timer);
+    this.siteStates.delete(key);
+  }
+  private clearSiteStates() {
+    this.siteStates.forEach(saved => clearTimeout(saved.timer));
+    this.siteStates.clear();
+  }
   private siteState(source: NewsSourceConfig) {
     const key = this.siteKey(source);
     const saved = this.siteStates.get(key);
-    if (saved && saved.expiresAt <= Date.now()) { this.siteStates.delete(key); return; }
+    if (saved && saved.expiresAt <= Date.now()) { this.forgetSiteState(key); return; }
     return saved?.state;
   }
   private async rememberSiteState(source: NewsSourceConfig, context: BrowserContext, revision: number, signal: AbortSignal) {
@@ -142,10 +150,15 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
     });
     state.origins = state.origins.filter(origin => origin.origin === target.origin);
     const key = this.siteKey(source);
-    if (!this.siteStates.has(key) && this.siteStates.size >= 20) this.siteStates.delete(this.siteStates.keys().next().value!);
-    this.siteStates.set(key, { state, expiresAt: Date.now() + 1800000 });
+    if (!this.siteStates.has(key) && this.siteStates.size >= 20) this.forgetSiteState(this.siteStates.keys().next().value!);
+    clearTimeout(this.siteStates.get(key)?.timer);
+    // The reuse window stays at 30 minutes; release expired storage even if the site is never visited again.
+    const expiresAt = Date.now() + 1800000;
+    const timer = setTimeout(() => this.forgetSiteState(key), Math.max(0, expiresAt - Date.now()));
+    timer.unref();
+    this.siteStates.set(key, { state, expiresAt, timer });
   }
-  async loadPage(source: NewsSourceConfig): Promise<LoadedWebPage> {
+  async loadPage(source: NewsSourceConfig, includeScreenshot = true): Promise<LoadedWebPage> {
     const config = source.web!; const settings = this.settings;
     const revision = this.browserRevision;
     let session: CrawlerPage | undefined;
@@ -179,17 +192,19 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
           }
           if (!await button.count() || !await button.first().isVisible()) stopReason = 'no-more';
         }
-        phase = '读取页面与截图';
-        const captured = await captureStablePage(current, settings, expiresAt, timeoutMs);
+        phase = includeScreenshot ? '读取页面与截图' : '读取页面';
+        // Automatic collection consumes HTML only; previews keep the original screenshot path.
+        const captured = includeScreenshot ? await captureStablePage(current, settings, expiresAt, timeoutMs)
+          : { html: await readHtml(), screenshot: null };
         html = captured.html;
         const screenshot = captured.screenshot;
         await this.rememberSiteState(source, current.context, revision, current.controller.signal);
         current.controller.signal.throwIfAborted();
-        return { url: page.url(), status: current.status, html, bytes: Buffer.byteLength(html), screenshot: `data:image/jpeg;base64,${screenshot.toString('base64')}`,
+        return { url: page.url(), status: current.status, html, bytes: Buffer.byteLength(html), screenshot: screenshot ? `data:image/jpeg;base64,${screenshot.toString('base64')}` : '',
           browserMode: this.browserMode(), loadedAt: new Date(), loadMoreClicks, stopReason, complete: stopReason !== 'page-limit' };
       });
     } catch (error) {
-      if (error instanceof SourceFetchError && ['access-denied', 'captcha'].includes(error.code)) this.siteStates.delete(this.siteKey(source));
+      if (error instanceof SourceFetchError && ['access-denied', 'captcha'].includes(error.code)) this.forgetSiteState(this.siteKey(source));
       if (error instanceof SourceFetchError) throw error;
       if (session?.failure) throw session.failure;
       throw new SourceFetchError(error instanceof errors.TimeoutError ? 'page-timeout' : 'browser-error',
@@ -197,7 +212,7 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
     }
   }
   async collect(source: NewsSourceConfig, rules: FilterRule[], fragmentOnly = false): Promise<CollectionResult> {
-    if (source.web!.loadMoreText && !fragmentOnly) return inspectWebPage(await this.loadPage(source), source, rules);
+    if (source.web!.loadMoreText && !fragmentOnly) return inspectWebPage(await this.loadPage(source, false), source, rules);
     const settings = this.settings;
     const revision = this.browserRevision;
     try {
@@ -243,7 +258,7 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
         return { ...output, pageFragment, status: session.status };
       });
     } catch (error) {
-      if (error instanceof SourceFetchError && ['access-denied', 'captcha'].includes(error.code)) this.siteStates.delete(this.siteKey(source));
+      if (error instanceof SourceFetchError && ['access-denied', 'captcha'].includes(error.code)) this.forgetSiteState(this.siteKey(source));
       if (error instanceof SourceFetchError) throw error;
       throw new SourceFetchError(error instanceof errors.TimeoutError ? 'page-timeout' : 'browser-error', error instanceof errors.TimeoutError ? '页面处理超过时间上限，已关闭上下文' : '浏览器页面处理失败，请核对浏览器依赖和来源配置');
     }
@@ -252,7 +267,7 @@ export class WebCrawlerService implements OnModuleInit, OnModuleDestroy {
   private sourceKey(source: NewsSourceConfig) { return `${source.id}\n${source.target}\n${source.useProxy !== false ? 'shared' : 'direct'}`; }
   async clearVerification() {
     this.browserRevision++;
-    this.siteStates.clear();
+    this.clearSiteStates();
     this.verified.forEach(saved => clearTimeout(saved.timer));
     this.verified.clear();
     if (this.verification) { const session = this.verification; this.verification = undefined; clearTimeout(session.timer); session.controller.abort(); await session.context.close(); }

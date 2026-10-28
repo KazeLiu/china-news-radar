@@ -1,0 +1,38 @@
+# Non-browser resource settings; the server/browser keeps the base limits.
+# Check the actual crawler peak before deploying on a shared 4 GB host.
+services:
+  server:
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+  client:
+    mem_limit: 384m
+    cpus: 0.5
+    environment:
+      NODE_OPTIONS: --max-old-space-size=256
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+  caddy:
+    mem_limit: 128m
+    cpus: 0.25
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+  rsshub:
+    profiles: ['rsshub']
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      NODE_OPTIONS: --max-old-space-size=384
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+  telegram:
+    mem_limit: 256m
+    cpus: 0.25
+    environment:
+      NODE_OPTIONS: --max-old-space-size=128
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
