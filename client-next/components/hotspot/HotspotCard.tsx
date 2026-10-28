@@ -4,7 +4,7 @@ import Image from 'next/image';
 import { m, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, Flame, Zap, TrendingUp,
-  Eye, Activity, Clock, Target, MessageCircle, Repeat2, Quote, User,
+  Eye, Target, MessageCircle, Repeat2, Quote, User,
   ShieldAlert, ChevronDown, ChevronUp, ThermometerSun, FileText,
   Sparkles,
 } from 'lucide-react';
@@ -103,14 +103,7 @@ export function HotspotCard({
     >
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1 min-w-0">
-          {/* Row 1: Meta badges — kept lean.
-              Removed: 可信 chip (the importance badge + 关键词 chip already
-              encode trust), 直接提及/间接相关 chip (the presence of a 关键词
-              chip already implies relevance — having a separate "this is
-              relevant to your keyword" badge on a card matched by that
-              keyword was redundant).
-              Kept: importance · source · keyword · 可疑 (only when suspicious,
-              acts as a warning) · heat. */}
+          {/* Source badges and a compact, right-aligned metadata row. */}
           <div className="flex flex-wrap items-center gap-2 mb-3">
             {hotspot.newsItemId && hotspot.qualityScore == null && <span className="text-xs text-[var(--text-muted)]">{hotspot.aiStatus === 'done' ? '未评分' : '规则兜底'}</span>}
             <span className={cn(
@@ -142,6 +135,22 @@ export function HotspotCard({
               <ThermometerSun className="w-3 h-3" />
               {heat.label} {heatScore}
             </span>}
+            <div className="ml-auto flex max-w-full min-w-0 items-center gap-3 overflow-x-auto whitespace-nowrap text-xs text-[var(--text-muted)]">
+              {hotspot.authorName && <span className="flex min-w-0 shrink-0 items-center gap-1.5 text-[var(--text-secondary)]"
+                title={[hotspot.authorName, hotspot.authorUsername && `@${hotspot.authorUsername}`, hotspot.authorVerified && '已认证', hotspot.authorFollowers != null && `${hotspot.authorFollowers.toLocaleString()} 粉丝`].filter(Boolean).join(' · ')}>
+                {hotspot.authorAvatar ? <Image src={hotspot.authorAvatar} unoptimized referrerPolicy="no-referrer" alt="" width={16} height={16} className="rounded-full object-cover" /> : <User className="h-3.5 w-3.5 shrink-0" />}
+                <span className="max-w-28 truncate sm:max-w-40">{hotspot.authorName}</span>
+              </span>}
+              {(!hotspot.newsItemId || hotspot.qualityScore != null) && <span className="flex shrink-0 items-center gap-1">
+                <Target className="h-3.5 w-3.5" />相关性 {hotspot.relevance}%
+              </span>}
+              {hotspot.publishedAt && <time dateTime={hotspot.publishedAt} title={`发布于 ${formatDateTime(hotspot.publishedAt)}`} className="shrink-0">
+                发布 {relativeTime(hotspot.publishedAt)}
+              </time>}
+              <time dateTime={hotspot.createdAt} title={`抓取于 ${formatDateTime(hotspot.createdAt)}`} className="shrink-0">
+                抓取 {relativeTime(hotspot.createdAt)}
+              </time>
+            </div>
           </div>
 
           {/* Title */}
@@ -172,33 +181,8 @@ export function HotspotCard({
             <HotspotMedia media={hotspot.media} />
           )}
 
-          {/* Author */}
-          {hotspot.authorName && (
-            <div className="flex items-center gap-2 mb-3">
-              {hotspot.authorAvatar ? (
-                <Image src={hotspot.authorAvatar} alt="" width={20} height={20} className="rounded-full object-cover" />
-              ) : (
-                <User className="w-4 h-4 text-[var(--text-muted)]" />
-              )}
-              <span className="text-xs text-[var(--text-secondary)]">
-                {hotspot.authorName}
-                {hotspot.authorUsername && <span className="text-[var(--text-muted)] ml-1">@{hotspot.authorUsername}</span>}
-              </span>
-              {hotspot.authorVerified && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--accent-blue)]/15 text-[var(--accent-blue)] dark:bg-blue-500/15 dark:text-blue-400">✓ 认证</span>
-              )}
-              {hotspot.authorFollowers != null && hotspot.authorFollowers > 0 && (
-                <span className="text-[10px] text-[var(--text-muted)]">{hotspot.authorFollowers.toLocaleString()} 粉丝</span>
-              )}
-            </div>
-          )}
-
           {/* Engagement metrics */}
-          <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-muted)] mb-2">
-            {(!hotspot.newsItemId || hotspot.qualityScore != null) && <span className="flex items-center gap-1">
-              <Target className="w-3.5 h-3.5" />
-              相关性 {hotspot.relevance}%
-            </span>}
+          <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-[var(--text-muted)] empty:hidden">
             {hotspot.likeCount != null && hotspot.likeCount > 0 && (
               <span className="flex items-center gap-1" title="点赞">
                 <Zap className="w-3.5 h-3.5" />
@@ -240,30 +224,6 @@ export function HotspotCard({
                 💬 {hotspot.danmakuCount.toLocaleString()}
               </span>
             )}
-          </div>
-
-          {/* Timestamps */}
-          <div className="flex flex-wrap items-center gap-3 text-[11px] text-[var(--text-muted)]">
-            {/* datetime carries the machine-readable timestamp; the visible text
-                stays relative ("3 小时前"), which crawlers can't parse alone. */}
-            {hotspot.publishedAt && (
-              <time
-                dateTime={hotspot.publishedAt}
-                className="flex items-center gap-1"
-                title={`发布于 ${formatDateTime(hotspot.publishedAt)}`}
-              >
-                <Clock className="w-3 h-3" />
-                发布 {relativeTime(hotspot.publishedAt)}
-              </time>
-            )}
-            <time
-              dateTime={hotspot.createdAt}
-              className="flex items-center gap-1"
-              title={`抓取于 ${formatDateTime(hotspot.createdAt)}`}
-            >
-              <Activity className="w-3 h-3" />
-              抓取 {relativeTime(hotspot.createdAt)}
-            </time>
           </div>
 
           {/* AI relevance reason — only present for keyword-matched cards.

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
-import { Play, X } from 'lucide-react';
+import { Play, X, ImageOff, RotateCw } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { MediaItem } from '../../types';
 
@@ -40,7 +40,7 @@ export function HotspotMedia({ media }: Props) {
           const spanClass = count === 3 && i === 0 ? 'row-span-2' : '';
           return (
             <MediaTile
-              key={m.url}
+              key={`${m.type}:${m.url}:${m.previewUrl || ''}`}
               item={m}
               spanClass={spanClass}
               singleItem={count === 1}
@@ -79,14 +79,20 @@ function MediaTile({
 }) {
   const isVideo = item.type === 'video' || item.type === 'gif';
   const src = isVideo ? (item.previewUrl ?? item.url) : item.url;
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   return (
     <button
       type="button"
-      aria-label={isVideo ? '播放报道视频' : '放大报道配图'}
-      onClick={isVideo ? onPlayVideo : onOpenImage}
+      aria-label={isVideo ? '播放报道视频' : failed ? '重新加载报道图片' : '放大报道配图'}
+      onClick={() => {
+        if (isVideo) onPlayVideo();
+        else if (failed) { setAttempt(value => value + 1); setFailed(false); }
+        else onOpenImage();
+      }}
       className={cn(
-        'relative overflow-hidden',
+        'group/media relative overflow-hidden focus-visible:outline-2 focus-visible:outline-[var(--accent-blue)]',
         // Use darker bg for better contrast when image loads
         'bg-slate-100 dark:bg-slate-800',
         spanClass,
@@ -94,20 +100,23 @@ function MediaTile({
         singleItem ? 'aspect-video max-h-[280px] w-full' : 'aspect-square max-h-[200px] w-full',
       )}
     >
-      <Image
+      {failed ? <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-[var(--text-secondary)]" role="status">
+        <ImageOff className="h-6 w-6 text-[var(--text-muted)]" />
+        <span>{isVideo ? '视频预览加载失败' : '图片加载失败'}</span>
+        <span className="flex items-center gap-1 text-xs text-[var(--accent-blue)]">{isVideo ? <Play className="h-3.5 w-3.5" /> : <RotateCw className="h-3.5 w-3.5" />}{isVideo ? '点击播放视频' : '点击重试'}</span>
+      </span> : <Image
+        key={attempt}
         src={src}
         unoptimized
         fill
+        referrerPolicy="no-referrer"
         loading="lazy"
         alt={isVideo ? '报道视频预览' : '报道配图'}
         sizes="(max-width: 768px) 50vw, 25vw"
         className={cn(isVideo ? 'object-contain' : 'object-cover', 'transition-transform group-hover/media:scale-[1.02]')}
-        onError={(e) => {
-          // Hide broken images so layout doesn't show a broken icon
-          (e.currentTarget as HTMLImageElement).style.display = 'none';
-        }}
-      />
-      {isVideo && (
+        onError={() => setFailed(true)}
+      />}
+      {isVideo && !failed && (
         <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <span className="w-14 h-14 rounded-full bg-black/70 backdrop-blur-sm flex items-center justify-center ring-2 ring-white/40 shadow-xl group-hover/media:bg-black/80 group-hover/media:scale-110 transition">
             <Play className="w-6 h-6 text-white ml-0.5" fill="white" />
@@ -155,6 +164,8 @@ function VideoModal({ item, onClose }: { item: MediaItem; onClose: () => void })
 
 function ImageLightbox({ item, onClose }: { item: MediaItem; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [failed, setFailed] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
   return (
     <dialog ref={dialog} aria-label="报道配图" onCancel={onClose}
@@ -169,16 +180,26 @@ function ImageLightbox({ item, onClose }: { item: MediaItem; onClose: () => void
       >
         <X className="w-5 h-5" />
       </button>
-      <Image
+      {failed ? <div className="flex flex-col items-center gap-4 text-white" onClick={event => event.stopPropagation()}>
+        <ImageOff className="h-8 w-8" />
+        <p role="status">图片加载失败</p>
+        <button type="button" onClick={() => { setAttempt(value => value + 1); setFailed(false); }} className="flex min-h-11 items-center gap-2 rounded-lg bg-white/15 px-4 hover:bg-white/25">
+          <RotateCw className="h-4 w-4" />重新加载
+        </button>
+        <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm underline underline-offset-4">打开原图</a>
+      </div> : <Image
+        key={attempt}
         src={item.url}
         alt="报道配图"
         unoptimized
+        referrerPolicy="no-referrer"
         width={0}
         height={0}
         sizes="100vw"
         className="max-w-full max-h-[90vh] w-auto h-auto rounded-lg shadow-2xl"
         onClick={(e) => e.stopPropagation()}
-      />
+        onError={() => setFailed(true)}
+      />}
     </dialog>
   );
 }
