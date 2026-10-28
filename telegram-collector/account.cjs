@@ -25,12 +25,12 @@ async function backendRequest(route = '', payload) {
   let response;
   try {
     const url = new URL(`${base}${route ? `/${route}` : ''}`);
-    const body = payload === undefined ? undefined : JSON.stringify(payload);
+    const body = payload === undefined ? undefined : Buffer.isBuffer(payload) ? payload : JSON.stringify(payload);
     // Node fetch adds Sec-Fetch headers, which the private collector endpoint rejects.
     response = await new Promise((resolve, reject) => {
       const request = (url.protocol === 'https:' ? https : http).request(url, {
         method: body === undefined ? 'GET' : 'POST', signal: AbortSignal.timeout(15_000),
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'Cache-Control': 'no-store',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': Buffer.isBuffer(payload) ? 'application/octet-stream' : 'application/json', 'Cache-Control': 'no-store',
           ...(body === undefined ? {} : { 'Content-Length': Buffer.byteLength(body) }) },
       }, incoming => {
         const chunks = [];

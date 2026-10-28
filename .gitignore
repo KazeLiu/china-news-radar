@@ -31,6 +31,7 @@ telegram-collector/state/
 server/prisma/media/
 server/prisma/preview/
 backups/
+china-radar-*.radar
 __pycache__/
 *.pyc
 

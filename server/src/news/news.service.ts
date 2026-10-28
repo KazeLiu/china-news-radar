@@ -710,6 +710,26 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       status: await this.status(), localOnly: false };
   }
   adminNetworkPrivate() { return { proxyUrl: sourceNetwork().proxyUrl }; }
+  async migrationConfiguration() {
+    const states = await this.prisma.newsSource.findMany({ select: { id: true, enabled: true } });
+    return { ...this.config, network: { ...sourceNetwork() }, browser: validateBrowserConfig(this.crawler.browserConfiguration()),
+      sources: this.config.sources.map(source => ({ ...source, enabled: states.find(state => state.id === source.id)?.enabled ?? source.enabled })) };
+  }
+  lockForMigration() {
+    this.runtime.assertIdleForMigration();
+    if (this.busy || this.configBusy || this.testingSource || this.preparingAnalysis || this.startingHistory) throw new ConflictException('当前正在采集或保存配置，请等待本轮结束后重试迁移');
+    this.configBusy = true;
+    return () => { this.configBusy = false; };
+  }
+  async reloadAfterMigration() {
+    const stored = await this.prisma.setting.findUniqueOrThrow({ where: { key: ADMIN_CONFIG_KEY } });
+    this.config = restoreConfig(stored.value); this.configRevision = randomUUID();
+    configureSourceNetwork(this.config.network); this.crawler.configureBrowser(this.config.browser);
+    this.webPreviews.clear(); await this.crawler.clearVerification();
+    await this.reapplyFilters();
+    for (const source of this.config.sources) await this.reapplySourcePolicy(source.id);
+    for (const keyword of await this.prisma.keyword.findMany({ select: { id: true } })) await this.bridge?.rematchKeyword(keyword.id);
+  }
   private async backupConfiguration(section: 'browser' | 'network' | 'sources') {
     const databases = await this.prisma.$queryRawUnsafe<Array<{ name: string; file: string }>>('PRAGMA database_list');
     const file = databases.find(database => database.name === 'main')?.file;

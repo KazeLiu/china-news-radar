@@ -4,6 +4,7 @@ const { setTimeout: delay } = require('node:timers/promises');
 const { state, sessionFile, CollectorError, backendRequest, failure, reportStatus } = require('./account.cjs');
 const { runCollector } = require('./collection.cjs');
 const { Authorization } = require('./authorization.cjs');
+const migration = require('./migration.cjs');
 
 const sameAccount = (a, b) => a && b && ['revision', 'apiId', 'apiHash', 'phone', 'proxyUrl'].every(key => a[key] === b[key]);
 async function main() {
@@ -25,7 +26,17 @@ async function main() {
   try {
     while (!shutdown.signal.aborted) {
       let control;
-      try { control = await backendRequest('control', { workerId }); }
+      try {
+        if (!await migration.recover(workerId)) { await delay(2_000); continue; }
+        control = await backendRequest('control', { workerId, migrationVersion: 1 });
+        if (control.migration) {
+          await stopJob();
+          if (current) await reportStatus('disconnected', current, { phase: 'stopped' });
+          await migration.hold(workerId, control.migration, shutdown.signal);
+          current = undefined; blocked = undefined; continue;
+        }
+        if (control.pendingMigration) throw new CollectorError('migration-state-missing', '迁移等待恢复，但本机缺少暂存状态；请保留备份并检查采集器的持久卷。');
+      }
       catch (error) {
         if (error.code === 'collector-auth-failed' || error.status === 409) throw error;
         const detail = failure(error); const signature = `${detail.code}:${error.status || ''}`;

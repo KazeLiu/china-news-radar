@@ -12,10 +12,11 @@ const active = (auth: Authorization) => !['authorized', 'failed', 'cancelled'].i
 
 @Injectable()
 export class TelegramControlService implements OnModuleDestroy {
-  private worker?: { id: string; checkedAt: number };
+  private worker?: { id: string; checkedAt: number; migration: boolean };
   private auth?: Authorization;
   private timer?: ReturnType<typeof setTimeout>;
   private collectionRevision = 0;
+  private transfer?: { id: string; workerId: string; command?: { id: string; action: 'snapshot' | 'prepare'; data?: unknown }; resolve?: (value: unknown) => void; reject?: (error: Error) => void; timer?: ReturnType<typeof setTimeout> };
   constructor(private readonly account: TelegramAccountService) {}
 
   private expire() {
@@ -36,6 +37,7 @@ export class TelegramControlService implements OnModuleDestroy {
         delivery: auth.delivery, error: auth.error, inputPending: auth.input !== undefined, canSubmit: auth.owner === owner } : null };
   }
   async start(owner: string) {
+    if (this.transfer) throw new ConflictException('正在迁移 Telegram 状态，请稍后再登录');
     this.expire();
     const current = await this.account.credentials();
     if (this.auth && active(this.auth)) throw new ConflictException('账号正在授权，请完成或取消当前登录。');
@@ -64,17 +66,57 @@ export class TelegramControlService implements OnModuleDestroy {
   completionFailed(id: unknown) {
     if (this.auth && this.auth.id === id && this.auth.phase === 'authorized') this.finish('failed', { code: 'configuration-save-failed', message: 'Telegram 已验证登录，但无法保存采集开关。请检查后端数据库写入权限，再点击“启动采集”复用已保存的 session。' });
   }
-  async poll(body: { workerId?: unknown }) {
+  async poll(body: { workerId?: unknown; migrationVersion?: unknown }) {
     if (typeof body?.workerId !== 'string' || !/^[a-f0-9-]{36}$/.test(body.workerId)) throw new BadRequestException('采集器实例无效');
+    if (this.transfer && this.transfer.workerId !== body.workerId) throw new ConflictException('另一采集器正在保存迁移状态，请等待完成');
     this.expire();
     if (this.worker && this.worker.id !== body.workerId && Date.now() - this.worker.checkedAt < 30_000) throw new ConflictException('已有采集器实例在线，请停止重复实例。');
     if (this.worker && this.worker.id !== body.workerId && this.auth && active(this.auth)) this.finish('failed', { code: 'collector-restarted', message: '采集服务已重启，请重新开始登录。' });
-    this.worker = { id: body.workerId, checkedAt: Date.now() };
+    this.worker = { id: body.workerId, checkedAt: Date.now(), migration: body.migrationVersion === 1 };
     this.expire();
+    if (this.transfer) return { migration: { id: this.transfer.id }, auth: null };
+    const pendingMigration = await this.account.migrationPending();
+    if (pendingMigration) return { pendingMigration: true, auth: null };
     const credentials = await this.account.credentials();
     if (this.auth && active(this.auth) && (this.auth.revision !== credentials.revision || this.auth.proxyUrl !== credentials.proxyUrl)) this.finish('cancelled', { code: 'configuration-changed', message: '账号或代理配置已修改，请重新开始登录。' });
     const auth = this.auth;
     return { credentials, collectionRevision: this.collectionRevision, auth: auth && active(auth) && auth.workerId === body.workerId ? { id: auth.id, phase: auth.phase, promptId: auth.promptId, input: auth.input } : null };
+  }
+  migrationReady() { return this.status().workerOnline && !!this.worker?.migration && !(this.auth && active(this.auth)); }
+  migrationActive(id: string) { return this.transfer?.id === id; }
+  beginMigration(id: string) {
+    if (this.transfer) throw new ConflictException('采集器正在迁移');
+    if (!this.migrationReady()) throw new ConflictException('完整迁移需要新版 Telegram 采集器在线，且没有正在进行的登录；请先更新并启动采集器');
+    this.transfer = { id, workerId: this.worker!.id };
+  }
+  migrationCommand(action: 'snapshot' | 'prepare', data?: unknown): Promise<unknown> {
+    const transfer = this.transfer;
+    if (!transfer || transfer.command) throw new ConflictException('迁移状态已变化');
+    transfer.command = { id: randomUUID(), action, data };
+    return new Promise((resolve, reject) => {
+      transfer.resolve = resolve; transfer.reject = reject;
+      transfer.timer = setTimeout(() => { transfer.command = undefined; transfer.resolve = undefined; transfer.reject = undefined; reject(new ConflictException('采集器状态保存超时；原状态和备份已保留，请检查采集器后重试')); }, 120_000);
+    });
+  }
+  migrationPoll(body: { workerId?: unknown; id?: unknown }) {
+    const transfer = this.transfer;
+    if (!transfer || transfer.id !== body?.id || transfer.workerId !== body.workerId) return { released: true };
+    if (this.worker?.id === body.workerId) this.worker.checkedAt = Date.now();
+    return { released: false, command: transfer.command || null };
+  }
+  migrationReport(body: { workerId?: unknown; id?: unknown; commandId?: unknown; ok?: unknown; data?: unknown; errorCode?: unknown }) {
+    const transfer = this.transfer;
+    if (!transfer || transfer.id !== body?.id || transfer.workerId !== body.workerId || transfer.command?.id !== body.commandId) return { accepted: false };
+    if (typeof body.ok !== 'boolean') throw new BadRequestException('迁移结果无效');
+    clearTimeout(transfer.timer);
+    const resolve = transfer.resolve; const reject = transfer.reject;
+    transfer.command = undefined; transfer.resolve = undefined; transfer.reject = undefined;
+    if (body.ok) resolve?.(body.data); else reject?.(new ConflictException(body.errorCode === 'migration-queue-conflict' ? '本站存在不同账号或相同消息内容冲突的未投递队列，已拒绝合并；请先处理原队列，未删除任何消息' : '采集器无法保存迁移状态，请检查状态目录权限、空间和队列格式；原状态已保留'));
+    return { accepted: true };
+  }
+  endMigration() {
+    if (this.transfer) { clearTimeout(this.transfer.timer); this.transfer.reject?.(new ConflictException('迁移已结束')); this.transfer = undefined; }
+    this.restartCollection();
   }
   report(body: { workerId?: unknown; id?: unknown; phase?: unknown; delivery?: unknown; error?: Detail }) {
     this.expire();
@@ -93,5 +135,5 @@ export class TelegramControlService implements OnModuleDestroy {
     }
     return { promptId: auth.promptId };
   }
-  onModuleDestroy() { clearTimeout(this.timer); if (this.auth) this.auth.input = undefined; }
+  onModuleDestroy() { this.endMigration(); clearTimeout(this.timer); if (this.auth) this.auth.input = undefined; }
 }

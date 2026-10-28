@@ -1,14 +1,16 @@
-import { CanActivate, Controller, ExecutionContext, Get, Global, Header, Injectable, Module, Post, Body, Req, Res } from '@nestjs/common';
+import { CanActivate, ConflictException, Controller, ExecutionContext, Get, Global, Header, Injectable, Module, Post, Body, Req, Res } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AdminAuthService } from './admin-auth.service';
 import { AdminRequest } from '../news/admin-access';
 import { FollowAccessService } from './follow-access.service';
 import { FollowAccessController } from './follow-access.controller';
+import { assertNoConfigurationMigration } from '../news/config-migration-lock';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 class AdminGuard implements CanActivate {
-  constructor(private readonly auth: AdminAuthService, private readonly follows: FollowAccessService) {}
+  constructor(private readonly auth: AdminAuthService, private readonly follows: FollowAccessService, private readonly prisma: PrismaService) {}
   async canActivate(context: ExecutionContext) {
     if (context.getType() !== 'http') return true;
     const req = context.switchToHttp().getRequest<AdminRequest & { path: string; method: string }>();
@@ -28,6 +30,11 @@ class AdminGuard implements CanActivate {
       context.switchToHttp().getResponse().setHeader('Cache-Control', 'no-store');
       if (mutation) this.auth.checkOrigin(req);
       const session = await this.auth.session(req);
+      if (mutation && !path.startsWith('/api/news/admin/migration/')) {
+        assertNoConfigurationMigration();
+        if (await this.prisma.setting.findUnique({ where: { key: 'news-migration-pending' } })) throw new ConflictException('配置迁移尚在恢复，暂不能修改；请检查 Telegram 采集器和持久卷');
+        assertNoConfigurationMigration();
+      }
       req.adminAuthenticated = true;
       req.adminSessionId = session!.tokenHash;
     }

@@ -12,6 +12,7 @@ services:
     environment:
       DATABASE_URL: file:/data/radar.db
       RADAR_MODE: news
+      COLLECTOR_ENABLED: ${COLLECTOR_ENABLED:-true}
       HOST: 0.0.0.0
       PORT: '3001'
       CLIENT_URL: https://${RADAR_DOMAIN:?请配置 RADAR_DOMAIN}

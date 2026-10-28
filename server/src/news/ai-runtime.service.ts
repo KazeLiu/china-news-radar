@@ -8,6 +8,7 @@ import { AI_TIMEOUT_MS, InvalidAnalysisResponse, ResponsesFailure, aiTestError }
 import { SourceFetchError } from './public-network';
 import { NewsLogsService } from './news-logs.service';
 import { retryAfterMs } from './rules';
+import { configurationMigrationInProgress } from './config-migration-lock';
 
 export async function reserveAiUsage(tx: Prisma.TransactionClient, limit: number, now = new Date()) {
   const key = `news-ai-usage-${now.toISOString().slice(0, 10)}`;
@@ -47,6 +48,7 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
     this.timer = setInterval(() => { void this.tick().catch(() => console.warn('AI 调度暂不可用，任务与原文保留')); }, 1000);
   }
   onModuleDestroy() { this.stopped = true; if (this.timer) clearInterval(this.timer); }
+  assertIdleForMigration() { if (this.busy) throw new ConflictException('AI 调度正在处理任务，请稍后重试配置迁移'); }
   register(kind: string, handler: Handler, onFailed?: FailureHandler) { this.handlers.set(kind, handler); if (onFailed) this.failureHandlers.set(kind, onFailed); }
   async config() {
     const saved = await this.prisma.setting.findUnique({ where: { key: ADMIN_CONFIG_KEY } });
@@ -229,7 +231,7 @@ export class AiRuntimeService implements OnModuleInit, OnModuleDestroy {
     }
   }
   private async tick() {
-    if (this.busy || this.stopped) return;
+    if (this.busy || this.stopped || configurationMigrationInProgress()) return;
     this.busy = true;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     const owner = randomUUID();

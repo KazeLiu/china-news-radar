@@ -13,6 +13,7 @@ type CollectorStatus = { session: typeof SESSIONS[number]; running: boolean; che
 @Injectable()
 export class TelegramAccountService {
   constructor(private readonly prisma: PrismaService) {}
+  migrationPending() { return this.prisma.setting.findUnique({ where: { key: 'news-migration-pending' } }); }
   async credentials() {
     const row = await this.prisma.setting.findUnique({ where: { key: ACCOUNT_KEY } });
     const saved: Account = row ? JSON.parse(row.value) : {};

@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   // Socket.IO polling must keep its trailing slash without an HTTP redirect.
   skipTrailingSlashRedirect: true,
   // Browser sessions allow up to 300 seconds; leave time to return timeout diagnostics.
-  experimental: { proxyTimeout: 360_000 },
+  experimental: { proxyTimeout: 360_000, proxyClientMaxBodySize: '32mb' },
   // API 代理到后端 NestJS
   async rewrites() {
     const apiUrl = process.env.INTERNAL_API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:3001';

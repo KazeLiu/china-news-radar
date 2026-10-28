@@ -3,7 +3,7 @@ import { NewsAuditInterceptor } from './news-audit.interceptor';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-function mediaDirectory() {
+export function mediaDirectory() {
   const database = path.resolve(__dirname, '../../prisma', (process.env.DATABASE_URL || 'file:radar.db').slice(5));
   return process.env.MEDIA_DIR || path.join(path.dirname(database), 'media');
 }
