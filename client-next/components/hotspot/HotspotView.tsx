@@ -13,6 +13,7 @@ import {
   triggerHotspotCheck,
   getScanStatus,
   keywordsApi,
+  followsApi,
 } from "../../services/api";
 import {
   onNewHotspot,
@@ -104,23 +105,11 @@ export function HotspotView({
 
       Object.assign(filterParams, tabFilter(activeTab));
 
-      const [hotspotsData, keywordsData] = await Promise.all([
-        hotspotsApi.getAll(
-          filterParams as Parameters<typeof hotspotsApi.getAll>[0],
-        ),
-        keywordsApi.getAll(),
-      ]);
+      const hotspotsData = await hotspotsApi.getAll(filterParams as Parameters<typeof hotspotsApi.getAll>[0]);
       setHotspots(hotspotsData.data as unknown as Hotspot[]);
       setTotalPages(hotspotsData.pagination.totalPages);
       // Show count for the current tab/filter, not global total
       setStats({ total: hotspotsData.pagination.total });
-      setKeywords(keywordsData as unknown as Keyword[]);
-
-      const activeKeywords = (keywordsData as unknown as Keyword[]).reduce<string[]>(
-        (acc, k) => { if (k.isActive) acc.push(k.text); return acc; },
-        [],
-      );
-      if (activeKeywords.length > 0) subscribeToKeywords(activeKeywords);
     } catch (err) {
       setError(err instanceof Error ? err.message : '热点加载失败');
     } finally {
@@ -134,25 +123,23 @@ export function HotspotView({
     // subsequent filter/page/tab change load normally.
     if (skipInitialLoad.current) {
       skipInitialLoad.current = false;
-      // Keywords aren't part of the server payload, so still fetch those —
-      // they gate the WebSocket subscription for live updates.
-      keywordsApi
-        .getAll()
-        .then((kws) => {
-          const list = kws as unknown as Keyword[];
-          setKeywords(list);
-          const active = list.reduce<string[]>((acc, k) => {
-            if (k.isActive) acc.push(k.text);
-            return acc;
-          }, []);
-          if (active.length > 0) subscribeToKeywords(active);
-        })
-        .catch((err) => setError(err instanceof Error ? err.message : '关注关键词加载失败'));
       return;
     }
 
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    let cancelled = false;
+    followsApi.access().then(async access => {
+      if (!access.authenticated) return;
+      const list = await keywordsApi.getAll();
+      if (cancelled) return;
+      setKeywords(list);
+      subscribeToKeywords(list.filter(keyword => keyword.isActive).map(keyword => keyword.text));
+    }).catch(err => { if (!cancelled) setError(err instanceof Error ? err.message : '关注访问状态读取失败'); });
+    return () => { cancelled = true; };
+  }, []);
 
   // WebSocket
   useEffect(() => {

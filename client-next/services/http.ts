@@ -1,3 +1,7 @@
+export class HttpError extends Error {
+  constructor(readonly status: number, message: string) { super(message); }
+}
+
 export async function requestJson<T>(url: string, options: RequestInit = {}, allowEmpty = false): Promise<T> {
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
@@ -15,7 +19,7 @@ export async function requestJson<T>(url: string, options: RequestInit = {}, all
       : [502, 504].includes(response.status) ? '代理未收到后台的完整响应，请检查后台状态和代理等待时间。' : '服务请求失败。';
     const reason = typeof body?.detail === 'string' ? ` ${body.detail}` : '';
     const requestId = typeof body?.requestId === 'string' && /^[A-Za-z0-9_.:-]{1,160}$/.test(body.requestId) ? ` 请求 ID：${body.requestId}` : '';
-    throw new Error(`HTTP ${response.status}：${detail}${reason}${requestId}`);
+    throw new HttpError(response.status, `HTTP ${response.status}：${detail}${reason}${requestId}`);
   }
   if (response.status === 204) return undefined as T;
   const text = await response.text();

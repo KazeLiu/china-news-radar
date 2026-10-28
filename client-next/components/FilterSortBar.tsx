@@ -308,7 +308,7 @@ export default function FilterSortBar({ filters, onChange, keywords }: FilterSor
             <div className="flex items-center gap-2 flex-wrap p-3 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)]">
               <Dropdown label="来源" value={filters.source} options={sourceOptions} onChange={(v) => update('source', v)} />
               <Dropdown label="重要程度" value={filters.importance} options={IMPORTANCE_OPTIONS} onChange={(v) => update('importance', v)} />
-              <Dropdown label="关键词" value={filters.keywordId} options={keywordOptions} onChange={(v) => update('keywordId', v)} />
+              {keywords.length > 0 && <Dropdown label="关键词" value={filters.keywordId} options={keywordOptions} onChange={(v) => update('keywordId', v)} />}
               <Dropdown label="时间" value={filters.timeRange} options={TIME_RANGE_OPTIONS} onChange={(v) => update('timeRange', v)} />
               {sourceError && <span role="alert" className="text-red-500 text-xs">{sourceError}</span>}
             </div>

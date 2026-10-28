@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Bot, FileText, Globe, History, ListFilter, Moon, Radio, Rss, Sun, Network } from 'lucide-react';
+import { ArrowLeft, Bot, Bookmark, FileText, Globe, History, ListFilter, Moon, Radio, Rss, Sun, Network } from 'lucide-react';
 import { useTheme } from '@/providers/ThemeProvider';
 import { adminApi, type AdminSettings } from './admin-api';
 import { AiSettingsForm } from './AiSettingsForm';
@@ -15,11 +15,12 @@ import { RulesSettingsForm } from './RulesSettingsForm';
 import { NewsManagementPanel } from './NewsManagementPanel';
 import { LogsPanel } from './LogsPanel';
 import { TelegramAccountPanel } from './TelegramAccountPanel';
+import { FollowSettingsPanel } from './FollowSettingsPanel';
 import base from '../news.module.css';
 import styles from './admin.module.css';
 
-type Tab = 'ai' | 'sources' | 'network' | 'browser' | 'telegram' | 'rules' | 'news' | 'logs';
-const tabs = [{ id: 'ai' as const, label: 'AI 配置', Icon: Bot }, { id: 'sources' as const, label: '来源配置', Icon: Rss }, { id: 'network' as const, label: '代理设置', Icon: Network }, { id: 'browser' as const, label: '浏览器设置', Icon: Globe }, { id: 'telegram' as const, label: 'Telegram 账号', Icon: Radio }, { id: 'rules' as const, label: '过滤规则', Icon: ListFilter }, { id: 'news' as const, label: '新闻管理', Icon: FileText }, { id: 'logs' as const, label: '日志统计', Icon: History }];
+type Tab = 'ai' | 'sources' | 'network' | 'browser' | 'telegram' | 'rules' | 'news' | 'follows' | 'logs';
+const tabs = [{ id: 'ai' as const, label: 'AI 配置', Icon: Bot }, { id: 'sources' as const, label: '来源配置', Icon: Rss }, { id: 'network' as const, label: '代理设置', Icon: Network }, { id: 'browser' as const, label: '浏览器设置', Icon: Globe }, { id: 'telegram' as const, label: 'Telegram 账号', Icon: Radio }, { id: 'rules' as const, label: '过滤规则', Icon: ListFilter }, { id: 'news' as const, label: '新闻管理', Icon: FileText }, { id: 'follows' as const, label: '关注管理', Icon: Bookmark }, { id: 'logs' as const, label: '日志统计', Icon: History }];
 async function loadAdminSettings(token: string) {
   return adminApi<AdminSettings>('admin/config', token);
 }
@@ -37,7 +38,7 @@ export function AdminConsole() {
     const expired = (event: Event) => { setConfig(null); setError((event as CustomEvent<string>).detail); };
     window.addEventListener('admin:expired', expired);
     const selected = new URLSearchParams(window.location.search).get('tab');
-    queueMicrotask(() => { if (!cancelled && (selected === 'sources' || selected === 'network' || selected === 'browser' || selected === 'telegram' || selected === 'rules' || selected === 'news' || selected === 'logs')) setTab(selected); });
+    queueMicrotask(() => { if (!cancelled && (selected === 'sources' || selected === 'network' || selected === 'browser' || selected === 'telegram' || selected === 'rules' || selected === 'news' || selected === 'follows' || selected === 'logs')) setTab(selected); });
     adminApi<{ initialized: boolean; authenticated: boolean }>('admin/auth/session', '').then(async session => {
       if (cancelled) return;
       setInitialized(session.initialized);
@@ -83,6 +84,7 @@ export function AdminConsole() {
         {tab === 'browser' && (config.browser ? <BrowserSettingsForm initial={config.browser} busy={busy} onSave={save} /> : <p className={styles.error} role="alert">后端尚未加载浏览器设置，请重启后端后刷新页面。</p>)}
         <div hidden={tab !== 'rules'}><RulesSettingsForm initial={config.rules} sources={config.sources} token={token} busy={busy} onSave={save} /></div>
         {tab === 'news' && <NewsManagementPanel sources={config.sources} />}
+        {tab === 'follows' && <FollowSettingsPanel />}
         {tab === 'logs' && <LogsPanel sources={config.sources} />}
         <p className={styles.footnote}>配置和会话保存在本站数据库。账号初始化或重置后，旧会话立即失效。</p>
       </>}

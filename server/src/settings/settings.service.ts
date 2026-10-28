@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-const PRIVATE_SETTINGS = ['news-admin-config-v1', 'news-telegram-account-v1'];
+const PRIVATE_SETTINGS = ['news-admin-config-v1', 'news-telegram-account-v1', 'news-follow-access-v1'];
 
 @Injectable()
 export class SettingsService {

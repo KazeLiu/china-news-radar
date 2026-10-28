@@ -235,6 +235,7 @@ export class EntitiesService {
     today.setHours(0, 0, 0, 0);
     return this.prisma.hotspot.count({
       where: contentScope({
+        isClusterMain: true,
         createdAt: { gte: today },
         OR: [{ title: { contains: name } }, { summary: { contains: name } }, ...(newsMode() ? [{ newsItem: { is: { keywordMatches: { some: { keyword: { text: name, isActive: true } } } } } }] : [])],
       }),
@@ -243,7 +244,7 @@ export class EntitiesService {
 
   async getLatestNews(name: string, limit: number) {
     const items = await this.prisma.hotspot.findMany({
-      where: contentScope({ ...(newsMode() ? {} : { qualityScore: { gte: 60 } }),
+      where: contentScope({ isClusterMain: true, ...(newsMode() ? {} : { qualityScore: { gte: 60 } }),
         OR: [{ title: { contains: name } }, { summary: { contains: name } }, ...(newsMode() ? [{ newsItem: { is: { keywordMatches: { some: { keyword: { text: name, isActive: true } } } } } }] : [])] }),
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -256,6 +257,7 @@ export class EntitiesService {
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const hotspots = await this.prisma.hotspot.findMany({
       where: contentScope({
+        isClusterMain: true,
         createdAt: { gte: sevenDaysAgo },
         OR: [{ title: { contains: name } }, { summary: { contains: name } }, ...(newsMode() ? [{ newsItem: { is: { keywordMatches: { some: { keyword: { text: name, isActive: true } } } } } }] : [])],
       }),

@@ -60,8 +60,15 @@ export const keywordsApi = {
       body: JSON.stringify(data)
     }),
   
+  update: (id: string, data: { text?: string; isActive?: boolean }) => request<Keyword>(`/keywords/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: string) => 
     request<void>(`/keywords/${id}`, { method: 'DELETE' })
+};
+
+export const followsApi = {
+  access: () => request<{ configured: boolean; authenticated: boolean }>('/follows/access'),
+  unlock: (password: string) => request<{ authenticated: boolean }>('/follows/unlock', { method: 'POST', body: JSON.stringify({ password }) }),
+  logout: () => request('/follows/logout', { method: 'POST' }),
 };
 
 // Hotspots API
