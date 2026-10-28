@@ -1,10 +1,11 @@
 'use client';
 import { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import {
   ExternalLink, RefreshCw, Zap, CalendarDays, ChevronDown, ChevronRight,
-  ChevronLeft, ArrowRight, Flame, Cpu, Globe2, Globe, Package, Users, BookOpen,
+  ChevronLeft, ArrowRight, Flame, Cpu, Globe2, Globe, Package, Users, BookOpen, Network,
 } from 'lucide-react';
 import { digestApi } from '../../services/api';
 import { digestJobs } from '../../services/digestJobs';
@@ -20,6 +21,11 @@ import type {
   DigestModelItem,
   DigestPaperItem,
 } from '../../types';
+
+const DigestMindMap = dynamic(() => import('./DigestMindMap').then(module => module.DigestMindMap), {
+  ssr: false,
+  loading: () => <div role="status" className="flex h-96 items-center justify-center rounded-2xl border border-[var(--card-border)] text-sm text-[var(--text-muted)]">正在加载思维导图…</div>,
+});
 
 // ── Date helpers ──────────────────────────────────────────────────────────────
 
@@ -575,7 +581,7 @@ export function DigestView({
       </div>
 
       {/* ── Right: content ──────────────────────────────────── */}
-      <div ref={rightColRef} className="flex-1 overflow-y-scroll relative flex flex-col">
+      <div ref={rightColRef} className="flex-1 min-w-0 overflow-y-scroll relative flex flex-col">
         {/* Sticky header */}
         <div className="sticky top-0 z-10 flex items-center justify-between px-6 py-3 bg-[var(--bg-base)]/90 backdrop-blur border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-3">
@@ -600,7 +606,7 @@ export function DigestView({
           )}
         </div>
 
-        <div className="flex-1 flex flex-col px-6 py-6 max-w-3xl">
+        <div className="flex-1 flex w-full flex-col px-6 py-6 max-w-3xl">
           {error && <p role="alert" className="mb-4 text-red-500">{error}</p>}
           {loading ? (
             <LoadingSkeleton />
@@ -622,6 +628,10 @@ export function DigestView({
                   </p>
                 </div>
               )}
+
+              <Section icon={<Network className="w-4 h-4" />} title="日报思维导图" accent="blue">
+                <DigestMindMap key={`${selectedDate}:${data!.generatedAt}`} date={selectedDate} data={data!} />
+              </Section>
 
               {/* 今日重点 */}
               {data!.highlights?.length > 0 && (
@@ -696,7 +706,7 @@ export function DigestView({
                   {/* Explicit timeZone: this now renders on the server too, and
                       the container's UTC clock would otherwise disagree with the
                       browser's local time and trip a hydration mismatch. */}
-                  日报生成于 {formatGeneratedAt(data.generatedAt)}
+                  日报生成于 {formatGeneratedAt(data.generatedAt)}（北京时间），汇总前一日涉华报道；生成后不自动更新。
                 </p>
               )}
             </div>
@@ -832,7 +842,7 @@ function DigestEmptyState({ date, today, onGenerate, generating }: {
         {isToday ? '今日日报尚未生成' : `${date} 暂无日报`}
       </p>
       <p className="mt-1.5 text-sm text-[var(--text-muted)] max-w-md">
-        {isToday ? '每天北京时间早上 8:00 自动生成，也可手动触发' : '该日期暂无数据，可手动触发生成'}
+        {isToday ? '每天北京时间 08:05 自动汇总前一日涉华报道，管理员也可手动生成' : '该日期暂无日报，管理员可手动生成前一日的涉华报道汇总'}
       </p>
 
       {date <= today && (
