@@ -111,6 +111,7 @@ function SourceEditor({ source, network, token, busy, onSave, onSaved, onCopy, o
   }
   function moveFeed(index: number, offset: number) { editFeeds(old => { const next = [...old]; [next[index], next[index + offset]] = [next[index + offset], next[index]]; return next; }); }
   return <div className={styles.stack}><form ref={form} className={styles.card} onChange={() => setResult(null)} onInvalid={event => {
+    if (!(event.target instanceof Element)) return;
     const group = event.target.closest('details');
     if (group) group.open = true;
   }} onSubmit={async event => {

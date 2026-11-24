@@ -24,7 +24,7 @@ export function analysisKey(text: AnalysisText, version = text.sourceTitlePresen
   const material = version === 3 ? [version, 'zh-Hans', buildAnalysisInput(text, (value, end) => value.slice(0, end))] : [version, 'zh-Hans', plainText(text.title), plainText(text.summary)];
   return createHash('sha256').update(JSON.stringify(material)).digest('hex');
 }
-function buildAnalysisInput(text: AnalysisText, clip: typeof clipText) {
+function buildAnalysisInput(text: AnalysisText, clip: typeof clipText): AnalysisText & { truncated: boolean } {
   const summary = clip(distinctSummary(text.title, text.summary), 1600);
   if (text.sourceTitlePresent === false) {
     const input = { title: '', summary, sourceTitlePresent: false, body: clip(plainText(text.body || ''), 3000), truncated: text.summary.length > 1600 || (text.body?.length || 0) > 3000 };
