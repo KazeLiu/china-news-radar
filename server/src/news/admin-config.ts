@@ -69,12 +69,17 @@ export function validateAi(value: unknown, previous: AiConfig): AiConfig {
   const body = object(value);
   const dailyLimit = body.dailyLimit;
   if (!Number.isInteger(dailyLimit) || Number(dailyLimit) < 0 || Number(dailyLimit) > 100_000) throw new BadRequestException('每日额度应为 0–100000 的整数');
-  const apiKey = body.apiKey === undefined || body.apiKey === '' ? previous.apiKey : string(body.apiKey, 'API Key', 1000);
+  const baseUrl = publicUrl(body.baseUrl, 'AI 接口地址');
+  const reuseKey = body.apiKey === undefined || body.apiKey === '';
+  if (reuseKey && previous.apiKey && new URL(baseUrl).origin !== new URL(previous.baseUrl).origin) {
+    throw new BadRequestException('AI 接口的域名、协议或端口已改变，请填写新接口的 API Key');
+  }
+  const apiKey = reuseKey ? previous.apiKey : string(body.apiKey, 'API Key', 1000);
   const intervalMs = body.intervalMs ?? previous.intervalMs;
   const newsOutputTokens = body.newsOutputTokens ?? previous.newsOutputTokens;
   if (!Number.isInteger(intervalMs) || Number(intervalMs) < 0 || Number(intervalMs) > 60000) throw new BadRequestException('请求间隔应为 0–60000 毫秒');
   if (!Number.isInteger(newsOutputTokens) || Number(newsOutputTokens) < 1024 || Number(newsOutputTokens) > 32768) throw new BadRequestException('新闻输出预算应为 1024–32768 tokens');
-  return { enabled: boolean(body.enabled), baseUrl: publicUrl(body.baseUrl, 'AI 接口地址'), model: string(body.model, '模型', 200),
+  return { enabled: boolean(body.enabled), baseUrl, model: string(body.model, '模型', 200),
     dailyLimit: Number(dailyLimit), apiKey, instructions: string(body.instructions ?? '', '额外提示词', 4000, true), intervalMs: Number(intervalMs), newsOutputTokens: Number(newsOutputTokens), autoAnalyzeNew: boolean(body.autoAnalyzeNew ?? previous.autoAnalyzeNew) };
 }
 export const defaultApi = (): ApiSourceConfig => ({ method: 'GET', body: '', auth: { type: 'none', header: 'Authorization', value: '' }, mapping: { items: 'articles', title: 'title', summary: 'description', url: 'url', publishedAt: 'publishedAt', author: 'author', images: 'urlToImage', body: 'content' } });
