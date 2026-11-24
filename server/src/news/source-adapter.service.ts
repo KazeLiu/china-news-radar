@@ -4,7 +4,7 @@ import { TwitterApiError, TwitterService } from '../services/twitter.service';
 import { SearchService } from '../services/search.service';
 import { CollectedItem, matchesHost } from './collector';
 import { NewsSourceConfig } from './sources';
-import { canonicalUrl, eventKey, isDomesticUrl, plainText, publisherForUrl, topicFor, withinNewsWindow } from './rules';
+import { canonicalUrl, clipText, eventKey, isDomesticUrl, plainText, publisherForUrl, topicFor, withinNewsWindow } from './rules';
 import { FilterRule, matchingExclusions } from './content-filter';
 import { requestPublic, SourceFetchError } from './public-network';
 import { feedUrlsFor } from './transports';
@@ -17,11 +17,12 @@ export function inspectRecords(records: ScrapedRecord[], source: NewsSourceConfi
   const items: CollectedItem[] = [];
   const publisherHosts = source.kind === 'api' && ['x-official', 'twitter'].includes(source.adapter || '') ? [...source.publisherHosts, 'x.com', 'twitter.com'] : source.publisherHosts;
   const samples = records.slice(0, source.kind === 'web' ? source.web!.maxItems : 150).map(record => {
-    const sourceTitle = plainText(typeof record.title === 'string' ? record.title : '').slice(0, 600);
-    const body = typeof record.body === 'string' ? record.body.slice(0, 200000) : '';
+    const sourceTitle = clipText(plainText(typeof record.title === 'string' ? record.title : ''), 600);
+    const body = typeof record.body === 'string' ? clipText(record.body, 200_000) : '';
     const sourceTitlePresent = record.sourceTitlePresent !== false && !!sourceTitle;
-    const title = sourceTitle || plainText(body).slice(0, 220);
-    const summary = plainText(typeof record.summary === 'string' ? record.summary : '').slice(0, 1600);
+    const title = sourceTitle || clipText(plainText(body), 220);
+    const summary = clipText(plainText(typeof record.summary === 'string' ? record.summary : ''), 1600);
+    const author = typeof record.author === 'string' ? clipText(plainText(record.author), 120) : null;
     let url: string | null = null;
     if (typeof record.url === 'string' && record.url.trim() && record.url.length <= 2000) { try { url = canonicalUrl(new URL(record.url, baseUrl).href); } catch { url = null; } }
     const publication = source.kind === 'web' ? webPublicationTime(record.publishedAt, source.timeZone, now) : { publishedAt: sourcePublishedAt(record.publishedAt, source.timeZone, now), estimated: false };
@@ -35,11 +36,10 @@ export function inspectRecords(records: ScrapedRecord[], source: NewsSourceConfi
       try { const image = canonicalUrl(new URL(raw, baseUrl || url || undefined).href); return image ? [image] : []; } catch { return []; }
     });
     if (!reason && url) items.push({ title, sourceTitlePresent, summary, url, originalUrl: url, originalPublisher, publishedAt, publishedAtEstimated: publication.estimated,
-      author: typeof record.author === 'string' ? plainText(record.author).slice(0, 120) : null,
-      body, images: JSON.stringify([...new Set(media)]),
+      author, body, images: JSON.stringify([...new Set(media)]),
       topic: topicFor(`${title} ${summary}`), eventKey: eventKey(title), contentHash: createHash('sha256').update(JSON.stringify([title, summary, publishedAt])).digest('hex') });
     return { title, sourceTitlePresent, summary, url, publishedAt, publishedAtEstimated: publication.estimated, images: media, originalPublisher, body,
-      author: typeof record.author === 'string' ? plainText(record.author).slice(0, 120) : null, accepted: !reason, reason };
+      author, accepted: !reason, reason };
   });
   return { items, samples, rawCount: records.length, checkedCount: samples.length, structure, status: 200 } satisfies CollectionResult;
 }

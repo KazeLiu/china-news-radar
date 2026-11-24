@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { distinctSummary, plainText, shouldDisplay, topicFor } from './rules';
+import { clipText, distinctSummary, plainText, shouldDisplay, topicFor } from './rules';
 import type { NewsTopic } from './sources';
 import { DEFAULT_EXCLUSIONS, FilterItem, FilterRule, matchingExclusions } from './content-filter';
 
@@ -20,22 +20,30 @@ export interface AnalysisResult {
 export interface AnalysisText { title: string; summary: string; sourceTitlePresent?: boolean; body?: string }
 
 export function analysisKey(text: AnalysisText, version = text.sourceTitlePresent === false ? 3 : ANALYSIS_VERSION): string {
-  // Dates, URLs, model selection and reader activity do not invalidate an existing result.
-  const material = version === 3 ? [version, 'zh-Hans', analysisInput(text)] : [version, 'zh-Hans', plainText(text.title), plainText(text.summary)];
+  // Keep the original v3 cache identity even when the data sent to the model is Unicode-safe.
+  const material = version === 3 ? [version, 'zh-Hans', buildAnalysisInput(text, (value, end) => value.slice(0, end))] : [version, 'zh-Hans', plainText(text.title), plainText(text.summary)];
   return createHash('sha256').update(JSON.stringify(material)).digest('hex');
 }
-export function analysisInput(text: AnalysisText) {
-  const summary = distinctSummary(text.title, text.summary).slice(0, 1600);
+function buildAnalysisInput(text: AnalysisText, clip: typeof clipText) {
+  const summary = clip(distinctSummary(text.title, text.summary), 1600);
   if (text.sourceTitlePresent === false) {
-    const input = { title: '', summary, sourceTitlePresent: false, body: plainText(text.body || '').slice(0, 3000), truncated: text.summary.length > 1600 || (text.body?.length || 0) > 3000 };
+    const input = { title: '', summary, sourceTitlePresent: false, body: clip(plainText(text.body || ''), 3000), truncated: text.summary.length > 1600 || (text.body?.length || 0) > 3000 };
     // Leave room for the ID and batch envelope, including JSON-escaped characters.
     while (JSON.stringify(input).length > 5500 && (input.body || input.summary)) {
-      if (input.body) input.body = input.body.slice(0, -100); else input.summary = input.summary.slice(0, -100);
+      if (input.body) input.body = clip(input.body, -100); else input.summary = clip(input.summary, -100);
       input.truncated = true;
     }
     return input;
   }
-  return { title: plainText(text.title).slice(0, 600), summary, truncated: text.title.length > 600 || text.summary.length > 1600 };
+  return { title: clip(plainText(text.title), 600), summary, truncated: text.title.length > 600 || text.summary.length > 1600 };
+}
+export function analysisInput(text: AnalysisText) { return buildAnalysisInput(text, clipText); }
+export function readAnalysisInput(raw: string) {
+  const input: ReturnType<typeof analysisInput> = JSON.parse(raw);
+  input.title = clipText(input.title, 600);
+  input.summary = clipText(input.summary, 1600);
+  if (input.body !== undefined) input.body = clipText(input.body, 3000);
+  return input;
 }
 function exactKeys(value: Record<string, unknown>, keys: string[]) {
   if (Object.keys(value).length !== keys.length || keys.some(key => !Object.hasOwn(value, key))) throw new Error('AI JSON fields invalid');

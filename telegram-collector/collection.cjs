@@ -83,7 +83,11 @@ async function runCollector(current, shutdown) {
         catch (error) {
           if (controller.signal.aborted) return;
           if (!(error instanceof CollectorError) || error.code === 'collector-auth-failed') throw error;
-          outbox.retry(record); await report('authorized', 'listening', failure(error));
+          if (error.code === 'telegram-message-invalid') {
+            if (!outbox.park(record)) continue;
+            console.warn(`Telegram 消息已隔离：${record.key}（${error.code}）`);
+          } else outbox.retry(record);
+          await report('authorized', 'listening', failure(error));
         }
       }
       await delay(1_000, undefined, { signal: controller.signal });

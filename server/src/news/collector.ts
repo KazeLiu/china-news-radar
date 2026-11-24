@@ -1,6 +1,6 @@
 import Parser from 'rss-parser';
 import { createHash } from 'node:crypto';
-import { canonicalUrl, eventKey, plainText, shouldDisplay, topicFor, withinNewsWindow } from './rules';
+import { canonicalUrl, clipText, eventKey, plainText, shouldDisplay, topicFor, withinNewsWindow } from './rules';
 import { NewsSourceConfig } from './sources';
 import { DEFAULT_EXCLUSIONS, FilterRule, matchingExclusions } from './content-filter';
 import { load } from 'cheerio';
@@ -29,11 +29,11 @@ export async function inspectFeed(xml: string, source: NewsSourceConfig, now = n
   const feed = await parser.parseString(xml);
   const samples: FeedSample[] = [];
   const items = feed.items.slice(0, 150).flatMap(item => {
-    const sourceTitle = plainText(item.title || '').slice(0, 600);
+    const sourceTitle = clipText(plainText(item.title || ''), 600);
     const html = item['content:encoded'] || item.content || '';
-    const body = plainText(html).slice(0, 200000);
-    const title = sourceTitle || body.slice(0, 220);
-    const summary = plainText(item.contentSnippet || item.summary || item['content:encodedSnippet'] || item.content || item['content:encoded'] || '').slice(0, 1600);
+    const body = clipText(plainText(html), 200_000);
+    const title = sourceTitle || clipText(body, 220);
+    const summary = clipText(plainText(item.contentSnippet || item.summary || item['content:encodedSnippet'] || item.content || item['content:encoded'] || ''), 1600);
     const url = canonicalUrl(item.link || '');
     const publishedAt = sourcePublishedAt(item.pubDate || item.isoDate, source.timeZone, now);
     const publisher = item.publisher?.[0];
@@ -52,7 +52,7 @@ export async function inspectFeed(xml: string, source: NewsSourceConfig, now = n
     if (reason || !url) return [];
     return [{ title, sourceTitlePresent: !!sourceTitle, summary, url, publishedAt, originalPublisher: source.englishName, acquisitionKind: source.kind,
       originalUrl: source.kind === 'google-rss' ? null : url,
-      author: item.creator || item.author ? plainText(item.creator || item.author || '').slice(0, 120) : null,
+      author: item.creator || item.author ? clipText(plainText(item.creator || item.author || ''), 120) : null,
       topic: topicFor(`${title} ${summary}`), eventKey: eventKey(title), body, images: JSON.stringify(images),
       contentHash: createHash('sha256').update(JSON.stringify([title, summary, publishedAt])).digest('hex') }];
   });

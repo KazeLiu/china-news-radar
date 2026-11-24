@@ -47,6 +47,11 @@ async function backendRequest(route = '', payload) {
   if (response.status === 401) throw new CollectorError('collector-auth-failed', '本站后端拒绝了采集令牌（HTTP 401）。本地预览请重启预览；独立部署请核对双方的 COLLECTOR_TOKEN。', 401);
   if (response.status === 403) throw new CollectorError('collector-auth-failed', '本站后端拒绝此请求方式（HTTP 403），请使用采集器专用接口，不要经网页代理转发。', 403);
   if (response.status === 409) throw new CollectorError(route === 'control' ? 'collector-already-running' : 'authorization-changed', route === 'control' ? '已有采集器在线，请停止重复实例后再启动。' : '本次授权已取消、过期或步骤改变，请在账号页重新开始登录。', 409);
+  if (!route && response.status === 400) {
+    let code;
+    try { code = JSON.parse(response.body)?.code; } catch { /* Unrecognized errors keep the usual HTTP handling. */ }
+    if (code === 'telegram-message-invalid') throw new CollectorError(code, '本站判定此消息无法入库，已停止自动重试。', 400);
+  }
   if (response.status < 200 || response.status >= 300) throw new CollectorError('backend-http', `本站接口返回 HTTP ${response.status}，请检查后端接收开关和来源配置。`, response.status);
   try { return JSON.parse(response.body); }
   catch { throw new CollectorError('backend-response-invalid', '本站后端返回了无效响应，请核对采集接口地址。'); }

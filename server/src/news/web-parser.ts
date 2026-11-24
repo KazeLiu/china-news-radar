@@ -3,6 +3,7 @@ import { ScrapedRecord } from './source-adapter.service';
 import { WebRules } from './sources';
 import { SourceFetchError } from './public-network';
 import { isIP } from 'node:net';
+import { clipText } from './rules';
 
 function metadataRecords(html: string, url: string): ScrapedRecord[] {
   const $ = load(html); const records: ScrapedRecord[] = [];
@@ -103,7 +104,7 @@ export function clippedPageFragment(html: string, limit = 12000) {
     if (element.is('meta') && /image|video|audio/i.test(element.attr('property') || element.attr('itemprop') || '')) element.attr('content', '');
     element.contents().each((_, child) => {
       if (child.type === 'comment') $(child).remove();
-      else if (child.type === 'text') child.data = child.data.replace(/\s+/g, ' ').trim().slice(0, 160);
+      else if (child.type === 'text') child.data = clipText(child.data.replace(/\s+/g, ' ').trim(), 160);
     });
   });
   // Only the AI copy is reduced; extraction still reads the unchanged page snapshot.

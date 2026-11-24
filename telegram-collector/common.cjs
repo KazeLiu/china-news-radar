@@ -1,6 +1,9 @@
 const { DatabaseSync } = require('node:sqlite');
 const { Api } = require('teleproto');
 
+// Keep terminal messages in the existing snapshot-compatible outbox.
+const PARKED_RETRY_AT = Number.MAX_SAFE_INTEGER;
+
 function messagePayload(channel, message) {
   const text = message.message || '';
   if (!text || text.length > 20_000) return null;
@@ -21,10 +24,17 @@ class Outbox {
     this.db = new DatabaseSync(file);
     this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec('CREATE TABLE IF NOT EXISTS pending (key TEXT PRIMARY KEY, payload TEXT NOT NULL, retry_at REAL NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0)');
-    this.putStatement = this.db.prepare('INSERT INTO pending(key,payload) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,retry_at=0,attempts=0');
+    this.db.exec('CREATE INDEX IF NOT EXISTS pending_due ON pending(retry_at, key)');
+    const edited = "json_remove(pending.payload, '$.backfill') <> json_remove(excluded.payload, '$.backfill')";
+    this.putStatement = this.db.prepare(`INSERT INTO pending(key,payload) VALUES (?,?)
+      ON CONFLICT(key) DO UPDATE SET payload=excluded.payload,
+        retry_at=CASE WHEN ${edited} THEN 0 ELSE pending.retry_at END,
+        attempts=CASE WHEN ${edited} THEN 0 ELSE pending.attempts END
+      WHERE pending.payload<>excluded.payload
+        AND (${edited} OR json_extract(excluded.payload, '$.backfill') IS NOT 1)`);
     this.nextStatement = this.db.prepare('SELECT key,payload,attempts FROM pending WHERE retry_at<=? ORDER BY retry_at,key LIMIT 1');
     this.acknowledgeStatement = this.db.prepare('DELETE FROM pending WHERE key=? AND payload=?');
-    this.retryStatement = this.db.prepare('UPDATE pending SET retry_at=?,attempts=? WHERE key=?');
+    this.retryStatement = this.db.prepare('UPDATE pending SET retry_at=?,attempts=? WHERE key=? AND payload=?');
   }
   put(payload) { this.putStatement.run(`${payload.channel}:${payload.messageId}`, JSON.stringify(payload)); }
   next() {
@@ -32,7 +42,8 @@ class Outbox {
     return row ? { ...row, serialized: row.payload, payload: JSON.parse(row.payload) } : null;
   }
   acknowledge(record) { this.acknowledgeStatement.run(record.key, record.serialized); }
-  retry(record) { this.retryStatement.run(Date.now() / 1_000 + Math.min(300, 5 * 2 ** Math.min(record.attempts, 6)), record.attempts + 1, record.key); }
+  retry(record) { this.retryStatement.run(Date.now() / 1_000 + Math.min(300, 5 * 2 ** Math.min(record.attempts, 6)), record.attempts + 1, record.key, record.serialized); }
+  park(record) { return this.retryStatement.run(PARKED_RETRY_AT, record.attempts + 1, record.key, record.serialized).changes > 0; }
   close() { this.db.close(); }
 }
 

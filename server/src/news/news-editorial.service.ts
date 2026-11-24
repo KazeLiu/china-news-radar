@@ -4,6 +4,7 @@ import { AiRuntimeService } from './ai-runtime.service';
 import { NewsBridgeService } from './news-bridge.service';
 import { contentScope, presentHotspot, publicNewsScope } from './radar-content';
 import { NEWS_TOPICS } from './analysis';
+import { clipText } from './rules';
 
 export const TOPIC_LABELS: Record<string, string> = { policy: '政策', economy: '经济', diplomacy: '外交', technology: '科技', security: '安全', society: '社会' };
 function string(value: unknown, max = 1200): string {
@@ -55,8 +56,8 @@ export class NewsEditorialService implements OnModuleInit {
       const day = new Date(`${date}T00:00:00+08:00`); day.setUTCDate(day.getUTCDate() - 1);
       const end = new Date(day.getTime() + 86_400_000);
       const window = { OR: [{ publishedAt: { gte: day, lt: end } }, { publishedAt: null, createdAt: { gte: day, lt: end } }] };
-      let raw = await this.prisma.hotspot.findMany({ where: contentScope({ ...window, isClusterMain: true, isCurated: true }), include: { newsItem: true }, orderBy: { qualityScore: 'desc' }, take: 60 });
-      if (raw.length < 5) raw = await this.prisma.hotspot.findMany({ where: contentScope({ ...window, isClusterMain: true }), include: { newsItem: true }, orderBy: [{ qualityScore: 'desc' }, { publishedAt: 'desc' }], take: 60 });
+      let raw = await this.prisma.hotspot.findMany({ where: contentScope({ ...window, isClusterMain: true, isCurated: true }), include: { newsItem: { omit: { body: true } } }, orderBy: { qualityScore: 'desc' }, take: 60 });
+      if (raw.length < 5) raw = await this.prisma.hotspot.findMany({ where: contentScope({ ...window, isClusterMain: true }), include: { newsItem: { omit: { body: true } } }, orderBy: [{ qualityScore: 'desc' }, { publishedAt: 'desc' }], take: 60 });
       const items = raw.map(presentHotspot);
       const linked = (item: typeof items[number], summary = item.summary || '') => ({ newsItemId: item.newsItemId, title: item.title, titleGenerated: item.titleGenerated, summary, source: item.originalPublisher || item.source, url: item.url });
       let data = { version: 2, summary: items.length ? `前一日共有 ${items.length} 条海外涉华报道。` : '',
@@ -69,7 +70,7 @@ export class NewsEditorialService implements OnModuleInit {
         const result = await this.ai.performJson(`你是涉华新闻编辑。生成前一日简体中文日报，保留归属与不确定性。
 返回 JSON：{"summary":"一段概述","highlights":[{"newsId":"提供的id","summary":"摘要","whyImportant":"依据原文解释影响","affects":["受影响对象"]}],"sections":[{"key":"policy|economy|diplomacy|technology|security|society","items":[{"newsId":"提供的id","summary":"摘要"}]}]}。
 重点最多5条，每个主题最多10条；只能引用提供的 newsId，不生成链接。没有依据的内容返回空数组。`,
-          { date, items: items.map(item => ({ id: item.id, title: item.title.slice(0, 600), summary: (item.summary || '').slice(0, 1600), topic: item.category })) }, 4000, undefined, raw.map(item => item.newsItem!.sourceId));
+          { date, items: items.map(item => ({ id: item.id, title: clipText(item.title, 600), summary: clipText(item.summary || '', 1600), topic: item.category })) }, 4000, undefined, raw.map(item => item.newsItem!.sourceId));
         const resolve = (value: any) => {
           const item = items.find(item => item.id === value?.newsId);
           if (!item) throw new BadRequestException('模型引用了不在日报素材中的报道，已有结果已保留');
@@ -96,10 +97,10 @@ export class NewsEditorialService implements OnModuleInit {
         relatedCountries: [] as string[], relatedOrganizations: [] as string[], relatedCompanies: [] as string[], relatedPeople: [] as string[],
         relatedModels: [], relatedProducts: [], competesWith: [], tags: [] as string[], generationStatus: 'rules' };
       if (config.enabled && config.apiKey) {
-        const news = await this.prisma.hotspot.findMany({ where: contentScope({ OR: [{ title: { contains: keyword.text } }, { content: { contains: keyword.text } }, { newsItem: { is: { OR: [{ title: { contains: keyword.text } }, { summary: { contains: keyword.text } }] } } }] }), include: { newsItem: true }, take: 8, orderBy: { createdAt: 'desc' } });
+        const news = await this.prisma.hotspot.findMany({ where: contentScope({ OR: [{ title: { contains: keyword.text } }, { content: { contains: keyword.text } }, { newsItem: { is: { OR: [{ title: { contains: keyword.text } }, { summary: { contains: keyword.text } }] } } }] }), include: { newsItem: { omit: { body: true } } }, take: 8, orderBy: { createdAt: 'desc' } });
         const result = await this.ai.performJson(`为关注词创建涉华档案，返回 JSON：{"type":"country|organization|company|person|topic","summary":"简体中文简介","aliases":[],"relatedCountries":[],"relatedOrganizations":[],"relatedCompanies":[],"relatedPeople":[],"tags":[]}。
 简介与关联必须有给定报道支持；没有材料时只解释关注词，不臆测关联。每个列表最多8项；别名仅提供明确的中英文称呼。`,
-          { keyword: keyword.text, reports: news.map(item => ({ title: item.title.slice(0, 600), summary: item.content.slice(0, 1600) })) }, 4000, undefined, news.map(item => item.newsItem!.sourceId));
+          { keyword: keyword.text, reports: news.map(item => ({ title: clipText(item.title, 600), summary: clipText(item.content, 1600) })) }, 4000, undefined, news.map(item => item.newsItem!.sourceId));
         if (!['country', 'organization', 'company', 'person', 'topic'].includes(String(result.type))) throw new BadRequestException('关注档案的实体类型无效，已有结果已保留');
         data = { ...data, type: String(result.type), summary: string(result.summary), generationStatus: 'ai',
           aliases: names(result.aliases), relatedCountries: names(result.relatedCountries), relatedOrganizations: names(result.relatedOrganizations),

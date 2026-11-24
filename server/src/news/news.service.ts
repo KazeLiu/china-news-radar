@@ -1,11 +1,11 @@
-import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, BadGatewayException, NotFoundException, ConflictException, Optional } from '@nestjs/common';
-import { AiTask, Prisma, NewsAnalysis, NewsItem } from '@prisma/client';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy, BadRequestException, BadGatewayException, ServiceUnavailableException, NotFoundException, ConflictException, Optional } from '@nestjs/common';
+import { AiTask, Prisma, NewsAnalysis, NewsItem, NewsSource } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { NewsSourceConfig } from './sources';
 import { CollectedItem, inspectFeed } from './collector';
-import { telegramItem } from './telegram';
-import { analysisKey, analysisInput, parseAnalysis, analysisDecision, analysisVisibility, fallbackDecision, ANALYSIS_PROMPT, AnalysisResult } from './analysis';
+import { InvalidTelegramMessage, telegramItem } from './telegram';
+import { analysisKey, analysisInput, readAnalysisInput, parseAnalysis, analysisDecision, analysisVisibility, fallbackDecision, ANALYSIS_PROMPT, AnalysisResult } from './analysis';
 import { feedUrlsFor, distributionFor } from './transports';
 import { fetchSourceFeed, FeedFetchError, restoreFailures, restoreValidators, mergeFeeds } from './feed-fetch';
 import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, defaultWeb, restoreConfig, validateAi, validateRules, validateSource, readAiUsage, sourceOrdering, validateSourceSortOrder } from './admin-config';
@@ -21,7 +21,7 @@ import { chmod } from 'node:fs/promises';
 import { validateWebRules } from './admin-config';
 import { publicNewsScope, presentNews } from './radar-content';
 import { manualInput } from './manual-news';
-import { canonicalUrl, distinctSummary, eventKey, isDomesticUrl, publisherForUrl } from './rules';
+import { canonicalUrl, clipText, distinctSummary, eventKey, isDomesticUrl, publisherForUrl } from './rules';
 import { CollectionCounts, NewsLogsService } from './news-logs.service';
 import { isDeletedNews } from './news-trash.service';
 import { clippedPageFragment } from './web-parser';
@@ -29,6 +29,17 @@ import { WebPreviewCache, inspectWebPage, webCandidateContext, webParserContext 
 import { validateBrowserConfig } from './browser-config';
 import { planSourceImport, sourceDocument } from './source-transfer';
 const webHash = (source: NewsSourceConfig) => createHash('sha256').update(JSON.stringify([source.target, source.web?.rules])).digest('hex');
+const HEX_ESCAPE_ERROR = /unexpected end of hex escape at line \d+ column \d+\s*$/im;
+const COLLECTION_RETRY_MS = 300_000;
+const MAX_STRUCTURE_RETRY_MS = 6 * 60 * 60 * 1_000;
+
+function collectionErrorReason(error: unknown) {
+  if (!(error instanceof Error)) return '未知采集错误';
+  if (error instanceof SourceFetchError || error instanceof BadGatewayException || error instanceof InvalidTelegramMessage) return error.message;
+  // Prisma 错误正文可能带入库参数；只保留可诊断的错误片段和错误码。
+  const detail = HEX_ESCAPE_ERROR.exec(error.message)?.[0].trim() ?? /database (?:is locked|or disk is full)|SQLITE_(?:BUSY|LOCKED|FULL|IOERR|CORRUPT)/i.exec(error.message)?.[0];
+  return detail ?? (error instanceof Prisma.PrismaClientKnownRequestError ? `${error.name} (${error.code})` : error.name);
+}
 
 @Injectable()
 export class NewsService implements OnModuleInit, OnModuleDestroy {
@@ -95,7 +106,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   onModuleDestroy() { this.stopped = true; this.webPreviews.clear(); if (this.timer) clearInterval(this.timer); if (this.analysisTimer) clearInterval(this.analysisTimer); }
   private async tick() {
     try { await this.scan(false); }
-    catch { this.logger.warn('采集任务异常，请检查数据库和来源状态'); }
+    catch (error) { this.logger.warn(`采集任务异常：${collectionErrorReason(error)}`); }
   }
   private orderedSources() {
     const sources = new Map(this.config.sources.map(source => [source.id, source]));
@@ -324,7 +335,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
     const state = await this.prisma.newsSource.findUniqueOrThrow({ where: { id: source.id } });
     const now = new Date();
-    if (source.kind === 'api' || source.kind === 'web') return this.collectAdapted(source, now);
+    if (source.kind === 'api' || source.kind === 'web') return this.collectAdapted(source, now, state);
     const counts: CollectionCounts = { discovered: 0, added: 0, updated: 0, duplicates: 0, filtered: 0 };
     try {
       const result = await fetchSourceFeed(source, (xml, selected) => inspectFeed(xml, selected, now, false, this.config.rules), state);
@@ -350,7 +361,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
       const failures = error instanceof FeedFetchError ? error.failures : {};
-      await this.logs.record({ kind: 'collection', route: 'collection/rss', sourceId: source.id, startedAt: now, elapsedMs: Date.now() - now.getTime(), status: 'failed', errorCode: error instanceof FeedFetchError ? 'feed-unavailable' : 'storage-error', errorReason: error instanceof FeedFetchError ? '所有 RSS 地址均请求或解析失败，请查看来源状态' : '新闻或来源状态写入失败', ...counts });
+      await this.logs.record({ kind: 'collection', route: 'collection/rss', sourceId: source.id, startedAt: now, elapsedMs: Date.now() - now.getTime(), status: 'failed', errorCode: error instanceof FeedFetchError ? 'feed-unavailable' : 'storage-error', errorReason: error instanceof FeedFetchError ? '所有 RSS 地址均请求或解析失败，请查看来源状态' : collectionErrorReason(error), ...counts });
       const retryTimes = Object.values(failures).map(f => Date.parse(f.retryAt)).filter(t => t > Date.now());
       await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: now,
         nextCheckAt: new Date(retryTimes.length ? Math.min(...retryTimes) : Date.now() + 300_000),
@@ -359,7 +370,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
   }
-  private async collectAdapted(source: NewsSourceConfig, now: Date) {
+  private async collectAdapted(source: NewsSourceConfig, now: Date, state: NewsSource) {
     const counts: CollectionCounts = { discovered: 0, added: 0, updated: 0, duplicates: 0, filtered: 0 };
     try {
       const result = await this.adapters.collect(source, this.config.rules);
@@ -378,8 +389,15 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       return true;
     } catch (error) {
       if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
-      await this.logs.record({ kind: 'collection', route: `collection/${source.kind}`, sourceId: source.id, startedAt: now, elapsedMs: Date.now() - now.getTime(), status: 'failed', errorCode: error instanceof SourceFetchError ? error.code : 'storage-error', errorReason: error instanceof SourceFetchError ? error.message : '来源采集或写入未完成', ...counts });
-      await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: now, nextCheckAt: new Date(Date.now() + 300000), error: error instanceof SourceFetchError ? `${error.code}：${error.message}` : '来源采集或入库失败，请核对配置和服务状态' } });
+      const code = error instanceof SourceFetchError ? error.code : 'storage-error';
+      const reason = collectionErrorReason(error);
+      const checkedAt = new Date();
+      let delay = COLLECTION_RETRY_MS;
+      if (source.kind === 'web' && code === 'structure-invalid' && state.error?.startsWith('structure-invalid：') && state.lastCheckedAt && state.nextCheckAt) {
+        delay = Math.min(MAX_STRUCTURE_RETRY_MS, Math.max(COLLECTION_RETRY_MS, 2 * (state.nextCheckAt.getTime() - state.lastCheckedAt.getTime())));
+      }
+      await this.logs.record({ kind: 'collection', route: `collection/${source.kind}`, sourceId: source.id, startedAt: now, elapsedMs: checkedAt.getTime() - now.getTime(), status: 'failed', errorCode: code, errorReason: reason, ...counts });
+      await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: checkedAt, nextCheckAt: new Date(checkedAt.getTime() + delay), error: error instanceof SourceFetchError ? `${code}：${reason}` : '来源采集或入库失败，请核对配置和服务状态' } });
       return false;
     }
   }
@@ -431,7 +449,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   private async logAnalysis(item: NewsItem, status: string, route: string, result?: AnalysisResult, taskId?: string) {
     await this.logs.record({ kind: 'analysis', route, sourceId: item.sourceId, taskId, status, elapsedMs: 0,
-      detailsJson: JSON.stringify({ newsItemId: item.id, title: item.title.slice(0, 160), aiStatus: result ? 'done' : item.aiStatus,
+      detailsJson: JSON.stringify({ newsItemId: item.id, title: clipText(item.title, 160), aiStatus: result ? 'done' : item.aiStatus,
         summaryOmitted: !analysisInput(item).summary, titleGenerated: item.titleGenerated, sourceTitlePresent: item.sourceTitlePresent, forceChina: this.forceChina(item.sourceId), effectiveRelation: this.forceChina(item.sourceId) ? 'related' : item.aiRelation,
         ...(result ? { relation: result.relation, topics: result.topics, type: result.type, language: result.language,
           reason: result.reason, translated: !!result.translation, scoring: result.scoring } : { reason: '使用规则筛选，不产生模型请求' }) }) });
@@ -442,19 +460,39 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   async ingest(input: Parameters<typeof telegramItem>[0]) {
     if (process.env.TELEGRAM_ENABLED !== 'true') throw new BadRequestException('Telegram 尚未启用');
-    const parsed = telegramItem(input, false, this.config.sources);
     const now = new Date();
-    if (!parsed) { await this.logs.record({ kind: 'collection', route: 'collection/telegram', status: 'filtered', startedAt: now, elapsedMs: 0, discovered: 1, filtered: 1 }); return { accepted: false, reason: '空消息、过期或国内来源' }; }
+    const route = input?.backfill === true ? 'collection/telegram-backfill' : 'collection/telegram';
+    const messageId = Number.isSafeInteger(input?.messageId) ? input.messageId : undefined;
+    let parsed: ReturnType<typeof telegramItem>;
+    try { parsed = telegramItem(input, false, this.config.sources); }
+    catch (error) {
+      if (error instanceof InvalidTelegramMessage) await this.logs.record({ kind: 'collection', route, status: 'failed', errorCode: 'telegram-message-invalid', errorReason: error.message,
+        startedAt: now, elapsedMs: Date.now() - now.getTime(), discovered: 1, detailsJson: JSON.stringify({ messageId, stage: 'validate' }) });
+      throw error;
+    }
+    if (!parsed) { await this.logs.record({ kind: 'collection', route, status: 'filtered', startedAt: now, elapsedMs: 0, discovered: 1, filtered: 1 }); return { accepted: false, reason: '空消息、过期或国内来源' }; }
     if (!this.config.sources.some(s => s.id === parsed.sourceId)) return { accepted: false, reason: '频道来源已删除' };
-    const state = await this.prisma.newsSource.findUniqueOrThrow({ where: { id: parsed.sourceId } });
-    if (!state.enabled) return { accepted: false, reason: '频道已暂停，请在来源管理中启用' };
     const counts: CollectionCounts = { discovered: 1, added: 0, updated: 0, duplicates: 0, filtered: 0 };
+    let stage = 'source-status';
     try {
+      const state = await this.prisma.newsSource.findUniqueOrThrow({ where: { id: parsed.sourceId } });
+      if (!state.enabled) return { accepted: false, reason: '频道已暂停，请在来源管理中启用' };
+      stage = 'store';
       const changed = await this.store(parsed.sourceId, parsed.item, now, input.backfill === true, counts);
+      stage = 'source-status';
       await this.prisma.newsSource.update({ where: { id: parsed.sourceId }, data: { lastCheckedAt: new Date(), lastSuccessAt: new Date(), error: null } });
-      await this.logs.record({ kind: 'collection', route: input.backfill === true ? 'collection/telegram-backfill' : 'collection/telegram', sourceId: parsed.sourceId, status: counts.filtered ? 'filtered' : !changed ? 'empty' : 'success', startedAt: now, elapsedMs: Date.now() - now.getTime(), ...counts });
+      await this.logs.record({ kind: 'collection', route, sourceId: parsed.sourceId, status: counts.filtered ? 'filtered' : !changed ? 'empty' : 'success', startedAt: now, elapsedMs: Date.now() - now.getTime(), ...counts });
       return { accepted: true, changed };
-    } catch (error) { await this.logs.record({ kind: 'collection', route: 'collection/telegram', sourceId: parsed.sourceId, status: 'failed', errorCode: 'storage-error', startedAt: now, elapsedMs: Date.now() - now.getTime(), ...counts }); throw error; }
+    } catch (error) {
+      const reason = collectionErrorReason(error);
+      const invalid = stage === 'store' && !counts.added && !counts.updated && HEX_ESCAPE_ERROR.test(reason);
+      const code = invalid ? 'telegram-message-invalid' : 'storage-error';
+      await this.logs.record({ kind: 'collection', route, sourceId: parsed.sourceId, status: 'failed', errorCode: code, errorReason: reason,
+        startedAt: now, elapsedMs: Date.now() - now.getTime(), detailsJson: JSON.stringify({ messageId, stage }), ...counts });
+      this.logger.warn(`${route} ${parsed.sourceId}/${messageId} ${stage}：${reason}`);
+      if (invalid) throw new InvalidTelegramMessage('消息含无法写入的 Unicode 文本');
+      throw new ServiceUnavailableException('暂时无法写入 Telegram 消息，请查看后端采集日志');
+    }
   }
   async telegramSources() {
     const states = await this.prisma.newsSource.findMany({ where: { enabled: true } });
@@ -464,7 +502,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     if (this.stopped || this.configBusy || this.preparingAnalysis) return;
     this.preparingAnalysis = true;
     try {
-      const abandoned = await this.prisma.$queryRaw<Array<{ key: string; queuedTaskId: string }>>`SELECT a.key, a.queuedTaskId FROM NewsAnalysis a JOIN AiTask t ON a.queuedTaskId = t.id WHERE t.status IN ('failed', 'done') AND a.status != 'done' LIMIT 100`;
+      // Failed tasks belong to the runtime failure handler, including diagnostics and notifications.
+      const abandoned = await this.prisma.$queryRaw<Array<{ key: string; queuedTaskId: string }>>`SELECT a.key, a.queuedTaskId FROM NewsAnalysis a JOIN AiTask t ON a.queuedTaskId = t.id WHERE t.status = 'done' AND a.status != 'done' LIMIT 100`;
       for (const cache of abandoned) {
         await this.prisma.$transaction(async tx => {
           const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: cache.queuedTaskId, status: { not: 'done' } }, data: { status: 'failed', queuedTaskId: null, error: '任务失败，已有原文保留，请在任务列表查看安全原因' } });
@@ -559,7 +598,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       const eligibleKeys = await this.eligibleAnalysisKeys(caches.map(cache => cache.key), false);
       for (const cache of caches) {
         if (!eligibleKeys.has(cache.key)) continue;
-        const input = { id: cache.key, ...JSON.parse(cache.inputJson) };
+        const input = { id: cache.key, ...readAnalysisInput(cache.inputJson) };
         if (keys.length && (keys.length >= 20 || JSON.stringify({ items: [...inputs, input] }).length > 6000)) { await this.queueBatch(keys); keys = []; inputs = []; }
         keys.push(cache.key); inputs.push(input);
       }
@@ -585,9 +624,11 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     return eligible;
   }
   async startHistory() {
+    if (this.configBusy) throw new ConflictException('正在保存配置，请稍后准备历史分析');
     if (!this.aiEnabled) throw new BadRequestException('请先保存并启用 AI 配置');
     if (this.startingHistory) throw new ConflictException('正在准备历史分析，请稍后查看队列');
     this.startingHistory = true;
+    const revision = this.configRevision;
     try {
       let cursor: string | undefined;
       let prepared = 0;
@@ -595,6 +636,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         const records = await this.prisma.newsItem.findMany({ where: { deletedAt: null, isManual: false, hiddenArticle: false, aiStatus: { notIn: ['done', 'excluded'] }, ...(cursor ? { id: { gt: cursor } } : {}) }, orderBy: { id: 'asc' }, take: 100 });
         if (!records.length) break;
         for (const item of records) {
+          if (this.stopped || this.configBusy || revision !== this.configRevision) throw new ConflictException('服务或配置已变化，已停止准备新的历史分析；已入队任务保留');
           if (matchingExclusions(item, this.config.rules, item.sourceId).length) continue;
           const cache = await this.findCached(item);
           if (cache?.status === 'done' || cache?.queuedTaskId) continue;
@@ -602,6 +644,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
           const changed = await this.prisma.$transaction(async tx => {
             const current = await tx.newsAnalysis.findUnique({ where: { key } });
             if (current?.status === 'done' || current?.queuedTaskId) return false;
+            if (this.stopped || this.configBusy || revision !== this.configRevision) throw new ConflictException('服务或配置已变化，已停止准备新的历史分析；已入队任务保留');
             const changed = await tx.newsItem.updateMany({ where: { id: item.id, contentHash: item.contentHash, analysisKey: item.analysisKey, aiStatus: item.aiStatus, deletedAt: null, hiddenArticle: false }, data: { analysisKey: key, aiStatus: 'pending', updatedAt: item.updatedAt } });
             if (!changed.count) return false;
             await tx.newsAnalysis.upsert({ where: { key }, create: { key, inputJson: JSON.stringify(analysisInput(item)), historical: false }, update: { historical: false, status: 'pending', attempts: 0, error: null, retryAt: null, leaseUntil: null } });
@@ -627,7 +670,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     }
     const selected = eligible.slice(0, payload.chunkSize);
     if (!selected.length) return { analyzed: 0 };
-    const items = selected.map(cache => ({ id: cache.key, ...JSON.parse(cache.inputJson) }));
+    const items = selected.map(cache => ({ id: cache.key, ...readAnalysisInput(cache.inputJson) }));
     const success = new Set<string>();
     let translated = 0;
     const sourceIds = [...new Set((await this.prisma.newsItem.findMany({ where: { analysisKey: { in: selected.map(cache => cache.key) } }, select: { sourceId: true } })).map(item => item.sourceId))];
@@ -637,14 +680,15 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       }, sourceIds);
       if (!Array.isArray(response.results)) throw new InvalidAnalysisResponse('批次缺少 results 数组。');
       const entries = response.results as Array<Record<string, unknown>>;
-      for (const cache of selected) {
+      for (const [index, cache] of selected.entries()) {
         const matches = entries.filter(entry => entry && entry.id === cache.key);
         if (matches.length !== 1) continue;
         const { id, ...value } = matches[0];
         let result;
         try {
-          result = parseAnalysis(JSON.stringify(value), JSON.parse(cache.inputJson));
-          if (result.version !== (JSON.parse(cache.inputJson).sourceTitlePresent === false ? 3 : 2)) throw new Error();
+          const input = items[index];
+          result = parseAnalysis(JSON.stringify(value), input);
+          if (result.version !== (input.sourceTitlePresent === false ? 3 : 2)) throw new Error();
         } catch { continue; }
         const saved = await this.prisma.$transaction(async tx => {
           const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: task.id, status: 'processing' }, data: { resultJson: JSON.stringify(result), status: 'done', analyzedAt: new Date(), model: this.runtime.requestInfo()?.model, error: null, queuedTaskId: null, retryAt: null, leaseUntil: null } });
@@ -841,6 +885,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   }
   private async writeSource(tx: Prisma.TransactionClient, source: NewsSourceConfig, previous?: NewsSourceConfig, checked?: CollectionResult) {
     const rulesChanged = source.kind === 'web' && (previous?.kind !== 'web' || webHash(source) !== webHash(previous));
+    const resetSchedule = source.kind !== 'web' || !!checked || rulesChanged || source.useProxy !== previous?.useProxy
+      || JSON.stringify(source.web) !== JSON.stringify(previous?.web);
     const state = await tx.newsSource.findUnique({ where: { id: source.id } });
     const urls = new Set(feedUrlsFor(source));
     const sameParsing = previous && previous.englishName === source.englishName && previous.timeZone === source.timeZone && JSON.stringify(previous.publisherHosts) === JSON.stringify(source.publisherHosts);
@@ -850,7 +896,8 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     return tx.newsSource.upsert({ where: { id: source.id },
       create: { id: source.id, enabled: false, lastParseJson: checked ? JSON.stringify({ ...checked.structure, ruleHash: webHash(source) }) : null },
       update: { etag: active ? validators[active].etag : null, lastModified: active ? validators[active].lastModified : null, activeKind: active ? state!.activeKind : null, activeFeedUrl: active,
-        feedValidators: JSON.stringify(validators), feedFailures: JSON.stringify(failures), nextCheckAt: source.kind === 'web' ? undefined : null, error: null,
+        feedValidators: JSON.stringify(validators), feedFailures: JSON.stringify(failures), nextCheckAt: resetSchedule ? null : undefined,
+        error: !resetSchedule && state?.error?.startsWith('structure-invalid：') ? undefined : null,
         ...(checked ? { lastParseJson: JSON.stringify({ ...checked.structure, ruleHash: webHash(source) }) } : rulesChanged || urls.size ? { lastParseJson: null } : {}) } });
   }
   async configureSource(body: unknown, checked?: CollectionResult) {

@@ -13,6 +13,11 @@ export function plainText(html: string): string {
   return $.text().replace(/\s+/g, ' ').trim();
 }
 
+export function clipText(value: string, end: number): string {
+  // Keep UTF-16 limits; Unicode mode matches only unpaired surrogate code units.
+  return value.slice(0, end).replace(/[\uD800-\uDFFF]/gu, '');
+}
+
 export function distinctSummary(title: string, summary: string): string {
   const clean = plainText(summary);
   const comparable = (text: string) => text.normalize('NFKC').replace(/[\p{P}\p{S}\s]/gu, '').toLowerCase();
