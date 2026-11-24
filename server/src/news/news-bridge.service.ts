@@ -27,7 +27,7 @@ export class NewsBridgeService {
   constructor(private readonly prisma: PrismaService, @Optional() private readonly gateway?: HotspotGateway, @Optional() private readonly email?: EmailService) {}
 
   async sync(tx: Prisma.TransactionClient, id: string, notifyEligible = false) {
-    const item = await tx.newsItem.findUniqueOrThrow({ where: { id } });
+    const item = await tx.newsItem.findUniqueOrThrow({ where: { id }, omit: { body: true } });
     const cache = item.analysisKey ? await tx.newsAnalysis.findUnique({ where: { key: item.analysisKey } }) : null;
     let score: AnalysisResult['scoring'];
     if (cache?.status === 'done' && cache.resultJson) {
@@ -57,10 +57,8 @@ export class NewsBridgeService {
   private async matchItem(tx: Prisma.TransactionClient, item: { id: string; title: string; summary: string; titleZh: string | null; summaryZh: string | null; aiGeneratedTitle: string | null }) {
     const keywords = await tx.keyword.findMany({ where: { isActive: true }, include: { newsProfile: true } });
     await tx.newsKeywordMatch.deleteMany({ where: { newsItemId: item.id } });
-    for (const keyword of keywords) {
-      if (matchesKeyword(item, keyword))
-        await tx.newsKeywordMatch.create({ data: { newsItemId: item.id, keywordId: keyword.id } });
-    }
+    const matches = keywords.filter(keyword => matchesKeyword(item, keyword)).map(keyword => ({ newsItemId: item.id, keywordId: keyword.id }));
+    if (matches.length) await tx.newsKeywordMatch.createMany({ data: matches });
   }
 
   async rebuild() {
@@ -108,7 +106,7 @@ export class NewsBridgeService {
   }
 
   async announce(id: string) {
-    const hotspot = await this.prisma.hotspot.findUnique({ where: { newsItemId: id }, include: { newsItem: { include: { keywordMatches: { include: { keyword: true } } } } } });
+    const hotspot = await this.prisma.hotspot.findUnique({ where: { newsItemId: id }, include: { newsItem: { omit: { body: true }, include: { keywordMatches: { include: { keyword: true } } } } } });
     if (!hotspot?.notifyEligible || !hotspot.newsItem?.visible || hotspot.newsItem.hiddenArticle || hotspot.newsItem.deletedAt || hotspot.newsItem.publicationStatus !== 'published'
       || (!hotspot.newsItem.originalPublisher && !hotspot.newsItem.isManual) || !hotspot.isClusterMain) return;
     // The unique notification id prevents edits, backfills and restarts from replaying an alert.

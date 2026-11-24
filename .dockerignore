@@ -1,6 +1,11 @@
 **/node_modules
 **/.next
+**/.cache
+**/.turbo
+**/.pnpm-store
 **/dist
+**/coverage
+**/*.tsbuildinfo
 .git
 **/.env
 **/.env.*
@@ -11,5 +16,8 @@
 **/__pycache__
 **/*.log
 telegram-collector/state
+server/prisma/media
+server/prisma/preview
+**/china-radar-*.radar
 backups
 work

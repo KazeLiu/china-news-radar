@@ -28,7 +28,7 @@ export class KeywordsService {
     });
     if (!keyword) throw new NotFoundException('Keyword not found');
     if (this.bridge) {
-      const hotspots = await this.prisma.hotspot.findMany({ where: contentScope({ newsItem: { is: { keywordMatches: { some: { keywordId: id } } } } }), include: { newsItem: true }, orderBy: { createdAt: 'desc' }, take: 20 });
+      const hotspots = await this.prisma.hotspot.findMany({ where: contentScope({ newsItem: { is: { keywordMatches: { some: { keywordId: id } } } } }), include: { newsItem: { omit: { body: true } } }, orderBy: { createdAt: 'desc' }, take: 20 });
       return { ...keyword, hotspots: hotspots.map(presentHotspot) };
     }
     return keyword;

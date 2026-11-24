@@ -1,6 +1,6 @@
-# Ubuntu ARM64 部署与个人使用
+# Ubuntu x86_64 / ARM64 部署与个人使用
 
-项目基于 [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar) 改造，保留上游源码。默认运行独立涉华新闻模块，旧 AI 行业采集、日报、邮件任务不会启动。
+项目基于 [zenitlab/ai-hot-radar](https://github.com/zenitlab/ai-hot-radar) 改造。默认由上游 AppModule 加载涉华扩展，保留热点、精选、日报、关注和 Agent 入口，不注册旧 AI 行业采集调度。
 
 ## 第一版能力
 
@@ -14,9 +14,9 @@
 
 暂未实现多用户注册、捐赠、X 接口和付费电讯。私人入口先用 HTTPS + Basic Auth，收藏属于本站管理员；开放多人使用前需要单独实现用户系统。
 
-## 在日本服务器启动
+## 在 Linux 服务器启动
 
-适用于 Ubuntu ARM64，已装 Docker Engine 和 Docker Compose v2。检查 `uname -m` 应为 `aarch64`，`docker compose version` 应可用。基础镜像支持 ARM64，服务器原生从源码构建，不固定为 amd64。本机未运行 ARM64 容器，首次部署需要完成下面的现场检查。
+适用于 Ubuntu x86_64 或 ARM64，已装 Docker Engine 和 Docker Compose v2。`uname -m` 为 `x86_64` 时使用 `linux/amd64` 镜像，为 `aarch64` 时使用 `linux/arm64` 镜像。`compose.arm64.yml` 保留原文件名但未固定平台，原生构建会使用宿主架构。首次部署需要完成下面的现场检查；共享小内存主机优先采用 [构建机打包、服务器只运行](LOW-MEMORY-DEPLOY.md) 的方式。
 
 1. 将项目源码上传到服务器，例如 `/opt/china-news-radar`。不要上传本机 `node_modules`、`.next`、`.env`、数据库或 Telegram session。
 2. 预定域名为 `china-news.951211.xyz`。将它的 A 记录指向日本服务器；如果配置 AAAA，确保 IPv6 也能访问。服务器和云防火墙放行 TCP 80/443，UDP 443 可选。已有站点占用这两个端口时，把本项目接入现有反向代理，不直接启动第二个占用端口的 Caddy。
@@ -30,18 +30,25 @@ docker run -it --rm caddy:2.10.2-alpine caddy hash-password
 
 在交互终端输入私人阅读密码，将输出 bcrypt hash 填入 `.env` 的 `RADAR_PASSWORD_HASH`。使用**单引号**包住 hash，以保留 `$`。填写 `RADAR_DOMAIN` 与 `RADAR_USER`，其余可保持默认。密码、hash、API key 和 token 都只在自己的终端/服务器配置，不需要发到聊天。
 
-需要使用管理后台时，在自己的终端用 `openssl rand -hex 32` 生成管理员令牌，填入 `.env` 的 `ADMIN_TOKEN`。登录私人阅读入口后，打开 `/admin` 并输入该令牌。未设置令牌时，后台接口只允许本机访问。来源、排除规则和 AI 参数保存到数据库，保存后的值优先于环境变量默认值；详见 [后台使用说明](ADMIN.md)。
+后台使用独立的管理员账号与 Cookie 会话，旧 `ADMIN_TOKEN` 不用于网站登录。启动后按下文交互初始化账号；来源、排除规则和 AI 参数保存到数据库，保存后的值优先于环境变量默认值。详见 [管理员登录](ADMIN-ACCESS.md) 与 [后台使用说明](ADMIN.md)。
 
 4. 构建和启动：
 
 ```bash
 docker compose -f compose.arm64.yml config --quiet
-docker compose -f compose.arm64.yml up -d --build
+docker compose --parallel 1 -f compose.arm64.yml build
+docker compose -f compose.arm64.yml up -d --no-build
 docker compose -f compose.arm64.yml ps
 docker compose -f compose.arm64.yml logs --tail=80 server client caddy
 ```
 
-Caddy 自动申请域名证书。打开 `https://你的域名`，使用私人阅读账号登录。后端和前端均没有发布宿主端口，Telegram 入库接口在公网入口返回 404。首次扫描一般需要数秒至一分钟，连接失败会展示状态并退避 5 分钟；HTTP 429 尊重 Retry-After，手动扫描不绕过失败退避。
+Caddy 自动申请域名证书。打开 `https://你的域名`，使用私人阅读账号登录。后端和前端均没有发布宿主端口，Telegram 入库接口在公网入口返回 404。连接失败会展示状态与退避时间；HTTP 429 尊重 Retry-After，手动扫描不绕过失败退避。
+
+首次使用后台时，在交互终端运行下列命令，按提示输入管理员账号与密码，再打开 `/admin`。重复执行会重置账号并使旧会话失效，不应在普通更新时重复运行：
+
+```bash
+docker compose -f compose.arm64.yml exec server node scripts/admin-account.cjs
+```
 
 5. 现场检查：
 
@@ -50,11 +57,13 @@ docker compose -f compose.arm64.yml exec server node -p process.arch
 docker compose -f compose.arm64.yml exec server node -e "fetch('http://127.0.0.1:3001/api/news/status').then(r=>r.json()).then(console.log)"
 ```
 
-应显示 `arm64`，并能看到采集总数。用未登录浏览器访问应要求认证；登录后检查来源状态、搜索、收藏和手机页面。拒绝外站 Origin 的写请求。确认容器重启后收藏仍在，再作为常驻站点使用。
+应与目标机一致地显示 `x64` 或 `arm64`，并能看到采集总数。用未登录浏览器访问应要求认证；登录后检查来源状态、搜索、收藏和手机页面。拒绝外站 Origin 的写请求。确认容器重启后收藏仍在，再作为常驻站点使用。
 
 ## 数据与备份
 
 SQLite 放在 `radar_data` 卷中；证书在 `caddy_data`，Telegram session 和重试队列在 `telegram_data`。单采集实例即可，不要同时横向启动多个后端写同一个 SQLite 文件。
+
+后端和 Node.js Telegram 采集器一并更新。数据库或网络暂时故障时，消息仍按原退避重投；后端明确报告 `telegram-message-invalid` 时，只隔离这条消息，原始内容保留在 `telegram_data` 的 outbox 中并随迁移包保留。相同内容的回填不会解除隔离；频道消息内容更正后允许重新投递。
 
 数据库初始化使用非破坏性 `prisma db push --skip-generate`，没有 `--accept-data-loss`。升级可能要求 schema 迁移时应先备份和审核；不要添加自动接受丢失数据的参数。新闻目前不自动删除，后续可以按实际规模增加保留期限；初筛为最近 7 天，已经入库的新闻保留供回查。
 
@@ -74,7 +83,7 @@ docker compose -f compose.arm64.yml start server
 
 ## 管理员统一 AI 分析与翻译
 
-默认无需预算或密钥。后续可以在 `/admin` 的“AI 配置”填写并保存模型参数，再用下方测试入口检查连接、分类和翻译。每次测试计入每日额度，不保存为新闻。根 `.env` 可设置尚未保存后台配置时的默认值：
+未启用 AI 时无需密钥。在 `/admin` → **AI 配置** 保存模型参数，再切到 **调用测试** 检查连接、分类和翻译。每次测试计入每日额度，不保存为新闻。根 `.env` 可设置尚未保存后台配置时的默认值：
 
 ```dotenv
 AI_ANALYSIS_ENABLED=true
@@ -86,7 +95,7 @@ AI_DAILY_LIMIT=100
 
 `OPENAI_BASE_URL` 为空时使用 OpenAI API，可填可信的 Responses 服务前缀，例如 `https://example.com/v1`，不要包含 `/responses`。新闻、日报、档案、解析辅助和后台测试统一调用 `POST /responses`，不回退 Chat Completions。后台可用当前地址与 Key 刷新 `GET /models` 并选择模型，未提供目录时也可手动填模型 ID。RSS 与启用的 Telegram 新闻仅发送标题与有限摘要，不发送账号凭据、session 或私聊。每日调用次数按 UTC 保存，包含失败尝试，重启不重置；这是次数限制，不是金额上限。没有密钥时采用规则展示原文。
 
-重新创建服务：`docker compose -f compose.arm64.yml up -d server`。启用后处理新内容和近 7 天候选；已完成缓存不会因模型切换或刷新重做。慢队列超过 15 秒时先按规则暂显，后续以 AI 结果更新。JSON 契约、有限重试和费用控制见 [AI 处理说明](AI-ANALYSIS.md)。
+重新创建服务：`docker compose -f compose.arm64.yml up -d server`。自动分析开关控制新内容；历史积压必须由管理员明确启动，保存配置或重启不会释放历史。已完成缓存不会因模型切换或刷新重做。慢队列超过 15 秒时先按规则暂显，后续以 AI 结果更新。JSON 契约、有限重试和费用控制见 [AI 处理说明](AI-ANALYSIS.md)。
 
 ## 可选 Telegram 个人账号
 

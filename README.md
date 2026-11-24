@@ -32,11 +32,11 @@ npx --yes pnpm@9.12.1 --filter ai-hot-radar-server --filter client-next install 
 
 ## 部署
 
-部署目标为 **Ubuntu ARM64 + Docker**，预定域名为 `china-news.951211.xyz`。使用仓库中的 `compose.arm64.yml` 和 `Dockerfile.radar`，按 [部署与使用说明](docs/DEPLOY-RADAR.md)配置持久卷、访问保护与反向代理。
+支持 **Ubuntu x86_64 / ARM64 + Docker**。使用仓库中的 `compose.arm64.yml` 和 `*.radar` Dockerfile；文件名保留 ARM64，但没有锁定架构。x86_64 机器构建或加载 `linux/amd64` 镜像。按 [部署与使用说明](docs/DEPLOY-RADAR.md)配置持久卷、访问保护与反向代理，不使用旧上游 `docker-compose.yml`。
 
 网页能力的 Camoufox 安装与容器配置见 [网页采集说明](docs/WEB-CRAWLER.md)，不连接个人 Chrome 或加载个人登录资料。
 
-共享主机的资源优化见 [部署与资源说明](docs/LOW-MEMORY-DEPLOY.md)和 `compose.low-memory.yml`。爬虫保留原有指纹、页面加载和状态复用，清理过期缓存与已取消任务的代理，省去自动“加载更多”采集不使用的截图；所在容器的资源限制不变。是否适合约 4 GB 的机器，须结合真实采集峰值与其他程序占用确认。
+共享主机优先在其他机器构建镜像，再上传运行；也可从 GitHub 拉源码后串行构建。具体命令、资源覆盖配置和约束见 [部署与资源说明](docs/LOW-MEMORY-DEPLOY.md)。爬虫保留原有指纹与页面加载，省去未使用的截图和结构样本；所在容器的资源限制不变。是否适合约 4 GB 的机器，须结合真实采集峰值与其他程序占用确认。
 
 ## 文档导航
 
@@ -60,7 +60,7 @@ china-news-radar/
 ├── scripts/             # 数据库升级、账号初始化等工具
 ├── skills/hot-monitor/  # Agent Skill
 ├── docs/                # 开发、部署与接续文档
-└── compose.arm64.yml    # Ubuntu ARM64 部署配置
+└── compose.arm64.yml    # Ubuntu x86_64 / ARM64 部署配置
 ```
 
 ## 作者与致谢
