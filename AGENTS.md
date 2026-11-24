@@ -14,6 +14,7 @@
 - 来源、排除规则和 AI 参数由 `/admin` 管理，保存后以数据库配置为准；AI API Key、TG_API_ID 和 TG_API_HASH 仅可覆盖，不可从浏览器读回，留空保留原值，普通接口仅返回配置状态。Telegram API 凭据属于账号配置，不进入来源或 session；默认 Node.js 采集器（teleproto 1.230.0）加入 pnpm 工作区，随项目安装依赖，复用 Node.js 22.15+ 与内置 SQLite，不在采集时安装 Python 或 npm 包；手机号与 API 凭据保存在账号配置；默认由独立后台采集服务通过 COLLECTOR_TOKEN 和禁止缓存的私有控制接口完成网页授权，Windows 隐藏启动与 Linux 服务使用同一流程。验证码、两步验证密码仅经已登录管理员的专用接口临时存在内存，不入库、不回显、不记日志；仅 Telegram 明确要求时请求两步验证密码，错误输入保留当前步骤重试。授权绑定管理员会话、配置版本和采集器实例，十分钟过期；成功持久 session，重启复用。保留环境变量兼容及显式终端授权入口，使用终端前停止后台采集服务。一个 Telegram 来源对应一个公开用户名，采集器每分钟匹配账号已订阅的公开频道并上报授权、匹配状态，不自动加入频道或读取私聊。管理员通过本地 `admin:init` 命令设置账号；密码使用随机盐和 scrypt，会话哈希保存在 SQLite，八小时过期，所有管理接口统一校验会话与修改来源。保留 Caddy 全站保护和 Telegram 接收令牌。排除规则在 AI 入队及展示时执行，重筛旧记录须保留收藏、原文和时间，移除规则复用缓存且不得自动付费重分析。
 - 保留媒体发布时间、首次发现时间和更新时间。URL 去重，标题相同仅折叠显示；不要把关键词相似当作同一事件，也不要让内容编辑覆盖收藏和首次发现时间。
 - 部署文件使用项目根构建上下文和 `*.radar` Dockerfile，目标支持 Ubuntu ARM64。数据库放在持久卷，禁止自动接受数据丢失；后端和 Telegram 接收入口不发布宿主端口。
+- Docker 打包与发布统一在 `main` 手动运行 GitHub Actions `Publish Docker images`（`gh workflow run publish-docker.yml --ref main`）。确认运行成功且摘要列出 GHCR 四个双架构镜像后再交付版本标签；部署方通过 `compose.images.yml` 和 `RADAR_IMAGE_TAG` 选版本。发布不触发线上部署，源码构建仍可用于本地调试或离线打包。
 - 运行开发服务前核对端口，不按端口批量杀进程。凭据、SQLite、Telegram session 和队列文件不得提交；验证前端时另遵循 `client-next/AGENTS.md`。
 - 前端源码、工作区和部署入口统一使用 `client-next`；旧 Vite `client` 已移除。调整前端调用后验证 Next.js 构建与现有页面，不再维护第二份组件实现。
 - 常规验证：后端 `pnpm --filter ai-hot-radar-server test` 与 `build`；前端构建以及所改文件 ESLint；仅维护旧 Python 采集入口时运行 `python -m unittest test_common.py`，不能用其结果代表默认 Node.js 采集器。本机通过不等于 ARM64 Docker、真实 Telegram 登录或 TLS 已通过，交付时分别说明证据范围。

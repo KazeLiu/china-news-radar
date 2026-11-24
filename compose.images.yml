@@ -1,0 +1,9 @@
+services:
+  server:
+    image: ghcr.io/kazeliu/china-news-radar-server:${RADAR_IMAGE_TAG:?请设置发布版本 RADAR_IMAGE_TAG}
+  client:
+    image: ghcr.io/kazeliu/china-news-radar-client:${RADAR_IMAGE_TAG:?请设置发布版本 RADAR_IMAGE_TAG}
+  rsshub:
+    image: ghcr.io/kazeliu/china-news-radar-rsshub:${RADAR_IMAGE_TAG:?请设置发布版本 RADAR_IMAGE_TAG}
+  telegram:
+    image: ghcr.io/kazeliu/china-news-radar-telegram:${RADAR_IMAGE_TAG:?请设置发布版本 RADAR_IMAGE_TAG}

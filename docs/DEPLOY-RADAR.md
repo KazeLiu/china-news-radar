@@ -16,7 +16,7 @@
 
 ## 在 Linux 服务器启动
 
-适用于 Ubuntu x86_64 或 ARM64，已装 Docker Engine 和 Docker Compose v2。`uname -m` 为 `x86_64` 时使用 `linux/amd64` 镜像，为 `aarch64` 时使用 `linux/arm64` 镜像。`compose.arm64.yml` 保留原文件名但未固定平台，原生构建会使用宿主架构。首次部署需要完成下面的现场检查；共享小内存主机优先采用 [构建机打包、服务器只运行](LOW-MEMORY-DEPLOY.md) 的方式。
+适用于 Ubuntu x86_64 或 ARM64，已装 Docker Engine 和 Docker Compose v2。`compose.arm64.yml` 保留原文件名但未固定平台，拉取发布镜像时 Docker 自动选择宿主架构。首次部署需要完成下面的现场检查；共享小内存主机可选用 [资源覆盖配置](LOW-MEMORY-DEPLOY.md)。
 
 1. 将项目源码上传到服务器，例如 `/opt/china-news-radar`。不要上传本机 `node_modules`、`.next`、`.env`、数据库或 Telegram session。
 2. 预定域名为 `china-news.951211.xyz`。将它的 A 记录指向日本服务器；如果配置 AAAA，确保 IPv6 也能访问。服务器和云防火墙放行 TCP 80/443，UDP 443 可选。已有站点占用这两个端口时，把本项目接入现有反向代理，不直接启动第二个占用端口的 Caddy。
@@ -32,7 +32,17 @@ docker run -it --rm caddy:2.10.2-alpine caddy hash-password
 
 后台使用独立的管理员账号与 Cookie 会话，旧 `ADMIN_TOKEN` 不用于网站登录。启动后按下文交互初始化账号；来源、排除规则和 AI 参数保存到数据库，保存后的值优先于环境变量默认值。详见 [管理员登录](ADMIN-ACCESS.md) 与 [后台使用说明](ADMIN.md)。
 
-4. 构建和启动：
+4. 从 [Publish Docker images](https://github.com/KazeLiu/china-news-radar/actions/workflows/publish-docker.yml) 最近一次成功运行的摘要取得 `RADAR_IMAGE_TAG`。镜像包为私有时，在服务器运行 `docker login ghcr.io`，使用有该包读取权限的 GitHub 账号和带 `read:packages` 的经典令牌。保留现有 `.env` 和卷；已有部署更新前先备份数据，并保留上次版本标签。
+
+```bash
+export RADAR_IMAGE_TAG=替换为发布摘要中的标签
+docker compose -f compose.arm64.yml -f compose.images.yml pull
+docker compose -f compose.arm64.yml -f compose.images.yml up -d --no-build
+```
+
+需要 Telegram 时，拉取和启动命令都加 `--profile telegram`。使用资源覆盖时，在 `compose.arm64.yml` 后加 `-f compose.low-memory.yml`，并按需启用 `rsshub` 或 `telegram`。回退镜像时使用上一版 `RADAR_IMAGE_TAG`，数据库恢复另见下节。
+
+没有可用发布镜像时，可以从源码构建：
 
 ```bash
 docker compose -f compose.arm64.yml config --quiet

@@ -1,0 +1,75 @@
+name: Publish Docker images
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-docker-${{ github.sha }}
+
+env:
+  IMAGE_PREFIX: ghcr.io/kazeliu/china-news-radar
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+        service: [server, client, rsshub, telegram]
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+          - service: server
+            dockerfile: server/Dockerfile.radar
+          - service: client
+            dockerfile: client-next/Dockerfile.radar
+          - service: rsshub
+            dockerfile: rsshub-service/Dockerfile.radar
+          - service: telegram
+            dockerfile: telegram-collector/Dockerfile
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
+      - name: Build and push platform image
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARCH: ${{ matrix.arch }}
+          SERVICE: ${{ matrix.service }}
+          DOCKERFILE: ${{ matrix.dockerfile }}
+        shell: bash
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker buildx create --use
+          docker buildx build --platform "linux/$ARCH" --file "$DOCKERFILE" \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$IMAGE_PREFIX-$SERVICE:${GITHUB_SHA:0:7}-$ARCH" --push .
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish and verify multi-platform tags
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          tag=${GITHUB_SHA:0:7}
+          printf '### Docker images\n\n`RADAR_IMAGE_TAG=%s` (`linux/amd64`, `linux/arm64`)\n\n' "$tag" >> "$GITHUB_STEP_SUMMARY"
+          for service in server client rsshub telegram; do
+            image="$IMAGE_PREFIX-$service:$tag"
+            docker buildx imagetools create --tag "$image" "$image-amd64" "$image-arm64"
+            docker buildx imagetools inspect --raw "$image" | jq -e \
+              '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64", "arm64"]'
+            printf -- '- `%s`\n' "$image" >> "$GITHUB_STEP_SUMMARY"
+          done

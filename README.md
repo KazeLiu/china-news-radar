@@ -36,7 +36,7 @@ npx --yes pnpm@9.12.1 --filter ai-hot-radar-server --filter client-next install 
 
 网页能力的 Camoufox 安装与容器配置见 [网页采集说明](docs/WEB-CRAWLER.md)，不连接个人 Chrome 或加载个人登录资料。
 
-共享主机优先在其他机器构建镜像，再上传运行；也可从 GitHub 拉源码后串行构建。具体命令、资源覆盖配置和约束见 [部署与资源说明](docs/LOW-MEMORY-DEPLOY.md)。爬虫保留原有指纹与页面加载，省去未使用的截图和结构样本；所在容器的资源限制不变。是否适合约 4 GB 的机器，须结合真实采集峰值与其他程序占用确认。
+共享主机优先拉取 [GitHub Actions 发布的双架构镜像](https://github.com/KazeLiu/china-news-radar/actions/workflows/publish-docker.yml)，避免在服务器编译。离线打包、资源覆盖配置和内存约束见 [部署与资源说明](docs/LOW-MEMORY-DEPLOY.md)。是否适合约 4 GB 的机器，须结合真实采集峰值与其他程序占用确认。
 
 ## 文档导航
 

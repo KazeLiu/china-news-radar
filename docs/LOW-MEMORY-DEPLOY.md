@@ -8,11 +8,11 @@
 
 Xeon E5-2683 v4 使用 `linux/amd64` 镜像。仓库的 `compose.arm64.yml` 没有固定架构；四个服务的 Dockerfile 均从构建目标平台安装依赖，浏览器安装脚本也支持 Linux x64。ARM64 单架构镜像不能直接原生运行在这台机器上，不建议在小内存主机上用模拟运行。[Docker 多平台镜像说明](https://docs.docker.com/build/building/multi-platform/)
 
-**推荐在另一台内存充足的机器构建，再将镜像送到服务器运行。** 也可以从 GitHub 拉源码在服务器构建，但依赖安装、TypeScript 和 Next.js 编译的内存峰值不受运行时 `mem_limit` 控制。仓库当前没有发布 Docker 镜像的 GitHub Actions 工作流，拉源码不等于能直接 `docker pull` 成品镜像。
+**优先使用 GitHub Actions 发布的镜像。** 按 [部署说明](DEPLOY-RADAR.md#在-linux-服务器启动)在拉取和启动命令中使用 `-f compose.arm64.yml -f compose.low-memory.yml -f compose.images.yml`。服务器无法访问 GHCR 时，可在另一台内存充足的机器构建、导出镜像再传入。源码构建时，依赖安装和编译的内存峰值不受运行时 `mem_limit` 控制。
 
 以下命令在 Linux shell 的项目根目录执行，需要 Git、Docker 及相应目录权限；没有 Docker 权限时使用 `sudo docker`。构建机使用 Docker Desktop 时需选择 Linux 容器。
 
-### 推荐：构建机打包，服务器只运行
+### 离线备选：构建机打包，服务器只运行
 
 构建机取得包含所需修复的代码版本，依次构建，避免并行抢内存。此处镜像名与 Compose 自动生成的名称一致，构建不需要生产密钥：
 
@@ -55,7 +55,7 @@ docker compose -f compose.arm64.yml -f compose.low-memory.yml up -d --no-build
 docker compose -f compose.arm64.yml -f compose.low-memory.yml up -d --no-build
 ```
 
-前提是镜像已经构建或装入目标机。首次使用后台时，在后端容器中交互初始化管理员账号：`docker compose -f compose.arm64.yml -f compose.low-memory.yml exec server node scripts/admin-account.cjs`，然后进入 `/admin` 登录。普通更新不需重新初始化，否则会重置账号并使旧会话失效。账号保存在数据库，不依赖旧 `ADMIN_TOKEN`。
+以上命令适用于已在目标机构建或导入的镜像；使用 GHCR 镜像时仍需加 `-f compose.images.yml`。首次使用后台时，在后端容器中交互初始化管理员账号：`docker compose -f compose.arm64.yml -f compose.low-memory.yml exec server node scripts/admin-account.cjs`，然后进入 `/admin` 登录。普通更新不需重新初始化，否则会重置账号并使旧会话失效。账号保存在数据库，不依赖旧 `ADMIN_TOKEN`。
 
 资源配置如下；它们是容器硬限制，不是实测占用：
 
