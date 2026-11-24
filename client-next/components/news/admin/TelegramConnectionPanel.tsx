@@ -28,7 +28,7 @@ function AuthInput({ auth, busy, onAction }: { auth: Auth; busy: boolean; onActi
     await onAction('auth/input', { id: auth.id, promptId: auth.promptId, value: submitted });
   }}>
     <label className={styles.fullField}>{password ? '两步验证密码' : '本次登录验证码'}<input type="password" autoComplete={password ? 'off' : 'one-time-code'} required maxLength={password ? 256 : 128} disabled={busy || auth.inputPending} value={value} onChange={event => setValue(event.target.value)} /></label>
-    <p className={styles.hint}>{password ? 'Telegram 已明确要求此账号的云端两步验证密码，不是短信验证码、API Hash 或手机锁屏密码。如果你未设置，请在官方客户端“设置 → 隐私与安全 → 两步验证”中确认，不能用空密码跳过。' : deliveries[auth.delivery || ''] || '请输入本次收到的 Telegram 登录验证码；没有收到时先查看已登录的 Telegram 客户端。'}</p>
+    <p className={styles.hint}>{password ? '请输入 Telegram 云端两步验证密码，可在客户端「设置 → 隐私与安全」确认。' : deliveries[auth.delivery || ''] || '未收到验证码时，请查看已登录的 Telegram 客户端。'}</p>
     <button type="submit" className={styles.primary} disabled={busy || auth.inputPending || !value}>{auth.inputPending ? '已提交，等待验证…' : password ? '提交两步验证密码' : '提交验证码'}</button>
   </form>;
 }
@@ -43,28 +43,27 @@ export function TelegramConnectionPanel({ status, sources, busy, unsaved, onActi
   const local = status.local?.available ? status.local : null;
   const ready = status.apiIdConfigured && status.apiHashConfigured && !!status.phone;
   const error = !active ? auth?.error || status.lastError : null;
-  let title = '下一步：开始登录'; let detail = '账号配置已保存。点击“开始登录”，在本页输入接下来收到的验证码。';
+  let title = '等待登录'; let detail = '';
   if (!status.collectorTokenConfigured) { title = '内部通信令牌未配置'; detail = 'Windows 请重启本地预览；Linux 请给后端与采集器配置相同的 COLLECTOR_TOKEN，至少 32 字符。'; }
   else if (!online) { title = '后台采集服务未连接'; detail = local?.error || local?.environment?.error || (local ? local.running ? '后台服务正在连接本站后端，请稍候。若持续未连接，请查看本地预览后端日志，或双击“重启预览.cmd”。' : '点击“启动后台服务”，等待连接成功后再开始登录。' : '请先在 Linux 部署中启动 telegram 服务，再回到本页登录。命令见下方。'); }
-  else if (unsaved || !ready) { title = '先保存账号配置'; detail = '在上方保存 API ID、API Hash 和注册 Telegram 的完整手机号。'; }
+  else if (unsaved || !ready) { title = '请先保存账号配置'; }
   else if (active) { title = phases[auth.phase]; detail = auth.canSubmit ? '请按下方当前步骤操作。取消、服务重启或十分钟超时会结束本次授权。' : '此授权由另一个管理员会话发起，请回到原会话完成或等待其结束。'; }
   else if (error) { title = '需要处理上次错误'; detail = error.message; }
   else if (!status.serverEnabled) { title = '后端尚未允许接收新闻'; detail = '请在后端启用 TELEGRAM_ENABLED=true 并重新创建服务。'; }
-  else if (connected) { title = status.phase === 'matching' ? '账号已连接，正在匹配频道' : `正在监听 ${status.channels.filter(row => row.subscribed).length} 个公开频道`; detail = '只读取已启用且此账号已订阅的公开频道。频道匹配每 60 秒更新。'; }
-  else if (!status.enabled) { title = '新闻采集已暂停'; detail = '登录 session 会保留，点击“启动采集”即可复用有效登录。'; }
+  else if (connected) { title = status.phase === 'matching' ? '正在匹配频道' : `正在监听 ${status.channels.filter(row => row.subscribed).length} 个公开频道`; }
+  else if (!status.enabled) { title = '新闻采集已暂停'; }
   else if (status.phase === 'connecting') { title = '正在检查登录并连接采集'; detail = '后台正在验证持久 session，成功后匹配频道；失败原因会显示在此处。'; }
   else if (auth?.phase === 'authorized' || status.session === 'authorized') { title = '账号已登录，正在连接采集'; detail = '等待后台匹配频道；失败原因会显示在此处。'; }
   const canOperate = !busy && online && ready && !unsaved && status.collectorTokenConfigured;
   const telegramSources = sources.filter(source => source.kind === 'telegram');
   return <div className={telegram.panel}>
-    <div className={telegram.nextStep} role="status" aria-live="polite"><strong>{title}</strong><p>{detail}</p></div>
+    <div className={telegram.nextStep} role="status" aria-live="polite"><strong>{title}</strong>{detail && <p>{detail}</p>}</div>
     {error && <p className={telegram.failure} role="alert">错误代码：{error.code}</p>}
-    <p className={styles.hint}>Telegram 连接方式：{status.proxyEnabled ? '共享 HTTP(S) 代理' : '直连'}。<a href="/admin?tab=network">前往代理设置</a>。更改连接方式会中止当前授权，并重新连接采集。</p>
+    <p className={styles.hint}>当前连接：{status.proxyEnabled ? '共享 HTTP(S) 代理' : '直连'}　<a href="/admin?tab=network">代理设置</a></p>
     {local && <div className={telegram.actions}><span>后台服务：{online ? '已连接' : local.running ? '连接中' : '未运行'} · Node.js {local.environment?.node}</span>{!online && <button type="button" disabled={busy || !!local.running} onClick={() => onAction('service/start', {}, '后台服务启动请求已提交，请等待连接状态更新。')}>启动后台服务</button>}</div>}
     <ol className={telegram.steps}>
       <li>
         <div className={telegram.stepHeading}><h3>登录账号</h3><span>{active ? phases[auth.phase] : auth?.phase === 'authorized' ? '本次授权成功' : local?.sessionFilePresent || status.session === 'authorized' ? '已有 session，可直接启动采集' : '等待登录'}</span></div>
-        <p>无需弹出窗口。验证码与两步验证密码只用于本次登录，不保存到数据库、浏览器存储或日志；成功后仅保存采集器的 session。</p>
         {auth?.error && active && <p className={telegram.failure} role="alert">{auth.error.message}</p>}
         {active && auth.canSubmit && ['code', 'password'].includes(auth.phase) && <AuthInput key={`${auth.id}:${auth.promptId}`} auth={auth} busy={busy} onAction={onAction} />}
         <div className={telegram.actions}>
@@ -74,19 +73,17 @@ export function TelegramConnectionPanel({ status, sources, busy, unsaved, onActi
       </li>
       <li>
         <div className={telegram.stepHeading}><h3>新闻采集</h3><span>{connected ? '已连接' : status.enabled ? '等待连接' : '已暂停'}</span></div>
-        <p>登录成功后自动启动采集；服务重启时复用持久 session，无需重复输入验证码。暂停采集不会退出 Telegram 账号。</p>
         <div className={telegram.actions}>
           <button type="button" disabled={!canOperate || active || connected || !status.serverEnabled || status.session === 'missing' && !local?.sessionFilePresent} onClick={() => onAction('collection', { enabled: true }, '已请求启动采集，正在检查持久登录。')}>启动采集</button>
           <button type="button" disabled={busy || active || !status.enabled} onClick={() => onAction('collection', { enabled: false }, '已请求暂停采集，后台服务仍会待命。')}>暂停采集</button>
         </div>
-        {!status.serverEnabled && <p className={telegram.failure}>后端接收未启用：请设置 TELEGRAM_ENABLED=true 并重新创建后端服务。</p>}
+        {!status.serverEnabled && (active || error || !online || !ready || unsaved) && <p className={telegram.failure}>请启用 TELEGRAM_ENABLED=true 并重新创建后端服务。</p>}
         {status.checkedAt && <p className={telegram.timestamp}>最近采集状态：{new Date(status.checkedAt).toLocaleString()}{status.reportFresh ? '' : ' · 上次记录'}</p>}
       </li>
     </ol>
     <div className={telegram.channels}>
-      <div className={telegram.stepHeading}><h3>频道匹配与入库结果</h3><a href="/admin?tab=sources">前往来源配置</a></div>
-      <p>先在 Telegram 客户端订阅公开频道，再将用户名填入来源并启用。每次连接采集时每频道补抓最近 24 小时最多 25 条，回填不发送新闻通知。不会自动加入频道或读取私聊。</p>
-      {!telegramSources.length && <p>尚未添加 Telegram 来源，请到“来源配置”新增。</p>}
+      <div className={telegram.stepHeading}><h3>频道匹配</h3><a href="/admin?tab=sources">来源配置</a></div>
+      {!telegramSources.length && <p>先在客户端订阅公开频道，再添加来源。</p>}
       <ul>{telegramSources.map(source => {
         const channel = status.channels.find(row => row.sourceId === source.id && row.channel.toLowerCase() === source.channel?.toLowerCase());
         const result = status.sourceResults?.find(row => row.id === source.id) || source.state;

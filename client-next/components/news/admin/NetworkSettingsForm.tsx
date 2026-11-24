@@ -16,14 +16,17 @@ export function NetworkSettingsForm({ initial, busy, onSave }: { initial: Networ
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, []);
-  return <section className={styles.card}><h2>代理设置</h2><p>在这里保存共享代理地址，再到各来源勾选“使用代理”。未勾选的来源直连。</p><form onSubmit={event => {
+  return <form className={`${styles.card} ${styles.compact}`} onSubmit={event => {
     event.preventDefault(); void onSave('admin/network', { mode, proxyUrl, secureDns, telegramUseProxy });
   }}>
+    <h2>共享代理</h2>
     {error && <p className={styles.error} role="alert">{error}</p>}
     <fieldset disabled={busy || loading || !!error} className={styles.fields}>
       <label>共享代理<select value={mode} onChange={e => setMode(e.target.value as NetworkSettings['mode'])}><option value="direct">停用（全部直连）</option><option value="proxy">启用 HTTP(S) 代理</option></select></label>
-      <label>代理地址<input type="text" autoComplete="off" maxLength={2000} value={proxyUrl} onChange={e => setProxyUrl(e.target.value)} placeholder="http://127.0.0.1:7897" required={mode === 'proxy'} /><small>地址须能被后端和 Telegram 采集器访问。Windows 本地预览可填本机代理；Docker 中的 127.0.0.1 指向容器自身。</small></label>
-      <div className={styles.wide}><label className={styles.check}><input type="checkbox" checked={secureDns} onChange={e => setSecureDns(e.target.checked)} />通过代理使用安全 DNS</label><p className={styles.hint}>RSS、网页与 API 的系统 DNS 解析异常时开启；Telegram 直接连接数据中心 IP，不使用此选项。</p></div>
-      <div className={styles.wide}><label className={styles.check}><input type="checkbox" checked={telegramUseProxy} onChange={e => setTelegramUseProxy(e.target.checked)} />Telegram 账号使用代理（登录和采集）</label><p className={styles.hint}>所有频道共用同一个账号连接，此开关与 Telegram 来源中的开关同步。后台服务约两秒检查配置，更改后重新连接采集；进行中的授权会取消，请在账号页重新开始登录。</p></div>
-    </fieldset><p className={styles.hint}>{mode === 'proxy' ? '代理仅用于已勾选的来源和 Telegram 账号；共享代理连接失败会报告错误，不会自动改为直连。' : '共享代理已停用；所有来源和 Telegram 均直连，保留各来源的勾选状态。'}</p><button type="submit" className={styles.primary} disabled={busy || loading || !!error}>{loading ? '正在读取代理配置…' : '保存代理设置'}</button><p className={styles.hint}>本站采集接收接口和内部 RSSHub 地址始终直连。AI 接口不使用这项代理配置。</p></form></section>;
+      <label>代理地址<input type="text" autoComplete="off" maxLength={2000} value={proxyUrl} onChange={e => setProxyUrl(e.target.value)} placeholder="http://127.0.0.1:7897" required={mode === 'proxy'} /><small>地址须能被采集服务访问；Docker 内的 127.0.0.1 指向容器。</small></label>
+      <div><label className={styles.check}><input type="checkbox" checked={secureDns} onChange={e => setSecureDns(e.target.checked)} />通过代理使用安全 DNS</label><small className={styles.hint}>用于 RSS、网页和 API，不影响 Telegram。</small></div>
+      <div><label className={styles.check}><input type="checkbox" checked={telegramUseProxy} onChange={e => setTelegramUseProxy(e.target.checked)} />Telegram 登录和采集使用代理</label><small className={styles.hint}>切换连接会中止正在进行的 Telegram 登录。</small></div>
+    </fieldset>
+    <div className={styles.formActions}><span>{mode === 'proxy' ? '仅用于选用代理的来源和 Telegram 账号。' : '所有来源直连，保留各来源的代理选择。'}</span><button type="submit" className={styles.primary} disabled={busy || loading || !!error}>{loading ? '读取中…' : busy ? '保存中…' : '保存代理设置'}</button></div>
+  </form>;
 }

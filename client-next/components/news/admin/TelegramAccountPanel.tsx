@@ -30,10 +30,8 @@ export function TelegramAccountPanel({ sources }: { sources: SourceSettings[] })
   }
   const authorizing = !!status?.control?.auth && !['authorized', 'failed', 'cancelled'].includes(status.control.auth.phase);
   const dirty = !!apiId || !!apiHash || phone !== null && phone !== status?.phone;
-  return <section className={styles.card}>
-    <div className={styles.sectionTitle}><div><h2>Telegram 账号配置</h2><p>保存一次账号资料，再在本页完成登录。所有 Telegram 来源共用此账号。</p></div></div>
-    {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
-    <form aria-label="Telegram 账号配置" onSubmit={async event => {
+  return <div className={`${styles.stack} ${styles.compact}`}>
+    <form className={styles.card} aria-label="Telegram 账号配置" onSubmit={async event => {
       event.preventDefault(); if (busy || authorizing || !status?.control) return;
       setBusy(true); setError(''); setNotice('');
       try {
@@ -42,15 +40,19 @@ export function TelegramAccountPanel({ sources }: { sources: SourceSettings[] })
       } catch (e) { setError(e instanceof Error ? e.message : '保存失败'); }
       finally { setBusy(false); }
     }}>
+      <h2>账号资料</h2>
       <div className={styles.fields}>
         <label>TG_API_ID · {status ? status.apiIdConfigured ? '已配置' : '未配置' : '读取中'}<input type="password" autoComplete="new-password" maxLength={10} value={apiId} onChange={e => setApiId(e.target.value)} placeholder="留空保持原值" disabled={busy || authorizing} /></label>
         <label>TG_API_HASH · {status ? status.apiHashConfigured ? '已配置' : '未配置' : '读取中'}<input type="password" autoComplete="new-password" maxLength={32} value={apiHash} onChange={e => setApiHash(e.target.value)} placeholder="留空保持原值" disabled={busy || authorizing} /></label>
         <label>Telegram 注册手机号<input type="tel" inputMode="tel" autoComplete="off" required maxLength={32} pattern={'\\+[1-9][0-9]{1,14}'} title="请填写 +国家区号和完整手机号，例如 +86 后接中国大陆手机号。" value={phone ?? status?.phone ?? ''} onChange={e => setPhone(e.target.value.replace(/[\s()-]/g, ''))} placeholder="+国家区号和完整手机号" disabled={busy || authorizing} /></label>
       </div>
-      <p className={styles.hint}>API ID / Hash 标识应用，不是账号登录凭据；留空保留原值。手机号保存到本站后台，仅管理员可见；例如中国大陆号码填写 +86 后接完整手机号。</p>
-      <div className={styles.actions}><button type="submit" disabled={busy || authorizing || !status?.control} className={dirty || !status?.phone ? styles.primary : undefined}>保存账号配置</button></div>
+      <div className={styles.formActions}><span>所有 Telegram 来源共用此账号。</span><button type="submit" disabled={busy || authorizing || !status?.control} className={dirty || !status?.phone ? styles.primary : undefined}>保存账号配置</button></div>
     </form>
-    {loadError && <p className={styles.error} role="alert">状态读取失败：{loadError}。页面暂时保留上次结果。</p>}
-    <TelegramConnectionPanel status={status} sources={sources} busy={busy} unsaved={dirty} onAction={act} />
-  </section>;
+    <section className={styles.card}>
+      <h2>登录与采集</h2>
+      {loadError && <p className={styles.error} role="alert">状态读取失败：{loadError}。当前显示上次结果。</p>}
+      {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
+      <TelegramConnectionPanel status={status} sources={sources} busy={busy} unsaved={dirty} onAction={act} />
+    </section>
+  </div>;
 }

@@ -116,25 +116,24 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
     ? <textarea value={form[key]} rows={key === 'body' ? 10 : 3} maxLength={max} disabled={busy || !editable} onChange={e => setForm({ ...form, [key]: e.target.value })} />
     : <input value={form[key]} maxLength={max} required={key === 'title'} disabled={busy || !editable} onChange={e => setForm({ ...form, [key]: e.target.value })} />}</label>;
   return <section className={styles.card}>
-    <div className={styles.sectionTitle}><div><h2>新闻管理</h2><p>未完成分析的新闻可单独点击“AI 分析”，按已保存配置处理并计入共享额度。点击标题查看原文与结果。</p></div><button type="button" disabled={busy} onClick={() => openEditor(null)}>新增手动新闻</button></div>
+    <div className={styles.sectionTitle}><h2>新闻列表</h2><button type="button" className={styles.primary} disabled={busy} onClick={() => openEditor(null)}>新增新闻</button></div>
     {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
     <form className={`${styles.actions} ${styles.newsFilters}`} onSubmit={e => { e.preventDefault(); void action(async () => { await load(0); }, false); }}>
       <label>新闻范围<select value={state} disabled={busy} onChange={e => setState(e.target.value)}><option value="all">全部新闻</option><option value="draft">草稿</option><option value="hidden">已隐藏文章</option><option value="manual">全部手动新闻</option><option value="deleted">回收站</option></select></label>
-      <label>标题或摘要<input value={query} maxLength={200} disabled={busy} onChange={e => setQuery(e.target.value)} /></label><button disabled={busy} type="submit">查询</button>
+      <label>标题或摘要<input value={query} maxLength={200} disabled={busy} onChange={e => setQuery(e.target.value)} /></label><button disabled={busy} type="submit">搜索</button>
     </form>
     {loading ? <p role="status">正在读取新闻…</p> : <>
-      <p>共 {page.total} 条 · 时间按北京时间显示</p>
-      {trashView && <p>删除后保留 60 天，期间可以恢复；到期自动永久清理，仅保留 URL 防重记录。恢复不会解除原有隐藏、筛选和草稿状态。</p>}
+      {trashView && <p className={styles.hint}>删除后可在 60 天内恢复，到期清理。</p>}
       <div className={styles.batchToolbar} aria-label="新闻批量操作">
         <label className={styles.check}><input ref={selectAll} type="checkbox" checked={page.items.length > 0 && selectedIds.length === page.items.length} disabled={busy || !page.items.length} onChange={e => setSelectedIds(e.target.checked ? page.items.map(item => item.id) : [])} />全选当前页</label>
-        <span role="status">已选 {selectedIds.length} 条</span>
-        {trashView ? <button type="button" disabled={busy || !selectedIds.length} onClick={() => confirmBatch('restore')}><RotateCcw size={16} />恢复所选</button> : <>
+        <span role="status">{selectedIds.length ? `已选 ${selectedIds.length} 条` : `共 ${page.total} 条 · 北京时间`}</span>
+        {!!selectedIds.length && (trashView ? <button type="button" disabled={busy} onClick={() => confirmBatch('restore')}><RotateCcw size={16} />恢复所选</button> : <>
           <button type="button" disabled={busy || !selectedIds.length} onClick={() => confirmBatch('hideArticle')}><EyeOff size={16} />隐藏文章</button>
           <button type="button" disabled={busy || !selectedIds.length} onClick={() => confirmBatch('hideImages')}><ImageOff size={16} />隐藏图片</button>
           <button type="button" disabled={busy || !selectedIds.length} onClick={() => confirmBatch('showArticle')}>显示文章</button>
           <button type="button" disabled={busy || !selectedIds.length} onClick={() => confirmBatch('showImages')}>显示图片</button>
           <button type="button" className={styles.danger} disabled={busy || !selectedIds.length} onClick={() => confirmBatch('delete')}><Trash2 size={16} />删除所选</button>
-        </>}
+        </>)}
       </div>
       <div className={styles.newsList}>{page.items.map(item => {
         const thumbnail = (JSON.parse(item.images) as string[])[0];
@@ -156,7 +155,7 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
           </div>
         </article>;
       })}</div>{!page.items.length && <p>此范围暂无新闻。</p>}
-      <div className={styles.actions}><button type="button" disabled={busy || offset === 0} onClick={() => void action(async () => { await load(Math.max(0, offset - 30)); }, false)}>上一页</button><button type="button" disabled={busy || page.nextOffset === null} onClick={() => void action(async () => { await load(page.nextOffset!); }, false)}>下一页</button></div>
+      <div className={styles.formActions}><button type="button" disabled={busy || offset === 0} onClick={() => void action(async () => { await load(Math.max(0, offset - 30)); }, false)}>上一页</button><button type="button" disabled={busy || page.nextOffset === null} onClick={() => void action(async () => { await load(page.nextOffset!); }, false)}>下一页</button></div>
     </>}
     {editorOpen && <NewsDialog title={selected ? selected.deletedAt ? '已删除新闻（只读）' : selected.isManual ? '编辑手动新闻' : '采集原文与展示预览' : '新增手动新闻'} busy={busy} onClose={closeEditor}>
     {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
@@ -164,12 +163,11 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
     {!selected && <form className={styles.fields} onSubmit={e => { e.preventDefault(); void action(async () => {
       const result = await adminApi<{ item: ManagedNews; reused: boolean }>('admin/items/import', '', { url: importUrl }, 'POST');
       choose(result.item); setNotice(result.reused ? '已打开同 URL 的原记录，未重复录入。' : '网页内容已保存为草稿，没有调用 AI。');
-    }); }}><label>从公开文章 URL 录入<input type="url" required maxLength={2000} value={importUrl} disabled={busy} onChange={e => setImportUrl(e.target.value)} /></label><div className={styles.actions}><button disabled={busy} type="submit">提取并保存草稿</button></div></form>}
+    }); }}><label>公开文章 URL<input type="url" required maxLength={2000} value={importUrl} disabled={busy} onChange={e => setImportUrl(e.target.value)} /></label><div className={styles.inlineEnd}><button disabled={busy} type="submit">提取为草稿</button></div></form>}
     <form onSubmit={e => { e.preventDefault(); void action(save); }}>
       <h3>{selected ? editable ? '分析素材与原文' : '采集原文（只读）' : '粘贴内容录入'}</h3>
       <div className={styles.fields}>{field('title', '原始标题', 600)}{field('url', '原文 URL（可空）', 2000)}{field('publisher', '发布者（可空）', 120)}{field('publishedAt', '发布时间（ISO 8601，含时区，可空）', 50)}{field('summary', '分析摘要 · 最多 1,600 字符', 1600, true)}{field('body', '完整正文 · 最多 200,000 字符，不完整发送给模型', 200000, true)}{field('images', '图片 HTTP(S) URL · 每行一张，最多 20 张', 40020, true)}</div>
-      {editable && <button type="submit" disabled={busy} className={styles.primary}>保存草稿素材</button>}
-      {selected && dirty && <p role="status">素材有未保存修改，请先保存再分析或发布。已发布新闻修改素材后会回到草稿。</p>}
+      {editable && <div className={styles.formActions}>{selected && dirty && <span role="status">请先保存再分析或发布。修改已发布新闻的素材会退回草稿。</span>}<button type="submit" disabled={busy} className={styles.primary}>保存草稿素材</button></div>}
     </form>
     {selected && <section className={styles.testResult}><h3>展示预览与操作</h3>
       <p>{selected.deletedAt ? '回收站，仅管理员可见' : selected.publicationStatus === 'draft' ? '草稿，仅管理员可见' : selected.hiddenArticle ? '文章已隐藏' : !selected.isManual && !selected.originalPublisher ? '原始出处未确认，暂不公开' : selected.visible ? '符合展示规则' : '未通过内容筛选'} · AI：{selected.aiStatus}</p>{selected.aiReason && <p>{selected.aiReason}</p>}
@@ -179,8 +177,8 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
       {selected.isManual && !selected.deletedAt && <><div className={styles.fields}><label>展示标题<input maxLength={1200} value={display.title} disabled={busy || dirty} onChange={e => setDisplay({ ...display, title: e.target.value })} /></label><label>展示摘要<textarea maxLength={8000} value={display.summary} disabled={busy || dirty} rows={4} onChange={e => setDisplay({ ...display, summary: e.target.value })} /></label></div><div className={styles.actions}>
         <button type="button" disabled={busy || dirty} onClick={() => void action(() => updateDisplay({ displayTitle: display.title, displaySummary: display.summary }))}>保存展示文案 · 不调用 AI</button>
         <button type="button" disabled={busy || dirty} onClick={() => void action(() => updateDisplay({ displayTitle: null, displaySummary: null }))}>使用原文或分析译文</button>
-      </div><p>分析仅发送标题与有限摘要，无有效缓存时产生模型请求并计入每日额度。首次请求最多再重试两次。</p></>}
-      {!selected.deletedAt && <div className={styles.actions}>
+      </div></>}
+      {!selected.deletedAt && <div className={styles.formActions}>
         {(selected.isManual || !['done', 'excluded'].includes(selected.aiStatus)) && <button type="button" disabled={busy || dirty || selected.hiddenArticle} onClick={() => void action(() => analyze(), false)}>{analyzingId === selected.id ? '分析中…' : 'AI 分析并预览'}</button>}
         {selected.isManual && <button type="button" className={styles.primary} disabled={busy || dirty || selected.publicationStatus === 'published' || selected.hiddenArticle || selected.aiStatus !== 'done' || !selected.visible} onClick={() => void action(async () => { choose(await adminApi<ManagedNews>(`admin/items/${selected.id}/publish`, '', {}, 'POST')); setNotice('新闻已发布。重复发布或恢复不会重放通知。'); })}>发布新闻</button>}
       </div>}
@@ -190,7 +188,7 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
       {confirmation.items.slice(0, 3).map(item => <p key={item.id} className={styles.confirmTitle}>{item.displayTitle ?? item.aiGeneratedTitle ?? item.titleZh ?? item.title}</p>)}{confirmation.items.length > 3 && <p>以及另外 {confirmation.items.length - 3} 条已选新闻。</p>}
       <p>{confirmation.action === 'delete' ? '将从所有公共入口移除，进入回收站。60 天内可恢复，满 60 天自动永久删除原文、译文及不再共用的分析缓存，仅留 URL 防重记录，避免重新采入。' : confirmation.action === 'hideArticle' ? '将从前台、日报条目、Agent、RSS 等公共入口隐藏文章，保留数据，可随时恢复。' : confirmation.action === 'hideImages' ? '将隐藏这些新闻在公共入口的全部图片，保留文字和原图信息。' : '恢复后仍遵守内容筛选、发布状态和其他人工隐藏设置，不重新调用 AI，也不重复发送通知。'}</p>
       {error && <p className={styles.error} role="alert">{error}</p>}
-      <div className={styles.actions}><button type="button" disabled={busy} onClick={() => setConfirmation(null)}>取消</button><button type="button" className={['delete', 'hideArticle', 'hideImages'].includes(confirmation.action) ? styles.danger : styles.primary} disabled={busy} onClick={() => void action(applyBatch)}>{busy ? '正在保存…' : `确认${batchLabels[confirmation.action]}`}</button></div>
+      <div className={styles.formActions}><button type="button" disabled={busy} onClick={() => setConfirmation(null)}>取消</button><button type="button" className={['delete', 'hideArticle', 'hideImages'].includes(confirmation.action) ? styles.danger : styles.primary} disabled={busy} onClick={() => void action(applyBatch)}>{busy ? '正在保存…' : `确认${batchLabels[confirmation.action]}`}</button></div>
     </NewsDialog>}
   </section>;
 }

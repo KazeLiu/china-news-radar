@@ -36,16 +36,16 @@ export function LogsPanel({ sources }: { sources: SourceSettings[] }) {
   const total = (key: keyof OperationGroup['_sum']) => collected.reduce((sum, group) => sum + (group._sum[key] || 0), 0);
   const ai = data?.summary.ai || [];
   const name = (id: string) => id === 'manual' ? '管理员录入' : sources.find(source => source.id === id)?.name || id;
-  return <section className={styles.card}><h2>日志与统计</h2><p>按北京时间查看每日汇总和时间线；AI 每日额度仍按 UTC。请求次数与处理文章条数分开计算，预览不计入正式新增。</p>
-    <form className={styles.fields} onSubmit={e => { e.preventDefault(); void load(); }}>
+  return <section className={styles.card}><h2>筛选日志</h2>
+    <form onSubmit={e => { e.preventDefault(); void load(); }}><div className={styles.fields}>
       <label>日期（北京时间）<input type="date" required value={date} onChange={e => setDate(e.target.value)} disabled={busy} /></label>
       <label>来源 ID（留空为全部，支持已删除来源）<input list="log-sources" value={source} maxLength={64} onChange={e => setSource(e.target.value)} disabled={busy} /><datalist id="log-sources"><option value="manual">管理员录入</option>{sources.map(source => <option key={source.id} value={source.id}>{source.name}</option>)}</datalist></label>
       <label>时间线类型<select value={kind} onChange={e => setKind(e.target.value)} disabled={busy}><option value="">全部类型</option>{Object.entries(kinds).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
       <label>时间线状态<select value={status} onChange={e => setStatus(e.target.value)} disabled={busy}><option value="">全部状态</option>{Object.entries(statuses).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-      <button type="submit" className={styles.primary} disabled={busy}>{busy ? '正在读取…' : '查看日志'}</button>
+      </div><div className={styles.formActions}><button type="submit" className={styles.primary} disabled={busy}>{busy ? '读取中…' : '查看日志'}</button></div>
     </form>{error && <p className={styles.error} role="alert">{error}</p>}
     {data && <>{data.recordingError && <p className={styles.error} role="alert">近期操作日志保存失败，请检查数据库。业务结果未改变，时间线可能不完整。</p>}
-      <p>明细保留 {data.retentionDays ?? 7} 天，到期自动清理；新闻、译文、有效分析缓存和每日额度不会随日志删除。AI 处理结果从功能启用后记录，不补造历史。以下汇总按日期和来源计算，类型与状态仅筛选时间线。</p>
+      <p className={styles.hint}>明细保留 {data.retentionDays ?? 7} 天。类型和状态只筛选时间线。</p>
       <dl className={styles.aiFacts}>
         <div><dt>来源检查</dt><dd>{collected.reduce((sum, group) => sum + group._count, 0)} 次 · 失败 {collected.filter(group => group.status === 'failed').reduce((sum, group) => sum + group._count, 0)} 次 · 无新内容 {collected.filter(group => group.status === 'empty').reduce((sum, group) => sum + group._count, 0)} 次</dd></div>
         <div><dt>正式采集文章</dt><dd>发现 {total('discovered')} · 新增 {total('added')} · 更新 {total('updated')} · 重复 {total('duplicates')} · 采集筛选过滤 {total('filtered')}</dd></div>

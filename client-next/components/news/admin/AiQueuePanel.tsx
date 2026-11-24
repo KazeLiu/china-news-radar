@@ -7,7 +7,7 @@ import styles from './admin.module.css';
 
 interface Queue { paused: boolean; queued: number; running: number; historical: number }
 
-export function AiQueuePanel() {
+export function AiQueuePanel({ active }: { active: boolean }) {
   const [queue, setQueue] = useState<Queue | null>(null);
   const [requests, setRequests] = useState<AiRequestPage | null>(null);
   const [page, setPage] = useState(1);
@@ -19,6 +19,7 @@ export function AiQueuePanel() {
   const [confirmHistory, setConfirmHistory] = useState(false);
 
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     async function load() {
@@ -42,7 +43,7 @@ export function AiQueuePanel() {
     }
     void load();
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [page, revision]);
+  }, [active, page, revision]);
 
   function refresh() { setLoading(true); setRevision(value => value + 1); }
   function turnPage(next: number) { setLoading(true); setError(''); setPage(next); }
@@ -53,19 +54,17 @@ export function AiQueuePanel() {
     finally { setBusy(false); }
   }
 
-  return <section className={`${styles.card} ${styles.aiRequests}`}>
-    <div className={styles.sectionTitle}><div><h2>请求详情</h2><p>每次实际调用单独记录，包括重试和失败。明细保留 {requests?.retentionDays ?? 7} 天；点击查看发送内容与模型返回。</p></div>
+  return <section className={styles.card}>
+    <div className={styles.sectionTitle}><h2>队列与请求记录</h2>
       <button type="button" disabled={loading} onClick={refresh}>{loading ? '读取中…' : '刷新记录'}</button></div>
     {queue && <>
       <p>{queue.paused ? '队列已暂停' : '队列运行中'} · 排队 {queue.queued} · 处理中 {queue.running} · 历史积压 {queue.historical}</p>
-      <p>单个任务最多三次实际请求；重试耗尽后保留失败状态，不会重新自动入队。可在“新闻管理”单篇重试，或明确启动历史未完成新闻。</p>
       <div className={styles.actions}>
-        <button type="button" disabled={busy} className={styles.secondary} onClick={() => void action('admin/ai/queue', { paused: !queue.paused }, 'PUT')}>{queue.paused ? '继续队列' : '暂停队列'}</button>
-        <button type="button" disabled={busy} className={styles.secondary} onClick={() => setConfirmHistory(true)}>处理历史未完成新闻</button>
+        <button type="button" disabled={busy} onClick={() => void action('admin/ai/queue', { paused: !queue.paused }, 'PUT')}>{queue.paused ? '继续队列' : '暂停队列'}</button>
+        <button type="button" disabled={busy} onClick={() => setConfirmHistory(true)}>处理历史未完成新闻</button>
       </div>
-      {confirmHistory && <div className={styles.notice}><p>此操作会把没有有效完成缓存的历史内容送入队列，产生实际模型请求并计入 UTC 每日额度。已完成内容继续复用缓存。</p>
-        <button type="button" className={styles.primary} disabled={busy} onClick={() => void action('admin/ai/history', {}, 'POST')}>确认启动历史处理</button>
-        <button type="button" className={styles.secondary} disabled={busy} onClick={() => setConfirmHistory(false)}>取消</button></div>}
+      {confirmHistory && <div className={styles.notice}><p>历史未完成新闻将加入队列，模型请求计入每日额度。已完成结果会保留。</p>
+        <div className={styles.formActions}><button type="button" disabled={busy} onClick={() => setConfirmHistory(false)}>取消</button><button type="button" className={styles.primary} disabled={busy} onClick={() => void action('admin/ai/history', {}, 'POST')}>启动历史处理</button></div></div>}
     </>}
     {error && <p className={styles.error} role="alert">{error}</p>}
     <div className={styles.requestList} aria-label="AI 实际请求记录" aria-busy={loading}>
@@ -78,7 +77,7 @@ export function AiQueuePanel() {
       {requests && !requests.items.length && <p>暂无实际请求记录。</p>}
     </div>
     {requests && <nav className={`${styles.actions} ${styles.requestPagination}`} aria-label="请求记录分页">
-      <span>共 {requests.total} 次请求 · 第 {requests.page} / {requests.totalPages} 页 · 北京时间</span>
+      <span>共 {requests.total} 次 · 第 {requests.page} / {requests.totalPages} 页 · 保留 {requests.retentionDays ?? 7} 天</span>
       <button type="button" disabled={loading || page <= 1} onClick={() => turnPage(page - 1)}>上一页</button>
       <button type="button" disabled={loading || page >= requests.totalPages} onClick={() => turnPage(page + 1)}>下一页</button>
     </nav>}

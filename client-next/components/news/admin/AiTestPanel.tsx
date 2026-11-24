@@ -38,15 +38,13 @@ export function AiTestPanel({ token, busy, keyConfigured, onUsage, sample }: {
     finally { setTesting(false); }
   }
 
-  return <form className={`${styles.card} ${styles.aiTest}`} onSubmit={event => { event.preventDefault(); void test(); }} aria-busy={testing}>
-    <h2>{sample ? '分析来源样例' : '测试 AI 调用'}</h2>
-    <p>使用已保存的接口、模型、密钥和额外指令。配置有改动时先保存。{sample ? '已填入抓取样例，点击下方按钮才产生一次实际请求；不保存为新闻。' : '下面是虚构测试样例，可以替换成来源中的真实标题、摘要。'}</p>
+  return <form className={`${styles.card} ${styles.compact}`} onSubmit={event => { event.preventDefault(); void test(); }} aria-busy={testing}>
+    <h2>{sample ? '分析来源样例' : '测试已保存的模型'}</h2>
     <div className={styles.fields}>
       <label>测试标题<textarea required rows={3} maxLength={600} value={title} disabled={testing} onChange={event => setTitle(event.target.value)} /><small>{title.length} / 600 字符</small></label>
       <label>测试摘要（可留空）<textarea rows={3} maxLength={1600} value={summary} disabled={testing} onChange={event => setSummary(event.target.value)} /><small>{summary.length} / 1600 字符；模型只读取你提供的文本。</small></label>
     </div>
-    <div className={styles.actions}><button className={styles.primary} type="submit" disabled={busy || testing || !keyConfigured || !title.trim()}>{testing ? '正在调用 AI…' : '测试已保存配置'}</button><span>每次点击调用一次，失败也计入每日额度；测试结果不保存为新闻。</span></div>
-    {!keyConfigured && <p className={styles.hint}>请先在上方填写并保存 API Key。</p>}
+    <div className={styles.formActions}><span>{keyConfigured ? '实际调用一次，失败也计入额度。' : '请先在模型设置中保存 API Key。'}</span><button className={styles.primary} type="submit" disabled={busy || testing || !keyConfigured || !title.trim()}>{testing ? '测试中…' : '运行测试'}</button></div>
     {testing && <p role="status">任务已排队，已等待 {elapsedSeconds} 秒；开始调用后最多等待模型 120 秒。暂停队列时请先继续队列。</p>}
     {error && <p className={styles.error} role="alert">{error}</p>}
     {result && <div className={styles.testResult} role="status">

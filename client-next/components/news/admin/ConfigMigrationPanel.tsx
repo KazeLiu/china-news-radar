@@ -89,25 +89,25 @@ export function ConfigMigrationPanel({ onBusy }: { onBusy: (busy: boolean) => vo
     } catch (error) { setError(error instanceof Error ? error.message : '导入失败'); await loadStatus().catch(() => {}); }
     finally { finish(); }
   }
-  return <div className={styles.stack}>
+  return <div className={`${styles.stack} ${styles.compact}`}>
     <section className={styles.card} aria-label="迁移服务状态">
-      <div className={styles.sectionTitle}><div><h2>配置迁移</h2><p>加密迁移采集设置、密钥、Logo、关注列表，以及 Telegram 登录和未投递队列。</p></div><button type="button" disabled={!!operation} onClick={() => { setError(''); void loadStatus().catch(error => setError(error instanceof Error ? error.message : '状态读取失败')); }}><RefreshCw size={16} />刷新状态</button></div>
+      <div className={styles.sectionTitle}><h2>服务状态</h2><button type="button" disabled={!!operation} onClick={() => { setError(''); void loadStatus().catch(error => setError(error instanceof Error ? error.message : '状态读取失败')); }}><RefreshCw size={16} />刷新状态</button></div>
       {!status ? <p role="status">正在读取服务状态…</p> : pendingId ? <div role="status"><p>正在恢复 Telegram 状态，来源暂未启动。请保持采集器运行，重启后也会继续恢复。</p><p>数据库备份：<code className={styles.migrationPath}>{status.pending!.backup}</code></p></div> : <p>{ready ? '迁移采集器已连接，可以导出或导入。' : '请先更新并启动新版 Telegram 采集器，再刷新状态。后端需启用 TELEGRAM_ENABLED=true，采集器需启用 TG_USE_CONFIRMED=true，双方需使用同一个有效 COLLECTOR_TOKEN。'}{!status.collectorEnabled && ' 当前定时采集已被部署环境关闭，需设置 COLLECTOR_ENABLED=true 并重建后端。'}</p>}
       {error && <div className={styles.error} role="alert">{error}</div>}{notice && <div className={styles.notice} role="status">{notice}</div>}
       {imported && <div className={styles.actions}><button type="button" className={styles.primary} onClick={() => window.location.reload()}>刷新后台，载入新配置</button></div>}
     </section>
-    <section className={styles.card}><h2>从旧服务器导出</h2><p>密钥、session 和队列只放入密码加密的 .radar 文件。请将文件和密码分开保管，密码遗失后无法恢复。</p>
+    <section className={styles.card}><h2>导出迁移包</h2><p>加密包包含应用设置、密钥与 Telegram 登录状态。请分开保管文件和密码。</p>
       <form onSubmit={event => { event.preventDefault(); void exportAll(); }}>
         <fieldset className={styles.fields} disabled={busy || !ready}><label>迁移密码<input type="password" autoComplete="new-password" minLength={12} maxLength={256} required value={exportPassword} onChange={event => setExportPassword(event.target.value)} /></label><label>再次输入密码<input type="password" autoComplete="new-password" minLength={12} maxLength={256} required value={repeat} onChange={event => setRepeat(event.target.value)} /></label></fieldset>
         <label className={styles.check}><input type="checkbox" disabled={busy || !ready} checked={stopConfirmed} onChange={event => setStopConfirmed(event.target.checked)} />导出时停止旧服务器 Telegram 采集，并保持暂停，避免两台服务器同时使用 session。</label>
-        <div className={styles.actions}><button type="submit" className={styles.primary} disabled={busy || !ready || !stopConfirmed}><Download size={16} />{operation === 'export' ? '正在停止采集并加密…' : '暂停 Telegram 并导出'}</button></div>
+        <div className={styles.formActions}><button type="submit" className={styles.primary} disabled={busy || !ready || !stopConfirmed}><Download size={16} />{operation === 'export' ? '正在停止采集并加密…' : '暂停 Telegram 并导出'}</button></div>
       </form>
     </section>
-    <section className={styles.card}><h2>导入到这台服务器</h2><p>先在新服务器部署相同版本，并初始化本站管理员账号。导入只替换应用设置，保留本站管理员、新闻和收藏；域名、TLS、Docker 路径和内部令牌沿用本站部署配置。</p>
+    <section className={styles.card}><h2>导入迁移包</h2><p>两台服务器需使用同一版本。导入会替换应用设置，保留本站管理员、新闻、收藏和部署配置。</p>
       {!preview ? <form onSubmit={event => { event.preventDefault(); void inspect(); }}><fieldset className={styles.fields} disabled={busy || !ready}>
         <label>加密迁移包<input type="file" accept=".radar,application/octet-stream" required onChange={event => { setFile(event.target.files?.[0] || null); setError(''); }} /></label>
         <label>迁移密码<input type="password" autoComplete="off" required minLength={12} maxLength={256} value={importPassword} onChange={event => setImportPassword(event.target.value)} /></label>
-      </fieldset><div className={styles.actions}><button type="submit" disabled={busy || !ready || !file}><Upload size={16} />{operation === 'preview' ? '正在解密和校验…' : '上传并预览'}</button></div></form> : <div>
+      </fieldset><div className={styles.formActions}><button type="submit" disabled={busy || !ready || !file}><Upload size={16} />{operation === 'preview' ? '正在解密和校验…' : '上传并预览'}</button></div></form> : <div>
         <p>导出时间：{new Date(preview.exportedAt).toLocaleString()} · 预览有效至 {new Date(preview.expiresAt).toLocaleTimeString()}</p>
         <p>{preview.sources.length} 个来源 · {preview.rules} 条过滤规则 · {preview.keywords} 个关注项 · {preview.logos} 个 Logo · Telegram {preview.telegramSession ? '含登录 session' : '未登录'} · {preview.pendingMessages} 条待投递消息</p>
         <ul className={styles.sourceImportList}>{preview.sources.map((source, index) => <li key={index}>{source.action} · {source.name}<small>{source.kind} · {source.enabled ? '恢复启用' : '保持暂停'}</small></li>)}</ul>
@@ -115,7 +115,7 @@ export function ConfigMigrationPanel({ onBusy }: { onBusy: (busy: boolean) => vo
         <ul className={styles.migrationWarnings}>{preview.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>
         <div className={styles.stack}><label className={styles.check}><input type="checkbox" disabled={busy} checked={oldStopped} onChange={event => setOldStopped(event.target.checked)} />已确认旧服务器 Telegram 采集器停止，不会再使用此 session。</label>
           <label className={styles.check}><input type="checkbox" disabled={busy} checked={replace} onChange={event => setReplace(event.target.checked)} />确认替换本站全部应用设置和关注列表；恢复完成后按包内开关自动采集。</label></div>
-        <div className={styles.actions}><button type="button" className={styles.primary} disabled={busy || !ready || !oldStopped || !replace} onClick={() => void confirmImport()}>{operation === 'import' ? '正在备份并导入…' : '备份本站并确认导入'}</button><button type="button" disabled={busy} onClick={() => setPreview(null)}>取消</button></div>
+        <div className={styles.formActions}><button type="button" disabled={busy} onClick={() => setPreview(null)}>取消</button><button type="button" className={styles.primary} disabled={busy || !ready || !oldStopped || !replace} onClick={() => void confirmImport()}>{operation === 'import' ? '正在备份并导入…' : '备份本站并导入'}</button></div>
       </div>}
     </section>
   </div>;
