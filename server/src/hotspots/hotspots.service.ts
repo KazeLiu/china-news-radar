@@ -4,7 +4,7 @@ import { TwitterService } from '../services/twitter.service';
 import { SearchService } from '../services/search.service';
 import { AiService } from '../services/ai.service';
 import { hotPage, importancePage } from './ranked-page';
-import { contentScope, newsInclude, newsMode, presentHotspot } from '../news/radar-content';
+import { contentScope, newsInclude, newsMode, presentHotspot, presentHotspotCards } from '../news/radar-content';
 
 /**
  * Within each cluster, push video sources (bilibili) to the bottom of their group.
@@ -182,7 +182,7 @@ export class HotspotsService {
     hotspots = reorderClusterByMedium(hotspots);
 
     return {
-      data: hotspots.map(presentHotspot),
+      data: await presentHotspotCards(this.prisma, hotspots),
       pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
     };
   }

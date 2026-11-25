@@ -1,4 +1,5 @@
 import { Prisma, NewsItem } from '@prisma/client';
+import { readCachedChinaEvaluation } from './analysis';
 import { distributionFor } from './transports';
 
 export const newsMode = () => process.env.RADAR_MODE !== 'legacy';
@@ -17,7 +18,8 @@ export function contentScope(where: Prisma.HotspotWhereInput = {}): Prisma.Hotsp
     : { newsItemId: null }] };
 }
 export const newsInclude = () => newsMode() ? { newsItem: { omit: { body: true } } } as const : {};
-export function presentHotspot<T extends { media?: string | null; newsItem?: Omit<NewsItem, 'body'> | null; qualityScore?: number | null }>(item: T) {
+type HotspotSource = { media?: string | null; newsItem?: Omit<NewsItem, 'body'> | null; qualityScore?: number | null };
+export function presentHotspot<T extends HotspotSource>(item: T) {
   const { newsItem: news, ...base } = item;
   const media = (() => { if (news?.hiddenImages) return null; try { return item.media ? JSON.parse(item.media) : null; } catch { return null; } })();
   return { ...base, media, ...(news ? { newsItemId: news.id, originalTitle: news.sourceTitlePresent ? news.title : '', sourceTitlePresent: news.sourceTitlePresent, titleGenerated: news.titleGenerated, originalSummary: news.summary, displaySummary: news.displaySummary,
@@ -26,4 +28,25 @@ export function presentHotspot<T extends { media?: string | null; newsItem?: Omi
     firstSeenAt: news.firstSeenAt, updatedAt: news.updatedAt, saved: news.saved, aiStatus: news.aiStatus, decisionBy: news.decisionBy,
     scoringStatus: item.qualityScore != null ? 'scored' : news.aiStatus === 'done' ? 'unscored' : 'rules',
     aiTopics: news.aiTopics, sourceId: news.sourceId, distribution: news.url.includes('news.google.com') ? 'Google News 索引' : news.sourceId.startsWith('tg-') ? 'Telegram 转发' : distributionFor(news.acquisitionKind) } : {}) };
+}
+
+export async function presentHotspotCards<T extends HotspotSource>(db: Pick<Prisma.TransactionClient, 'newsAnalysis'>, items: T[]) {
+  const keys = [...new Set(items.flatMap(({ newsItem }) => newsItem?.aiStatus === 'done' && newsItem.analysisKey ? [newsItem.analysisKey] : []))];
+  const evaluations = new Map<string, NonNullable<ReturnType<typeof readCachedChinaEvaluation>>>();
+  if (keys.length) {
+    const cached = await db.newsAnalysis.findMany({ where: { key: { in: keys }, status: 'done' }, select: { key: true, resultJson: true, inputJson: true } });
+    for (const { key, resultJson, inputJson } of cached) {
+      if (!resultJson) continue;
+      try {
+        const result = readCachedChinaEvaluation(resultJson, inputJson);
+        if (result) evaluations.set(key, result);
+      } catch { /* A damaged optional result must not hide the valid news card. */ }
+    }
+  }
+  return items.map(item => {
+    const news = item.newsItem;
+    const result = news?.aiStatus === 'done' && news.analysisKey ? evaluations.get(news.analysisKey) : undefined;
+    // Untitled articles can reuse titled caches for classification, but not for evaluation.
+    return { ...presentHotspot(item), ...(result && result.sourceTitlePresent === news?.sourceTitlePresent ? { chinaEvaluation: result.evaluation } : {}) };
+  });
 }

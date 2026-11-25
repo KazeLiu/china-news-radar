@@ -26,6 +26,14 @@ export interface Keyword {
   _count?: { hotspots: number };
 }
 
+export interface ChinaEvaluation {
+  target: string;
+  polarity: 'positive' | 'negative' | 'neutral';
+  attribution: { kind: 'report' } | { kind: 'quoted'; speaker: string };
+  field: 'title' | 'summary' | 'body';
+  excerpt: string;
+}
+
 export interface Hotspot {
   id: string;
   newsItemId?: string;
@@ -43,6 +51,7 @@ export interface Hotspot {
   aiStatus?: string;
   scoringStatus?: 'scored' | 'unscored' | 'rules';
   decisionBy?: string;
+  chinaEvaluation?: ChinaEvaluation;
   title: string;
   content: string;
   url: string;

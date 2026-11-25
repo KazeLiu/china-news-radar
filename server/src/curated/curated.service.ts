@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { contentScope, newsInclude, newsMode, presentHotspot } from '../news/radar-content';
+import { contentScope, newsInclude, newsMode, presentHotspotCards } from '../news/radar-content';
 
 export type CuratedPeriod = 'today' | 'week';
 
@@ -95,7 +95,7 @@ export class CuratedService {
       total,
       limit,
       offset,
-      items: items.map(presentHotspot),
+      items: await presentHotspotCards(this.prisma, items),
     };
   }
 }

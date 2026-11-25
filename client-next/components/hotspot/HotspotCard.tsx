@@ -16,6 +16,7 @@ import type { Hotspot } from '../../types';
 import { BilingualText } from '../common/BilingualText';
 import { AiTitleBadge } from '../common/AiTitleBadge';
 import { NewsSourceLinks } from '../news/NewsSourceLinks';
+import { ChinaEvaluationDetails } from '../news/ChinaEvaluationDetails';
 import { NewsComparisonLink } from '../news/comparison/NewsComparisonLink';
 import { getNewsText } from '@/lib/newsText';
 import { useReadingPreference } from '@/providers/ReadingPreference';
@@ -176,6 +177,7 @@ export function HotspotCard({
             </div>
           )}
 
+          {hotspot.chinaEvaluation && <ChinaEvaluationDetails evaluation={hotspot.chinaEvaluation} />}
           <NewsSourceLinks links={hotspot.sourceLinks || []} />
           {hotspot.newsItemId && <NewsComparisonLink articleId={hotspot.newsItemId} />}
           {/* Media (X/Twitter photos & videos) */}
