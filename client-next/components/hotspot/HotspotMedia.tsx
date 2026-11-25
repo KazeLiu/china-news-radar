@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
-import { Play, X, ImageOff, RotateCw } from 'lucide-react';
+import { Play, X, ImageOff, RotateCw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { MediaItem } from '../../types';
 
@@ -58,23 +58,34 @@ export function HotspotMedia({ media }: Props) {
 
       {/* Image lightbox */}
       {lightbox && (
-        <ImageLightbox item={lightbox} onClose={() => setLightbox(null)} />
+        <ImageLightbox photos={[lightbox]} onClose={() => setLightbox(null)} />
       )}
     </>
   );
+}
+
+export function HotspotPhotos({ photos }: { photos: MediaItem[] }) {
+  const [open, setOpen] = useState(false);
+  if (!photos.length) return null;
+  return <div className="relative w-14 shrink-0 self-stretch sm:w-[72px]">
+    <MediaTile key={photos[0].url} item={photos[0]} spanClass="" singleItem compact onOpenImage={() => setOpen(true)} />
+    {open && <ImageLightbox photos={photos} onClose={() => setOpen(false)} />}
+  </div>;
 }
 
 function MediaTile({
   item,
   spanClass,
   singleItem,
+  compact = false,
   onPlayVideo,
   onOpenImage,
 }: {
   item: MediaItem;
   spanClass: string;
   singleItem: boolean;
-  onPlayVideo: () => void;
+  compact?: boolean;
+  onPlayVideo?: () => void;
   onOpenImage: () => void;
 }) {
   const isVideo = item.type === 'video' || item.type === 'gif';
@@ -87,20 +98,22 @@ function MediaTile({
       type="button"
       aria-label={isVideo ? '播放报道视频' : failed ? '重新加载报道图片' : '放大报道配图'}
       onClick={() => {
-        if (isVideo) onPlayVideo();
+        if (isVideo) onPlayVideo?.();
         else if (failed) { setAttempt(value => value + 1); setFailed(false); }
         else onOpenImage();
       }}
       className={cn(
-        'group/media relative overflow-hidden focus-visible:outline-2 focus-visible:outline-[var(--accent-blue)]',
+        'group/media overflow-hidden focus-visible:outline-2 focus-visible:outline-[var(--accent-blue)]',
         // Use darker bg for better contrast when image loads
         'bg-slate-100 dark:bg-slate-800',
         spanClass,
         // Single item: taller but constrained; multi: square and smaller
-        singleItem ? 'aspect-video max-h-[280px] w-full' : 'aspect-square max-h-[200px] w-full',
+        compact ? 'absolute inset-0 rounded-md' : cn('relative w-full', singleItem ? 'aspect-video max-h-[280px]' : 'aspect-square max-h-[200px]'),
       )}
     >
-      {failed ? <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-[var(--text-secondary)]" role="status">
+      {failed && compact ? <span className="absolute inset-0 flex items-center justify-center text-[var(--text-muted)]" title="图片加载失败，点击重试">
+        <RotateCw className="size-4" aria-hidden="true" />
+      </span> : failed ? <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-sm text-[var(--text-secondary)]" role="status">
         <ImageOff className="h-6 w-6 text-[var(--text-muted)]" />
         <span>{isVideo ? '视频预览加载失败' : '图片加载失败'}</span>
         <span className="flex items-center gap-1 text-xs text-[var(--accent-blue)]">{isVideo ? <Play className="h-3.5 w-3.5" /> : <RotateCw className="h-3.5 w-3.5" />}{isVideo ? '点击播放视频' : '点击重试'}</span>
@@ -112,7 +125,7 @@ function MediaTile({
         referrerPolicy="no-referrer"
         loading="lazy"
         alt={isVideo ? '报道视频预览' : '报道配图'}
-        sizes="(max-width: 768px) 50vw, 25vw"
+        sizes={compact ? '(max-width: 639px) 56px, 72px' : '(max-width: 768px) 50vw, 25vw'}
         className={cn(isVideo ? 'object-contain' : 'object-cover', 'transition-transform group-hover/media:scale-[1.02]')}
         onError={() => setFailed(true)}
       />}
@@ -162,15 +175,27 @@ function VideoModal({ item, onClose }: { item: MediaItem; onClose: () => void })
   );
 }
 
-function ImageLightbox({ item, onClose }: { item: MediaItem; onClose: () => void }) {
+function ImageLightbox({ photos, onClose }: { photos: MediaItem[]; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const [index, setIndex] = useState(0);
+  const item = photos[Math.min(index, photos.length - 1)];
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  function move(offset: number) {
+    setIndex(current => (current + offset + photos.length) % photos.length);
+    setFailed(false);
+    setAttempt(0);
+  }
   useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
   return (
     <dialog ref={dialog} aria-label="报道配图" onCancel={onClose}
       className="fixed inset-0 z-50 w-full h-full max-w-none max-h-none m-0 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 cursor-zoom-out"
-      onClick={onClose}
+      onClick={event => { if (event.target === event.currentTarget) onClose(); }}
+      onKeyDown={event => {
+        if (photos.length < 2 || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) return;
+        event.preventDefault();
+        move(event.key === 'ArrowLeft' ? -1 : 1);
+      }}
     >
       <button
         type="button"
@@ -188,7 +213,7 @@ function ImageLightbox({ item, onClose }: { item: MediaItem; onClose: () => void
         </button>
         <a href={item.url} target="_blank" rel="noopener noreferrer" className="text-sm underline underline-offset-4">打开原图</a>
       </div> : <Image
-        key={attempt}
+        key={`${item.url}:${attempt}`}
         src={item.url}
         alt="报道配图"
         unoptimized
@@ -200,6 +225,11 @@ function ImageLightbox({ item, onClose }: { item: MediaItem; onClose: () => void
         onClick={(e) => e.stopPropagation()}
         onError={() => setFailed(true)}
       />}
+      {photos.length > 1 && <div className="absolute bottom-4 flex items-center gap-1 rounded-full bg-black/75 p-1 text-white">
+        <button type="button" aria-label="上一张" onClick={() => move(-1)} className="rounded-full p-2 hover:bg-white/20"><ChevronLeft className="size-5" /></button>
+        <span aria-live="polite" className="min-w-12 text-center text-sm tabular-nums">{Math.min(index + 1, photos.length)} / {photos.length}</span>
+        <button type="button" aria-label="下一张" onClick={() => move(1)} className="rounded-full p-2 hover:bg-white/20"><ChevronRight className="size-5" /></button>
+      </div>}
     </dialog>
   );
 }

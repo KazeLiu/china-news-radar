@@ -9,7 +9,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { HotspotMedia } from './HotspotMedia';
+import { HotspotMedia, HotspotPhotos } from './HotspotMedia';
 import type { Hotspot } from '../../types';
 import { BilingualText } from '../common/BilingualText';
 import { AiTitleBadge } from '../common/AiTitleBadge';
@@ -74,6 +74,8 @@ export function HotspotCard({
 }: HotspotCardProps) {
   const { translationFirst } = useReadingPreference();
   const text = getNewsText(hotspot, translationFirst);
+  const photos = hotspot.media?.filter(media => media.type === 'photo') ?? [];
+  const videos = hotspot.media?.filter(media => media.type !== 'photo') ?? [];
   // Local state fallback when parent doesn't manage expansion
   const [localReasonOpen, setLocalReasonOpen] = useState(false);
   const [localContentOpen, setLocalContentOpen] = useState(false);
@@ -145,14 +147,13 @@ export function HotspotCard({
           </div>
 
           {/* Title */}
-          <a
-            href={hotspot.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block font-semibold text-[15px] text-[var(--text-primary)] mb-2 hover:text-[var(--accent-blue)] dark:hover:text-blue-400 transition-colors cursor-pointer leading-snug"
-          >
-            <BilingualText text={text.title} lineClassName="line-clamp-2" prefix={<AiTitleBadge generated={hotspot.titleGenerated} />} />
-          </a>
+          <div className={cn('mb-2 flex items-stretch gap-2.5', photos.length > 0 && 'min-h-9')}>
+            <HotspotPhotos photos={photos} />
+            <a href={hotspot.url} target="_blank" rel="noopener noreferrer" title={[text.title.primary, text.title.secondary].filter(Boolean).join('\n')}
+              className="block min-w-0 flex-1 self-center font-semibold text-[15px] text-[var(--text-primary)] hover:text-[var(--accent-blue)] dark:hover:text-blue-400 transition-colors leading-snug">
+              <BilingualText text={text.title} lineClassName={photos.length && text.title.secondary ? 'line-clamp-1' : 'line-clamp-2'} prefix={<AiTitleBadge generated={hotspot.titleGenerated} />} />
+            </a>
+          </div>
 
           {text.summary.primary && (
             <div className="mb-3 pl-3 border-l-2 border-[var(--accent-blue)]/40 dark:border-blue-400/40">
@@ -169,10 +170,7 @@ export function HotspotCard({
           {hotspot.chinaEvaluation && <ChinaEvaluationDetails evaluation={hotspot.chinaEvaluation} />}
           <NewsSourceLinks links={hotspot.sourceLinks || []} />
           {hotspot.newsItemId && <NewsComparisonLink articleId={hotspot.newsItemId} />}
-          {/* Media (X/Twitter photos & videos) */}
-          {hotspot.media && hotspot.media.length > 0 && (
-            <HotspotMedia media={hotspot.media} />
-          )}
+          {videos.length > 0 && <HotspotMedia media={videos} />}
 
           {/* Engagement metrics */}
           <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-[var(--text-muted)] empty:hidden">

@@ -34,6 +34,7 @@ import { cn } from "../../lib/utils";
 import type { Hotspot, HotspotTab } from "../../types";
 import type { Keyword } from "../../services/api";
 import { tabFilter } from '../../lib/filterState';
+import { useFeedWidth } from '@/providers/ReadingPreference';
 
 /**
  * `initialHotspots` / `initialTotal` / `initialTotalPages` are prefetched on
@@ -51,6 +52,7 @@ export function HotspotView({
   initialTotal?: number;
   initialTotalPages?: number;
 } = {}) {
+  const { width } = useFeedWidth();
   const [hotspots, setHotspots] = useState<Hotspot[]>(initialHotspots);
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [stats, setStats] = useState<{ total: number } | null>(
@@ -238,7 +240,7 @@ export function HotspotView({
   };
 
   return (
-    <div className="px-4 py-6 max-w-4xl mx-auto">
+    <div className={cn('mx-auto w-full px-4 py-6', width === 'narrow' ? 'max-w-4xl' : width === 'default' && 'max-w-[1280px]')}>
       {error && <p role="alert" className="mb-4 text-red-500">{error}</p>}
       {/* Header */}
       <div className="flex items-center justify-between mb-6">

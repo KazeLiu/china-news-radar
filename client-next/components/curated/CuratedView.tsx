@@ -13,7 +13,7 @@ import { SkeletonList } from '../common/Loader';
 import { EmptyState } from '../common/EmptyState';
 import type { Hotspot, HotspotTab } from '../../types';
 import { tabFilter } from '../../lib/filterState';
-import { HotspotMedia } from '../hotspot/HotspotMedia';
+import { HotspotMedia, HotspotPhotos } from '../hotspot/HotspotMedia';
 import { BilingualText } from '../common/BilingualText';
 import { AiTitleBadge } from '../common/AiTitleBadge';
 import { NewsSourceLinks } from '../news/NewsSourceLinks';
@@ -22,7 +22,7 @@ import { NewsProvenance } from '../news/NewsProvenance';
 import { ChinaEvaluationDetails } from '../news/ChinaEvaluationDetails';
 import { NewsComparisonLink } from '../news/comparison/NewsComparisonLink';
 import { getNewsText } from '@/lib/newsText';
-import { useReadingPreference } from '@/providers/ReadingPreference';
+import { useFeedWidth, useReadingPreference } from '@/providers/ReadingPreference';
 
 type Period = 'today' | 'week';
 
@@ -45,6 +45,8 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
   const tags = item.tags ? (JSON.parse(item.tags) as string[]) : [];
   const { translationFirst } = useReadingPreference();
   const text = getNewsText(item, translationFirst);
+  const photos = item.media?.filter(media => media.type === 'photo') ?? [];
+  const videos = item.media?.filter(media => media.type !== 'photo') ?? [];
 
   // Same heat formula as HotspotCard for visual consistency
   const heatRaw =
@@ -99,13 +101,17 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
         </div>
 
         {/* Title — large, semibold, reading-first */}
-        <h3 className="text-[17px] font-semibold text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors leading-snug mb-2.5">
-          <a href={item.url} target="_blank" rel="noopener noreferrer"><BilingualText text={text.title}>
-          <AiTitleBadge generated={item.titleGenerated} />
-          <ExternalLink className="inline-block w-3.5 h-3.5 ml-1 mb-0.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
-          </BilingualText>
-          </a>
-        </h3>
+        <div className={cn('mb-2.5 flex items-stretch gap-2.5', photos.length > 0 && 'min-h-9')}>
+          <HotspotPhotos photos={photos} />
+          <h3 className="min-w-0 flex-1 self-center text-[17px] font-semibold leading-snug text-[var(--text-primary)] group-hover:text-[var(--accent-blue)] dark:group-hover:text-blue-400 transition-colors">
+            <a href={item.url} target="_blank" rel="noopener noreferrer" title={[text.title.primary, text.title.secondary].filter(Boolean).join('\n')}>
+              <BilingualText text={text.title} lineClassName={photos.length && text.title.secondary ? 'line-clamp-1' : undefined}>
+                <AiTitleBadge generated={item.titleGenerated} />
+                <ExternalLink className="inline-block w-3.5 h-3.5 ml-1 mb-0.5 text-[var(--text-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+              </BilingualText>
+            </a>
+          </h3>
+        </div>
 
         {text.summary.primary && (
           <div className="mb-3 pl-3 border-l-2 border-[var(--accent-blue)]/40 dark:border-blue-400/40">
@@ -123,7 +129,7 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
         {item.chinaEvaluation && <ChinaEvaluationDetails evaluation={item.chinaEvaluation} />}
         <NewsSourceLinks links={item.sourceLinks || []} />
         {item.newsItemId && <NewsComparisonLink articleId={item.newsItemId} />}
-        {item.media && item.media.length > 0 && <div className="mb-4"><HotspotMedia media={item.media} /></div>}
+        {videos.length > 0 && <div className="mb-4"><HotspotMedia media={videos} /></div>}
 
         {/* Engagement metrics — only when there are any */}
         {(item.likeCount || item.retweetCount || item.commentCount || item.viewCount) && (
@@ -195,6 +201,7 @@ export function CuratedView({
   initialItems?: Hotspot[];
   initialTotal?: number;
 } = {}) {
+  const { width } = useFeedWidth();
   const [period, setPeriod] = useState<Period>('today');
   const [activeTab, setActiveTab] = useState<HotspotTab>('all');
   const [searchInput, setSearchInput] = useState('');
@@ -269,7 +276,7 @@ export function CuratedView({
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6">
+    <div className={cn('mx-auto w-full px-4 py-6', width === 'narrow' ? 'max-w-3xl' : width === 'default' && 'max-w-[1280px]')}>
       {(error || overviewError) && <p role="alert" className="mb-4 text-red-500">{error || overviewError}</p>}
       <div className="flex items-center justify-between mb-4">
         <div>

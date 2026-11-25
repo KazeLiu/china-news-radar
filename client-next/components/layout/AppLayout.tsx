@@ -76,7 +76,7 @@ export function AppLayout({ unreadCount, children }: AppLayoutProps) {
 
       {/* Main Content */}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <TopBar onMenuClick={() => setSidebarOpen(true)} theme={theme} onThemeToggle={toggleTheme} />
+        <TopBar onMenuClick={() => setSidebarOpen(true)} theme={theme} onThemeToggle={toggleTheme} showFeedWidth={pathname === '/curated' || pathname === '/hotspot'} />
 
         {/* Mobile Bottom Nav */}
         <div className="fixed bottom-0 left-0 right-0 z-40 flex lg:hidden border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]">
