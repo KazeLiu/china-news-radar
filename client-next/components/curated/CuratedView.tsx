@@ -7,7 +7,6 @@ import {
 import { curatedApi, hotspotsApi } from '../../services/api';
 import { relativeTime } from '../../utils/relativeTime';
 import { cn } from '../../lib/utils';
-import { getSourceIcon, getSourceLabel } from '../../lib/sourceMeta';
 import { HotspotTabs } from '../hotspot/HotspotTabs';
 import { BackToTop } from '../common/BackToTop';
 import { SkeletonList } from '../common/Loader';
@@ -18,6 +17,7 @@ import { HotspotMedia } from '../hotspot/HotspotMedia';
 import { BilingualText } from '../common/BilingualText';
 import { AiTitleBadge } from '../common/AiTitleBadge';
 import { NewsSourceLinks } from '../news/NewsSourceLinks';
+import { NewsCardSource } from '../news/NewsCardSource';
 import { NewsProvenance } from '../news/NewsProvenance';
 import { ChinaEvaluationDetails } from '../news/ChinaEvaluationDetails';
 import { NewsComparisonLink } from '../news/comparison/NewsComparisonLink';
@@ -70,10 +70,7 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
         >
         {/* Top row: source icon + label · category · keyword (left) | heat + score (right) */}
         <div className="flex flex-wrap items-center gap-2 mb-3">
-          <span className="flex items-center gap-1 text-[12px] text-[var(--text-muted)] font-medium">
-            {getSourceIcon(item.source, 'w-3.5 h-3.5')}
-            {item.originalPublisher || getSourceLabel(item.source)}
-          </span>
+          <NewsCardSource item={item} />
           {item.category && CATEGORY_LABEL[item.category] && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
               {CATEGORY_LABEL[item.category]}

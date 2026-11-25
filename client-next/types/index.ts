@@ -57,6 +57,8 @@ export interface Hotspot {
   url: string;
   source: string;
   sourceId?: string;
+  sourceName?: string;
+  sourceRegionLabel?: string;
   isReal: boolean;
   relevance: number;
   relevanceReason?: string;

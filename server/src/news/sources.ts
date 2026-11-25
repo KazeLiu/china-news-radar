@@ -9,6 +9,7 @@ export interface WebSourceConfig { rules: WebRules; previousRules?: WebRules; lo
 export interface NewsSourceConfig {
   id: string;
   name: string;
+  regionLabel?: string;
   englishName: string;
   kind: 'rss' | 'google-rss' | 'rsshub' | 'telegram' | 'reserved' | 'api' | 'web';
   website: string;

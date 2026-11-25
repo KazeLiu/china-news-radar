@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { contentScope, newsInclude, newsMode, presentHotspotCards } from '../news/radar-content';
+import { NewsService } from '../news/news.service';
 
 export type CuratedPeriod = 'today' | 'week';
 
@@ -19,7 +20,7 @@ export interface CuratedFilter {
 
 @Injectable()
 export class CuratedService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, @Optional() private readonly news?: NewsService) {}
 
   async getCurated(filter: CuratedFilter = {}) {
     const { period = 'today', limit = 20, offset = 0, category, region, search, source } = filter;
@@ -95,7 +96,7 @@ export class CuratedService {
       total,
       limit,
       offset,
-      items: await presentHotspotCards(this.prisma, items),
+      items: await presentHotspotCards(this.prisma, items, this.news?.cardSourceLabels()),
     };
   }
 }

@@ -131,6 +131,7 @@ export function validateSource(value: unknown, previous?: NewsSourceConfig, rest
   try { new Intl.DateTimeFormat('en', { timeZone }); } catch { throw new BadRequestException('发布时间时区应为有效 IANA 时区，如 UTC 或 Asia/Shanghai'); }
   if (logo && !/^\/api\/news\/logos\/[a-f0-9-]+\.(png|jpg|webp)$/.test(logo)) publicUrl(logo, 'Logo 地址');
   const source: NewsSourceConfig = { id, name: string(body.name, '来源名称', 100), englishName: string(body.englishName || previous?.englishName || publisherHosts[0] || body.name, '发布者', 100),
+    regionLabel: string(body.regionLabel ?? previous?.regionLabel ?? '', '地区', 100, true),
     kind: rss ? new URL(feedUrls[0]).hostname === 'news.google.com' ? 'google-rss' : 'rss' : rawKind as NewsSourceConfig['kind'],
     website: body.website ? publicUrl(body.website, '来源链接') : previous?.website || (rss ? new URL(feedUrls[0]).origin : rawKind === 'web' || (rawKind === 'api' && adapter === 'generic') ? new URL(target).origin : ''),
     feedUrls, feedUrl: feedUrls[0], target, adapter, logo, timeZone, notes: string(body.notes ?? previous?.notes ?? '', '备注', 2000, true), publisherHosts: [...new Set(publisherHosts)],

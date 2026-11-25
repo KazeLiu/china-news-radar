@@ -1,10 +1,11 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { TwitterService } from '../services/twitter.service';
 import { SearchService } from '../services/search.service';
 import { AiService } from '../services/ai.service';
 import { hotPage, importancePage } from './ranked-page';
 import { contentScope, newsInclude, newsMode, presentHotspot, presentHotspotCards } from '../news/radar-content';
+import { NewsService } from '../news/news.service';
 
 /**
  * Within each cluster, push video sources (bilibili) to the bottom of their group.
@@ -62,6 +63,7 @@ export class HotspotsService {
     private twitterService: TwitterService,
     private searchService: SearchService,
     private aiService: AiService,
+    @Optional() private readonly news?: NewsService,
   ) {}
 
   async findAll(query: HotspotFilterQuery) {
@@ -182,7 +184,7 @@ export class HotspotsService {
     hotspots = reorderClusterByMedium(hotspots);
 
     return {
-      data: await presentHotspotCards(this.prisma, hotspots),
+      data: await presentHotspotCards(this.prisma, hotspots, this.news?.cardSourceLabels()),
       pagination: { page: pageNum, limit: limitNum, total, totalPages: Math.ceil(total / limitNum) },
     };
   }

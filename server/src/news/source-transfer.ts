@@ -3,7 +3,7 @@ import { defaultApi, defaultWeb, sourceOrdering, validateSource, validateSourceS
 import { NEWS_SOURCES, type NewsSourceConfig } from './sources';
 
 export interface SourceDocument { format: 'china-radar-sources'; version: 1; sources: Record<string, unknown>[] }
-const sourceFields = ['id', 'name', 'englishName', 'kind', 'website', 'feedUrls', 'feedUrl', 'publisherHosts', 'description', 'pollSeconds', 'forceChina', 'useProxy', 'channel', 'logo', 'timeZone', 'target', 'adapter', 'api', 'web', 'sortOrder'];
+const sourceFields = ['id', 'name', 'regionLabel', 'englishName', 'kind', 'website', 'feedUrls', 'feedUrl', 'publisherHosts', 'description', 'pollSeconds', 'forceChina', 'useProxy', 'channel', 'logo', 'timeZone', 'target', 'adapter', 'api', 'web', 'sortOrder'];
 function object(value: unknown, fields: string[], label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new BadRequestException(`${label}必须是对象`);
   if (Object.keys(value).some(key => !fields.includes(key))) throw new BadRequestException(`${label}包含不支持的字段，请参照导出格式`);

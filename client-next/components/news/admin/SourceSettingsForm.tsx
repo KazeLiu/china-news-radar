@@ -124,6 +124,7 @@ function SourceEditor({ source, network, token, busy, onSave, onSaved, onCopy, o
     {!privateLoaded && error && <p className={styles.error} role="alert">{error}</p>}
     <fieldset className={styles.fields} disabled={pending} aria-label="来源配置项">
       <label>来源名称<input required maxLength={100} value={draft.name} onChange={e => change('name', e.target.value)} /></label>
+      <label>地区<input maxLength={100} value={draft.regionLabel ?? ''} onChange={e => change('regionLabel', e.target.value)} placeholder="选填，例如：台湾" /></label>
       <label>获取方式<select value={draft.kind} onChange={e => { const kind = e.target.value; setDraft(old => ({ ...old, kind, pollSeconds: kind === 'telegram' ? 0 : old.pollSeconds || 900, useProxy: kind === 'telegram' ? network.telegramUseProxy : old.useProxy })); }}><option value="rss">RSS</option><option value="web">网页爬虫</option><option value="api">API / 平台适配器</option><option value="telegram">Telegram 接收</option></select></label>
       {draft.kind === 'api' && <label className={styles.wide}>适配器<select value={adapter} onChange={e => selectAdapter(e.target.value)}><option value="generic">通用 JSON API</option><option value="x-official">X 官方 API · 账号动态</option><option value="twitter">X 搜索（TwitterAPI.io，复用上游）</option><option value="bing">Bing 搜索（复用上游）</option><option value="hackernews">Hacker News 搜索（复用上游）</option><option value="bilibili">哔哩哔哩（保留，暂不启用）</option><option value="sogou">搜狗（保留，暂不启用）</option></select></label>}
       {draft.kind === 'rss' ? <div className={`${styles.wide} ${styles.feedList}`}>

@@ -108,6 +108,9 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     try { await this.scan(false); }
     catch (error) { this.logger.warn(`采集任务异常：${collectionErrorReason(error)}`); }
   }
+  cardSourceLabels() {
+    return new Map(this.config.sources.map(({ id, name, regionLabel }) => [id, { name, regionLabel }]));
+  }
   private orderedSources() {
     const sources = new Map(this.config.sources.map(source => [source.id, source]));
     return sourceOrdering(this.config).sort((a, b) => a.sortOrder - b.sortOrder || (b.editedAt ? Date.parse(b.editedAt) : 0) - (a.editedAt ? Date.parse(a.editedAt) : 0))

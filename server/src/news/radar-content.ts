@@ -1,5 +1,6 @@
 import { Prisma, NewsItem } from '@prisma/client';
 import { readCachedChinaEvaluation } from './analysis';
+import type { NewsSourceConfig } from './sources';
 import { distributionFor } from './transports';
 
 export const newsMode = () => process.env.RADAR_MODE !== 'legacy';
@@ -30,7 +31,8 @@ export function presentHotspot<T extends HotspotSource>(item: T) {
     aiTopics: news.aiTopics, sourceId: news.sourceId, distribution: news.url.includes('news.google.com') ? 'Google News 索引' : news.sourceId.startsWith('tg-') ? 'Telegram 转发' : distributionFor(news.acquisitionKind) } : {}) };
 }
 
-export async function presentHotspotCards<T extends HotspotSource>(db: Pick<Prisma.TransactionClient, 'newsAnalysis'>, items: T[]) {
+export async function presentHotspotCards<T extends HotspotSource>(db: Pick<Prisma.TransactionClient, 'newsAnalysis'>, items: T[],
+  sourceLabels?: ReadonlyMap<string, Pick<NewsSourceConfig, 'name' | 'regionLabel'>>) {
   const keys = [...new Set(items.flatMap(({ newsItem }) => newsItem?.aiStatus === 'done' && newsItem.analysisKey ? [newsItem.analysisKey] : []))];
   const evaluations = new Map<string, NonNullable<ReturnType<typeof readCachedChinaEvaluation>>>();
   if (keys.length) {
@@ -45,8 +47,11 @@ export async function presentHotspotCards<T extends HotspotSource>(db: Pick<Pris
   }
   return items.map(item => {
     const news = item.newsItem;
+    const source = news && sourceLabels?.get(news.sourceId);
     const result = news?.aiStatus === 'done' && news.analysisKey ? evaluations.get(news.analysisKey) : undefined;
     // Untitled articles can reuse titled caches for classification, but not for evaluation.
-    return { ...presentHotspot(item), ...(result && result.sourceTitlePresent === news?.sourceTitlePresent ? { chinaEvaluation: result.evaluation } : {}) };
+    return { ...presentHotspot(item),
+      ...(source ? { sourceName: source.name, sourceRegionLabel: source.regionLabel || undefined } : {}),
+      ...(result && result.sourceTitlePresent === news?.sourceTitlePresent ? { chinaEvaluation: result.evaluation } : {}) };
   });
 }

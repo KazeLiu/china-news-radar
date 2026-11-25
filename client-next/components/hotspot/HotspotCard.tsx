@@ -9,12 +9,12 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
-import { getSourceIcon, getSourceLabel } from '../../lib/sourceMeta';
 import { HotspotMedia } from './HotspotMedia';
 import type { Hotspot } from '../../types';
 import { BilingualText } from '../common/BilingualText';
 import { AiTitleBadge } from '../common/AiTitleBadge';
 import { NewsSourceLinks } from '../news/NewsSourceLinks';
+import { NewsCardSource } from '../news/NewsCardSource';
 import { NewsProvenance } from '../news/NewsProvenance';
 import { ChinaEvaluationDetails } from '../news/ChinaEvaluationDetails';
 import { NewsComparisonLink } from '../news/comparison/NewsComparisonLink';
@@ -118,10 +118,7 @@ export function HotspotCard({
               {getImportanceIcon(hotspot.importance)}
               <span className="ml-1">{hotspot.importance}</span>
             </span>
-            <span className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
-              {getSourceIcon(hotspot.source)}
-              {hotspot.originalPublisher || getSourceLabel(hotspot.source)}
-            </span>
+            <NewsCardSource item={hotspot} />
             {hotspot.keyword && (
               <span className="text-[10px] px-2 py-0.5 rounded-md bg-[var(--accent-blue)]/10 text-[var(--accent-blue)] border border-[var(--accent-blue)]/20 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20">
                 {hotspot.keyword.text}
