@@ -1,4 +1,5 @@
 import { APIConnectionError, APIConnectionTimeoutError, APIError } from 'openai';
+import { AnalysisValidationError } from './analysis';
 
 export const AI_TIMEOUT_MS = 120_000;
 
@@ -72,14 +73,11 @@ export function aiTestError(problem: unknown, apiKey: string, timeoutMs = AI_TIM
 }
 
 export function analysisErrorDetail(problem: unknown): string {
+  if (problem instanceof AnalysisValidationError) return problem.message;
   if (problem instanceof SyntaxError) return '模型输出不是有效 JSON。';
   const details: Record<string, string> = {
     'AI JSON too large': '模型输出超过允许的 32000 字符。',
     'AI JSON object required': '模型必须返回一个 JSON 对象。',
-    'AI JSON fields invalid': 'JSON 字段缺失或含额外字段，请对照面板中的 JSON 协议。',
-    'AI JSON enum invalid': '分类、语言、版本或主题字段不在允许范围内。',
-    'AI JSON text invalid': '理由或译文的类型、长度不符合 JSON 协议。',
-    'AI JSON text empty': '必须填写的理由或译文为空。',
     'Simplified Chinese must not be translated again': '简体中文原文的 translation 必须为 null。',
     'Translation required': '非简体中文内容缺少 translation 对象。',
     'Translation summary missing': '原文有摘要，但模型没有返回摘要译文。',

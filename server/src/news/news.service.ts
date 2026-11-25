@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NewsSourceConfig } from './sources';
 import { CollectedItem, inspectFeed } from './collector';
 import { InvalidTelegramMessage, telegramItem } from './telegram';
-import { analysisKey, analysisInput, readAnalysisInput, parseAnalysis, analysisDecision, analysisVisibility, fallbackDecision, ANALYSIS_PROMPT, AnalysisResult } from './analysis';
+import { analysisKey, analysisInput, readAnalysisInput, parseAnalysis, parseModelAnalysis, analysisDecision, analysisVisibility, fallbackDecision, ANALYSIS_PROMPT, BATCH_ANALYSIS_PROMPT, AnalysisResult } from './analysis';
 import { feedUrlsFor, distributionFor } from './transports';
 import { fetchSourceFeed, FeedFetchError, restoreFailures, restoreValidators, mergeFeeds } from './feed-fetch';
 import { ADMIN_CONFIG_KEY, AdminConfig, defaultConfig, defaultWeb, restoreConfig, validateAi, validateRules, validateSource, readAiUsage, sourceOrdering, validateSourceSortOrder } from './admin-config';
@@ -675,21 +675,36 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     let translated = 0;
     const sourceIds = [...new Set((await this.prisma.newsItem.findMany({ where: { analysisKey: { in: selected.map(cache => cache.key) } }, select: { sourceId: true } })).map(item => item.sourceId))];
     try {
-      const response = await this.runtime.performJson(`${ANALYSIS_PROMPT}\n批次输入为 items 数组。逐条遵守上述单条协议，返回 {"results":[{"id":"原输入id",...单条结果}]}。id 必须完整照抄，不以数组顺序关联，不输出其他字段。`, { items }, this.config.ai.newsOutputTokens, async tx => {
+      const response = await this.runtime.performJson(BATCH_ANALYSIS_PROMPT, { items }, this.config.ai.newsOutputTokens, async tx => {
         for (const cache of selected) await tx.newsAnalysis.update({ where: { key: cache.key }, data: { attempts: { increment: 1 }, status: 'processing' } });
       }, sourceIds);
-      if (!Array.isArray(response.results)) throw new InvalidAnalysisResponse('批次缺少 results 数组。');
-      const entries = response.results as Array<Record<string, unknown>>;
+      const requestId = this.runtime.requestInfo()?.requestId;
+      if (!Array.isArray(response.results)) throw new InvalidAnalysisResponse('批次缺少 results 数组。', requestId);
+      const entries: unknown[] = response.results;
+      const expectedIds = new Set(items.map(item => item.id));
+      const byId = new Map<string, object | null>();
+      let unknownIds = 0;
+      for (const entry of entries) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry) || !('id' in entry)) { unknownIds++; continue; }
+        const { id, ...fields } = entry;
+        if (typeof id !== 'string' || !expectedIds.has(id)) { unknownIds++; continue; }
+        byId.set(id, byId.has(id) ? null : fields);
+      }
+      let missingIds = 0;
+      let duplicateIds = 0;
+      const fieldErrors = new Map<string, number>();
       for (const [index, cache] of selected.entries()) {
-        const matches = entries.filter(entry => entry && entry.id === cache.key);
-        if (matches.length !== 1) continue;
-        const { id, ...value } = matches[0];
+        const fields = byId.get(cache.key);
+        if (fields === undefined) { missingIds++; continue; }
+        if (fields === null) { duplicateIds++; continue; }
         let result;
         try {
-          const input = items[index];
-          result = parseAnalysis(JSON.stringify(value), input);
-          if (result.version !== (input.sourceTitlePresent === false ? 3 : 2)) throw new Error();
-        } catch { continue; }
+          result = parseModelAnalysis(JSON.stringify(fields), items[index]);
+        } catch (problem) {
+          const detail = analysisErrorDetail(problem);
+          fieldErrors.set(detail, (fieldErrors.get(detail) || 0) + 1);
+          continue;
+        }
         const saved = await this.prisma.$transaction(async tx => {
           const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: task.id, status: 'processing' }, data: { resultJson: JSON.stringify(result), status: 'done', analyzedAt: new Date(), model: this.runtime.requestInfo()?.model, error: null, queuedTaskId: null, retryAt: null, leaseUntil: null } });
           if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: cache.key } }));
@@ -700,7 +715,13 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
         await this.logAnalysisKey(cache.key, 'success', 'news/analyzed', result, task.id);
       }
       await this.runtime.noteNewsResults(success.size, translated);
-      if (selected.some(cache => !success.has(cache.key)) || entries.some(entry => !entry || !selected.some(cache => cache.key === entry.id))) throw new InvalidAnalysisResponse('批次存在重复、未知、缺失 ID 或无效结果；已成功条目保存，不会重复请求。');
+      const issues = [missingIds ? `缺少 ${missingIds} 个输入 ID` : '', duplicateIds ? `${duplicateIds} 个输入 ID 重复` : '', unknownIds ? `${unknownIds} 条 ID 未知或无效` : '',
+        ...Array.from(fieldErrors, ([detail, count]) => `${count} 条字段错误：${detail.replace(/。$/, '')}`)].filter(Boolean);
+      if (issues.length) {
+        const detail = `批次预期 ${items.length} 条，返回 ${entries.length} 条，已保存 ${success.size} 条。${issues.join('；')}。`;
+        if (missingIds || duplicateIds || fieldErrors.size) throw new InvalidAnalysisResponse(detail, requestId);
+        await this.runtime.noteProtocolError(detail);
+      }
       const remaining = eligible.filter(cache => !success.has(cache.key)).map(cache => cache.key);
       if (remaining.length) await this.queueBatch(remaining, payload.chunkSize, task.id);
       return { analyzed: success.size };
@@ -710,8 +731,10 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       const chunkSize = problem instanceof InvalidAnalysisResponse && problem.detail.includes('截断') ? Math.max(1, Math.floor(selected.length / 2)) : payload.chunkSize;
       await this.runtime.replacePayload(task.id, { keys: remaining, chunkSize });
       for (const cache of selected.filter(cache => !success.has(cache.key))) {
-        const updated = await this.prisma.newsAnalysis.update({ where: { key: cache.key }, data: { status: 'pending' } });
-        await this.prisma.$transaction(tx => this.applyCache(tx, updated));
+        await this.prisma.$transaction(async tx => {
+          const changed = await tx.newsAnalysis.updateMany({ where: { key: cache.key, queuedTaskId: task.id, status: 'processing' }, data: { status: 'pending' } });
+          if (changed.count) await this.applyCache(tx, await tx.newsAnalysis.findUniqueOrThrow({ where: { key: cache.key } }));
+        });
       }
       throw problem;
     }
@@ -732,9 +755,12 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       const json = await this.runtime.performJson(ANALYSIS_PROMPT, input, this.config.ai.newsOutputTokens);
       let result;
       try {
-        result = parseAnalysis(JSON.stringify(json), input);
-        if (result.version !== 2) throw new Error();
-      } catch (problem) { await this.runtime.noteProtocolError(analysisErrorDetail(problem)); throw new InvalidAnalysisResponse(analysisErrorDetail(problem), this.runtime.requestInfo()?.requestId); }
+        result = parseModelAnalysis(JSON.stringify(json), input);
+      } catch (problem) {
+        const detail = analysisErrorDetail(problem);
+        await this.runtime.noteProtocolError(detail);
+        throw new InvalidAnalysisResponse(detail, this.runtime.requestInfo()?.requestId);
+      }
       const decision = this.analysisDecision(result, { ...input, url: 'https://example.invalid/ai-test' }, []);
       return { ...this.runtime.requestInfo(), input, ok: true, result, preview: { visible: decision.visible, decisionBy: decision.decisionBy } };
     } catch (problem) {
