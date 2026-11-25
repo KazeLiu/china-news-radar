@@ -13,6 +13,7 @@
  */
 
 import type { DigestData, Hotspot } from '../types';
+import type { ComparisonResponse } from '../types/news-comparison';
 import { requestJson } from '../services/http';
 
 const API_ORIGIN =
@@ -113,4 +114,11 @@ export interface NewsArticle {
 export async function fetchArticleSSR(id: string): Promise<NewsArticle | null> {
   try { return await getJson<NewsArticle>(`/api/news/items/${encodeURIComponent(id)}`); }
   catch (error) { if (error instanceof Error && error.message.startsWith('HTTP 404')) return null; throw error; }
+}
+
+export function fetchNewsComparisonsSSR(event?: string, article?: string) {
+  const params = new URLSearchParams();
+  if (event) params.set('event', event);
+  if (article) params.set('article', article);
+  return getJson<ComparisonResponse>(`/api/news/comparisons?${params}`);
 }

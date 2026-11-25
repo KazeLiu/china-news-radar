@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import Image from 'next/image';
-import { Eye, EyeOff, Image as ImageIcon, ImageOff, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
+import Link from 'next/link';
+import { Eye, EyeOff, Image as ImageIcon, ImageOff, Network, RotateCcw, Sparkles, Trash2, X } from 'lucide-react';
 import { adminApi, type ManagedNews, type SourceSettings } from './admin-api';
 import { waitForAiTask, type AiTicket } from '@/services/ai-tasks';
 import { HotspotMedia } from '../../hotspot/HotspotMedia';
@@ -37,6 +38,12 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<{ items: ManagedNews[]; action: BatchAction } | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [comparisonItems, setComparisonItems] = useState<{ id: string; title: string; publisher: string }[]>([]);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
+  const [comparisonQueued, setComparisonQueued] = useState(false);
+  const [comparisonTitle, setComparisonTitle] = useState('');
+  const [comparisonId, setComparisonId] = useState<string | null>(null);
+  const [publishedComparisons, setPublishedComparisons] = useState<{ id: string; title: string }[] | null>(null);
   const selectAll = useRef<HTMLInputElement>(null);
   const polling = useRef<AbortController | null>(null);
   const dirty = JSON.stringify(form) !== savedMaterial;
@@ -70,6 +77,34 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
     const result = await adminApi<{ count: number }>('admin/items/batch', '', { ids: confirmation.items.map(item => item.id), action: confirmation.action }, 'POST');
     setNotice(`${batchLabels[confirmation.action]}完成，共 ${result.count} 条；没有调用 AI 或重新发送通知。`);
     setConfirmation(null);
+  }
+  function addComparisonItems() {
+    setError(''); setNotice(''); setComparisonId(null);
+    const selected = page.items.filter(item => selectedIds.includes(item.id));
+    if (selected.some(item => item.deletedAt || item.hiddenArticle || item.publicationStatus !== 'published' || !item.visible || (!item.originalPublisher && !item.isManual))) {
+      setError('对照只使用公开新闻。请取消选择未发布、已隐藏或出处不明的材料。');
+      return;
+    }
+    const added = selected.filter(item => !comparisonItems.some(row => row.id === item.id));
+    if (comparisonItems.length + added.length > 6) { setError('每次最多对照 6 份材料，请先移除不需要的条目。'); return; }
+    setComparisonItems([...comparisonItems, ...added.map(item => ({ id: item.id, title: item.displayTitle ?? item.aiGeneratedTitle ?? item.titleZh ?? item.title,
+      publisher: item.originalPublisher ?? '管理员录入' }))]);
+    setSelectedIds([]);
+  }
+  async function generateComparison() {
+    const ticket = await adminApi<AiTicket | { id: string; cached: true }>('admin/comparisons', '', { title: comparisonTitle, ids: comparisonItems.map(item => item.id) }, 'POST');
+    if ('taskId' in ticket) {
+      setComparisonQueued(true);
+      setNotice(`新闻对照已排队。可在「AI 配置」查看任务进度（${ticket.taskId}）。`);
+      const controller = new AbortController();
+      polling.current = controller;
+      try { setComparisonId((await waitForAiTask<{ id: string }>(ticket, controller.signal)).id); }
+      finally { polling.current = null; setComparisonQueued(false); setNotice(''); }
+    } else setComparisonId(ticket.id);
+    setComparisonOpen(false);
+    setComparisonItems([]);
+    setComparisonTitle('');
+    setNotice('新闻对照已保存。');
   }
   function closeEditor() {
     const displayDirty = selected?.isManual && (display.title !== (selected.displayTitle ?? selected.aiGeneratedTitle ?? selected.titleZh ?? selected.title) || display.summary !== (selected.displaySummary ?? selected.summaryZh ?? selected.summary));
@@ -116,8 +151,14 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
     ? <textarea value={form[key]} rows={key === 'body' ? 10 : 3} maxLength={max} disabled={busy || !editable} onChange={e => setForm({ ...form, [key]: e.target.value })} />
     : <input value={form[key]} maxLength={max} required={key === 'title'} disabled={busy || !editable} onChange={e => setForm({ ...form, [key]: e.target.value })} />}</label>;
   return <section className={styles.card}>
-    <div className={styles.sectionTitle}><h2>新闻列表</h2><button type="button" className={styles.primary} disabled={busy} onClick={() => openEditor(null)}>新增新闻</button></div>
-    {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
+    <div className={styles.sectionTitle}><h2>新闻列表</h2><div className="flex items-center gap-2">
+      <button type="button" disabled={busy} onClick={() => void action(async () => {
+        setComparisonId(null);
+        setPublishedComparisons(await adminApi<{ id: string; title: string }[]>('admin/comparisons', ''));
+      }, false)}>管理对照</button>
+      <button type="button" className={styles.primary} disabled={busy} onClick={() => openEditor(null)}>新增新闻</button>
+    </div></div>
+    {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice} {comparisonId && <Link href={`/news-comparison?event=${comparisonId}`}>查看对照</Link>}</p>}
     <form className={`${styles.actions} ${styles.newsFilters}`} onSubmit={e => { e.preventDefault(); void action(async () => { await load(0); }, false); }}>
       <label>新闻范围<select value={state} disabled={busy} onChange={e => setState(e.target.value)}><option value="all">全部新闻</option><option value="draft">草稿</option><option value="hidden">已隐藏文章</option><option value="manual">全部手动新闻</option><option value="deleted">回收站</option></select></label>
       <label>标题或摘要<input value={query} maxLength={200} disabled={busy} onChange={e => setQuery(e.target.value)} /></label><button disabled={busy} type="submit">搜索</button>
@@ -128,6 +169,7 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
         <label className={styles.check}><input ref={selectAll} type="checkbox" checked={page.items.length > 0 && selectedIds.length === page.items.length} disabled={busy || !page.items.length} onChange={e => setSelectedIds(e.target.checked ? page.items.map(item => item.id) : [])} />全选当前页</label>
         <span role="status">{selectedIds.length ? `已选 ${selectedIds.length} 条` : `共 ${page.total} 条 · 北京时间`}</span>
         {!!selectedIds.length && (trashView ? <button type="button" disabled={busy} onClick={() => confirmBatch('restore')}><RotateCcw size={16} />恢复所选</button> : <>
+          <button type="button" disabled={busy} onClick={addComparisonItems}><Network size={16} />加入对照</button>
           <button type="button" disabled={busy || !selectedIds.length} onClick={() => confirmBatch('hideArticle')}><EyeOff size={16} />隐藏文章</button>
           <button type="button" disabled={busy || !selectedIds.length} onClick={() => confirmBatch('hideImages')}><ImageOff size={16} />隐藏图片</button>
           <button type="button" disabled={busy || !selectedIds.length} onClick={() => confirmBatch('showArticle')}>显示文章</button>
@@ -135,6 +177,11 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
           <button type="button" className={styles.danger} disabled={busy || !selectedIds.length} onClick={() => confirmBatch('delete')}><Trash2 size={16} />删除所选</button>
         </>)}
       </div>
+      {!!comparisonItems.length && <div className={styles.batchToolbar} aria-label="新闻对照材料">
+        <span>对照材料 {comparisonItems.length}/6</span>
+        <button type="button" disabled={busy} onClick={() => { setError(''); setNotice(''); setComparisonId(null); setComparisonOpen(true); }}>查看材料</button>
+        <button type="button" disabled={busy} onClick={() => setComparisonItems([])}>清空</button>
+      </div>}
       <div className={styles.newsList}>{page.items.map(item => {
         const thumbnail = (JSON.parse(item.images) as string[])[0];
         return <article key={item.id} className={styles.newsRow}>
@@ -157,6 +204,32 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
       })}</div>{!page.items.length && <p>此范围暂无新闻。</p>}
       <div className={styles.formActions}><button type="button" disabled={busy || offset === 0} onClick={() => void action(async () => { await load(Math.max(0, offset - 30)); }, false)}>上一页</button><button type="button" disabled={busy || page.nextOffset === null} onClick={() => void action(async () => { await load(page.nextOffset!); }, false)}>下一页</button></div>
     </>}
+    {publishedComparisons && <NewsDialog title="已发布的新闻对照" busy={busy} onClose={() => setPublishedComparisons(null)}>
+      {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
+      {publishedComparisons.length ? <ul>{publishedComparisons.map(item => <li key={item.id} className={styles.batchToolbar}>
+        <Link href={`/news-comparison?event=${item.id}`}>{item.title}</Link>
+        <button type="button" disabled={busy} onClick={() => {
+          if (!window.confirm(`撤下「${item.title}」？原报道会保留。`)) return;
+          void action(async () => {
+            await adminApi(`admin/comparisons/${item.id}/withdraw`, '', {}, 'PATCH');
+            setPublishedComparisons(items => items?.filter(row => row.id !== item.id) ?? null);
+            setNotice('新闻对照已撤下。');
+          }, false);
+        }}>撤下</button>
+      </li>)}</ul> : <p>暂无已发布的对照。</p>}
+    </NewsDialog>}
+    {comparisonOpen && <NewsDialog title="生成新闻对照" busy={busy && !comparisonQueued} onClose={() => setComparisonOpen(false)} compact>
+      <form onSubmit={e => { e.preventDefault(); void action(generateComparison, false); }}>
+        <div className={styles.fields}><label className={styles.wide}>事件名称<input value={comparisonTitle} maxLength={100} required disabled={busy} onChange={e => setComparisonTitle(e.target.value)} placeholder="例如：芯片出口许可新规" /></label></div>
+        <ul>{comparisonItems.map(item => <li key={item.id} className={styles.batchToolbar}>
+          <span><strong>{item.publisher}</strong> · {item.title}</span><button type="button" aria-label={`移除：${item.title}`} disabled={busy} onClick={() => setComparisonItems(items => items.filter(row => row.id !== item.id))}><X size={16} /></button>
+        </li>)}</ul>
+        <p className={styles.hint}>{comparisonItems.length < 2 ? '至少需要 2 份同一事件的公开材料。' : '核对材料属于同一事件后提交。任务完成后，原文摘录与对照将出现在「新闻关联」。'}</p>
+        {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
+        <div className={styles.formActions}><button type="button" disabled={busy && !comparisonQueued} onClick={() => setComparisonOpen(false)}>返回列表</button>
+          <button type="submit" className={styles.primary} disabled={busy || comparisonItems.length < 2 || !comparisonTitle.trim()}>{busy ? '生成中…' : '生成并发布对照'}</button></div>
+      </form>
+    </NewsDialog>}
     {editorOpen && <NewsDialog title={selected ? selected.deletedAt ? '已删除新闻（只读）' : selected.isManual ? '编辑手动新闻' : '采集原文与展示预览' : '新增手动新闻'} busy={busy} onClose={closeEditor}>
     {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
     {selected && <><p>采集来源：{sourceName(selected)}</p><NewsSourceLinks links={JSON.parse(selected.sourceLinks)} /></>}

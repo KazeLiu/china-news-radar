@@ -64,6 +64,7 @@ export class NewsTrashService implements OnModuleInit {
           for (const url of new Set([item.url, item.originalUrl].filter((value): value is string => !!value).flatMap(value => [value, canonicalUrl(value) || value])))
             await tx.newsDeletedUrl.upsert({ where: { url }, create: { url }, update: {} });
           await tx.notification.deleteMany({ where: { OR: [{ id: `news:${item.id}` }, { hotspotId: `news:${item.id}` }] } });
+          await tx.newsComparison.deleteMany({ where: { articles: { some: { id: item.id } } } });
           await tx.newsItem.delete({ where: { id: item.id } });
           const shared = await tx.newsItem.count({ where: { OR: [{ analysisKey: { in: keys } }, { contentHash: item.contentHash }, { title: item.title, summary: item.summary }] } });
           if (!shared) await tx.newsAnalysis.deleteMany({ where: { key: { in: keys } } });

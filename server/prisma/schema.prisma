@@ -201,6 +201,7 @@ model NewsItem {
   analyzedAt         DateTime?
   hotspot            Hotspot?
   keywordMatches     NewsKeywordMatch[]
+  comparisons        NewsComparison[]
 
   @@unique([sourceId, url])
   @@index([publishedAt, firstSeenAt])
@@ -213,6 +214,18 @@ model NewsItem {
 
 model NewsDeletedUrl {
   url String @id
+}
+
+model NewsComparison {
+  id          String     @id
+  title       String
+  materialKey String
+  data        String
+  published   Boolean    @default(true)
+  articles    NewsItem[]
+  updatedAt   DateTime   @updatedAt
+
+  @@index([updatedAt])
 }
 
 model NewsAnalysis {

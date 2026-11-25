@@ -18,6 +18,7 @@ import { HotspotMedia } from '../hotspot/HotspotMedia';
 import { BilingualText } from '../common/BilingualText';
 import { AiTitleBadge } from '../common/AiTitleBadge';
 import { NewsSourceLinks } from '../news/NewsSourceLinks';
+import { NewsComparisonLink } from '../news/comparison/NewsComparisonLink';
 import { getNewsText } from '@/lib/newsText';
 import { useReadingPreference } from '@/providers/ReadingPreference';
 
@@ -121,6 +122,7 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
           </div>
         )}
         <NewsSourceLinks links={item.sourceLinks || []} />
+        {item.newsItemId && <NewsComparisonLink articleId={item.newsItemId} />}
         {item.media && item.media.length > 0 && <div className="mb-4"><HotspotMedia media={item.media} /></div>}
 
         {/* Engagement metrics — only when there are any */}
