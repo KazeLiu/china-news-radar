@@ -4,18 +4,18 @@ import Image from 'next/image';
 import { m, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, Flame, Zap, TrendingUp,
-  Eye, Target, MessageCircle, Repeat2, Quote, User,
+  Eye, MessageCircle, Repeat2, Quote, User,
   ShieldAlert, ChevronDown, ChevronUp, ThermometerSun, FileText,
   Sparkles,
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { getSourceIcon, getSourceLabel } from '../../lib/sourceMeta';
-import { relativeTime, formatDateTime } from '../../utils/relativeTime';
 import { HotspotMedia } from './HotspotMedia';
 import type { Hotspot } from '../../types';
 import { BilingualText } from '../common/BilingualText';
 import { AiTitleBadge } from '../common/AiTitleBadge';
 import { NewsSourceLinks } from '../news/NewsSourceLinks';
+import { NewsProvenance } from '../news/NewsProvenance';
 import { ChinaEvaluationDetails } from '../news/ChinaEvaluationDetails';
 import { NewsComparisonLink } from '../news/comparison/NewsComparisonLink';
 import { getNewsText } from '@/lib/newsText';
@@ -137,21 +137,13 @@ export function HotspotCard({
               <ThermometerSun className="w-3 h-3" />
               {heat.label} {heatScore}
             </span>}
-            <div className="ml-auto flex max-w-full min-w-0 items-center gap-3 overflow-x-auto whitespace-nowrap text-xs text-[var(--text-muted)]">
-              {hotspot.authorName && <span className="flex min-w-0 shrink-0 items-center gap-1.5 text-[var(--text-secondary)]"
+            <div className="ml-auto flex max-w-full min-w-0 items-center gap-2 text-xs text-[var(--text-muted)]">
+              {hotspot.authorName && <span className="flex min-w-0 items-center gap-1.5 text-[var(--text-secondary)]"
                 title={[hotspot.authorName, hotspot.authorUsername && `@${hotspot.authorUsername}`, hotspot.authorVerified && '已认证', hotspot.authorFollowers != null && `${hotspot.authorFollowers.toLocaleString()} 粉丝`].filter(Boolean).join(' · ')}>
-                {hotspot.authorAvatar ? <Image src={hotspot.authorAvatar} unoptimized referrerPolicy="no-referrer" alt="" width={16} height={16} className="rounded-full object-cover" /> : <User className="h-3.5 w-3.5 shrink-0" />}
+                {hotspot.authorAvatar ? <Image src={hotspot.authorAvatar} unoptimized referrerPolicy="no-referrer" alt="" width={16} height={16} className="shrink-0 rounded-full object-cover" /> : <User className="h-3.5 w-3.5 shrink-0" />}
                 <span className="max-w-28 truncate sm:max-w-40">{hotspot.authorName}</span>
               </span>}
-              {(!hotspot.newsItemId || hotspot.qualityScore != null) && <span className="flex shrink-0 items-center gap-1">
-                <Target className="h-3.5 w-3.5" />相关性 {hotspot.relevance}%
-              </span>}
-              {hotspot.publishedAt && <time dateTime={hotspot.publishedAt} title={`发布于 ${formatDateTime(hotspot.publishedAt)}`} className="shrink-0">
-                发布 {relativeTime(hotspot.publishedAt)}
-              </time>}
-              <time dateTime={hotspot.createdAt} title={`抓取于 ${formatDateTime(hotspot.createdAt)}`} className="shrink-0">
-                抓取 {relativeTime(hotspot.createdAt)}
-              </time>
+              <NewsProvenance item={hotspot} />
             </div>
           </div>
 
@@ -230,9 +222,7 @@ export function HotspotCard({
             )}
           </div>
 
-          {/* AI relevance reason — only present for keyword-matched cards.
-              Each card self-decides; the page-level "expand all" was removed. */}
-          {hotspot.relevanceReason && (
+          {!hotspot.newsItemId && hotspot.relevanceReason && (
             <div className="mt-2">
               <button
                 type="button"
@@ -240,7 +230,7 @@ export function HotspotCard({
                 className="flex items-center gap-1 text-[11px] text-[var(--accent-blue)]/70 dark:text-blue-400/70 hover:text-[var(--accent-blue)] dark:hover:text-blue-400 transition-colors"
               >
                 {reasonOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                {hotspot.newsItemId ? '涉华分析依据' : '关键词关联分析'}
+                关键词关联分析
               </button>
               <AnimatePresence>
                 {reasonOpen && (
