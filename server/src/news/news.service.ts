@@ -334,23 +334,28 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       return { scanning: false, started: true, sourcesChecked: due.length, sourcesFailed: failed };
     } finally { this.busy = false; this.bridge?.scanStatus(false); }
   }
+  private matchesCollectionSource(source: NewsSourceConfig) {
+    const current = this.config.sources.find(config => config.id === source.id);
+    // A display-only label must not invalidate a source already being collected.
+    return !!current && (current === source || JSON.stringify({ ...current, regionLabel: undefined }) === JSON.stringify({ ...source, regionLabel: undefined }));
+  }
   private async collect(source: NewsSourceConfig) {
-    if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+    if (!this.matchesCollectionSource(source)) return;
     const state = await this.prisma.newsSource.findUniqueOrThrow({ where: { id: source.id } });
     const now = new Date();
     if (source.kind === 'api' || source.kind === 'web') return this.collectAdapted(source, now, state);
     const counts: CollectionCounts = { discovered: 0, added: 0, updated: 0, duplicates: 0, filtered: 0 };
     try {
       const result = await fetchSourceFeed(source, (xml, selected) => inspectFeed(xml, selected, now, false, this.config.rules), state);
-      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      if (!this.matchesCollectionSource(source)) return;
       const parsed = mergeFeeds(result.feeds.flatMap(feed => feed.parsed ? [feed.parsed] : []));
       counts.discovered = parsed.rawCount; counts.filtered = parsed.filtered; counts.duplicates = parsed.duplicates;
       let changed = 0;
       for (const item of parsed.items) {
-        if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+        if (!this.matchesCollectionSource(source)) return;
         if (await this.store(source.id, item, now, false, counts)) changed++;
       }
-      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      if (!this.matchesCollectionSource(source)) return;
       const first = result.feeds[0];
       await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: now, lastSuccessAt: now, error: null,
         nextCheckAt: new Date(Date.now() + source.pollSeconds * 1000), activeKind: first.selected.kind, activeFeedUrl: first.selected.feedUrl,
@@ -362,7 +367,7 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(`${source.englishName}: ${result.feeds.length}/${result.attempts.length} 个 RSS 地址成功，${changed} 条新增或更新`);
       return true;
     } catch (error) {
-      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      if (!this.matchesCollectionSource(source)) return;
       const failures = error instanceof FeedFetchError ? error.failures : {};
       await this.logs.record({ kind: 'collection', route: 'collection/rss', sourceId: source.id, startedAt: now, elapsedMs: Date.now() - now.getTime(), status: 'failed', errorCode: error instanceof FeedFetchError ? 'feed-unavailable' : 'storage-error', errorReason: error instanceof FeedFetchError ? '所有 RSS 地址均请求或解析失败，请查看来源状态' : collectionErrorReason(error), ...counts });
       const retryTimes = Object.values(failures).map(f => Date.parse(f.retryAt)).filter(t => t > Date.now());
@@ -377,21 +382,21 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
     const counts: CollectionCounts = { discovered: 0, added: 0, updated: 0, duplicates: 0, filtered: 0 };
     try {
       const result = await this.adapters.collect(source, this.config.rules);
-      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      if (!this.matchesCollectionSource(source)) return;
       counts.discovered = result.rawCount; counts.filtered = result.checkedCount - result.items.length;
       let changed = 0;
       for (const item of result.items) {
-        if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+        if (!this.matchesCollectionSource(source)) return;
         if (await this.store(source.id, item, now, false, counts)) changed++;
       }
-      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      if (!this.matchesCollectionSource(source)) return;
       await this.prisma.newsSource.update({ where: { id: source.id }, data: { lastCheckedAt: now, lastSuccessAt: now, nextCheckAt: new Date(Date.now() + source.pollSeconds * 1000), error: null, lastItemCount: result.items.length, activeKind: source.kind, activeFeedUrl: null,
         ...(source.kind === 'web' ? { lastParseJson: JSON.stringify({ ...result.structure, ruleHash: webHash(source) }) } : {}) } });
       this.logger.log(`${source.name}：${changed} 条新增或更新`);
       await this.logs.record({ kind: 'collection', route: `collection/${source.kind}`, sourceId: source.id, startedAt: now, elapsedMs: Date.now() - now.getTime(), status: counts.discovered && !result.items.length ? 'filtered' : !changed ? 'empty' : 'success', ...counts });
       return true;
     } catch (error) {
-      if (JSON.stringify(source) !== JSON.stringify(this.config.sources.find(s => s.id === source.id))) return;
+      if (!this.matchesCollectionSource(source)) return;
       const code = error instanceof SourceFetchError ? error.code : 'storage-error';
       const reason = collectionErrorReason(error);
       const checkedAt = new Date();
@@ -887,23 +892,28 @@ export class NewsService implements OnModuleInit, OnModuleDestroy {
   previewSourceImport(body: unknown) {
     const plan = planSourceImport(body, this.config);
     return { revision: this.configRevision, document: plan.document, added: plan.added, updated: plan.updated,
-      sources: plan.entries.map(({ source, previous, warnings }) => ({ id: source.id, name: source.name, kind: source.kind, action: previous ? 'update' : 'add', warnings })) };
+      sources: plan.entries.map(({ source, previous, warnings, preserveCollection }) => ({ id: source.id, name: source.name, kind: source.kind, regionLabel: source.regionLabel,
+        action: previous ? 'update' : 'add', warnings, preserveCollection })) };
   }
   async importSources(body: { revision?: unknown; document?: unknown }) {
     const revision = body?.revision;
     if (revision !== this.configRevision) throw new ConflictException('后台配置已修改或服务已重启，请重新预览导入');
     const plan = planSourceImport(body.document, this.config);
-    for (const { source, previous } of plan.entries) await this.preserveWebRules(source, previous);
-    if (revision !== this.configRevision) throw new ConflictException('后台配置已修改，请重新预览导入');
-    if (this.busy) throw new ConflictException('正在采集，请等待本轮结束后再确认导入');
-    await this.updateConfig(plan.config, async tx => {
-      for (const { source, previous } of plan.entries) {
-        await this.writeSource(tx, source, previous);
-        await tx.newsSource.update({ where: { id: source.id }, data: { enabled: false, nextCheckAt: null } });
-      }
-    }, async () => {
-      for (const { source, previous } of plan.entries) if (!!source.forceChina !== !!previous?.forceChina) await this.reapplySourcePolicy(source.id);
-    }, true);
+    const reconfigured = plan.entries.filter(entry => !entry.preserveCollection);
+    if (!reconfigured.length) await this.updateConfig(plan.config);
+    else {
+      for (const { source, previous } of reconfigured) await this.preserveWebRules(source, previous);
+      if (revision !== this.configRevision) throw new ConflictException('后台配置已修改，请重新预览导入');
+      if (this.busy) throw new ConflictException('此文件含新增来源或其他来源设置变更，须等本轮采集结束；只填地区可拆成单独文件，现在就能导入');
+      await this.updateConfig(plan.config, async tx => {
+        for (const { source, previous } of reconfigured) {
+          await this.writeSource(tx, source, previous);
+          await tx.newsSource.update({ where: { id: source.id }, data: { enabled: false, nextCheckAt: null } });
+        }
+      }, async () => {
+        for (const { source, previous } of reconfigured) if (!!source.forceChina !== !!previous?.forceChina) await this.reapplySourcePolicy(source.id);
+      }, true);
+    }
     return { ...await this.adminConfig(), importedSources: { added: plan.added, updated: plan.updated } };
   }
   private async preserveWebRules(source: NewsSourceConfig, previous?: NewsSourceConfig) {

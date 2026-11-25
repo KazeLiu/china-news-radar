@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
-import { defaultApi, defaultWeb, sourceOrdering, validateSource, validateSourceSortOrder, type AdminConfig } from './admin-config';
+import { isDeepStrictEqual } from 'node:util';
+import { defaultApi, defaultWeb, sourceOrdering, validateSource, validateSourceRegionLabel, validateSourceSortOrder, type AdminConfig } from './admin-config';
 import { NEWS_SOURCES, type NewsSourceConfig } from './sources';
 
 export interface SourceDocument { format: 'china-radar-sources'; version: 1; sources: Record<string, unknown>[] }
@@ -19,6 +20,42 @@ export function exportSource(source: NewsSourceConfig, sortOrder: number) {
 export function sourceDocument(sources: Array<{ source: NewsSourceConfig; order: { sortOrder: number } }>): SourceDocument {
   return { format: 'china-radar-sources', version: 1, sources: sources.map(({ source, order }) => exportSource(source, order.sortOrder)) };
 }
+function changesOnlyRegion(input: Record<string, unknown>, previous: NewsSourceConfig, sortOrder: number) {
+  // Compare with the JSON users edit, without private fields or undefined placeholders.
+  const exported: Record<string, unknown> = JSON.parse(JSON.stringify(exportSource(previous, sortOrder)));
+  return Object.entries(input).every(([key, value]) => key === 'regionLabel' || isDeepStrictEqual(value, exported[key]));
+}
+function reconfigureSource(input: Record<string, unknown>, previous: NewsSourceConfig | undefined, warnings: string[]) {
+  const kind = input.kind ?? previous?.kind ?? 'rss';
+  const apiInput: Record<string, unknown> = input.api === undefined ? {} : object(input.api, ['method', 'auth', 'mapping', 'body'], 'API 配置');
+  const auth = apiInput.auth === undefined ? {} : object(apiInput.auth, ['type', 'header'], 'API 鉴权配置（不接收密钥）');
+  const web = input.web === undefined ? {} : object(input.web, Object.keys(defaultWeb()).concat('parseInstructions'), '网页配置');
+  const baseApi = previous?.api || defaultApi();
+  const api = { ...baseApi, ...apiInput, auth: { ...baseApi.auth, ...auth, value: '' } };
+  const source = validateSource({ pollSeconds: 900, description: '', ...previous, ...input, kind,
+    ...(input.feedUrl !== undefined && input.feedUrls === undefined ? { feedUrls: [input.feedUrl] } : {}),
+    ...(input.channel !== undefined && input.target === undefined ? { target: input.channel } : {}),
+    ...(kind === 'api' ? { api } : {}),
+    ...(kind === 'web' ? { web: { ...(previous?.web || defaultWeb()), ...web } } : {}),
+  }, previous || NEWS_SOURCES.find(source => source.id === input.id && source.kind === 'reserved'));
+  source.enabled = false;
+  if (source.kind === 'telegram' && input.useProxy !== undefined) {
+    delete source.useProxy;
+    warnings.push('Telegram 代理由此服务器的账号统一设置，不随频道导入');
+  }
+  if (source.api) {
+    const sameCredentials = previous?.kind === 'api' && (previous.adapter || 'generic') === source.adapter && previous.target === source.target
+      && previous.api?.auth.type === source.api.auth.type && previous.api.auth.header === source.api.auth.header;
+    source.api.auth.value = sameCredentials ? previous.api!.auth.value : '';
+    if (source.api.auth.type !== 'none' && !source.api.auth.value) warnings.push('需在此服务器填写鉴权值');
+    if (!sameCredentials && source.api.method === 'POST' && apiInput.body === undefined) source.api.body = '';
+    if (source.api.method === 'POST' && !source.api.body) warnings.push('POST 请求正文需另行填写');
+  }
+  if (typeof input.logo === 'string' && input.logo.startsWith('/api/news/logos/') && input.logo !== previous?.logo) {
+    source.logo = previous?.logo || ''; warnings.push('站内 Logo 文件需在此服务器重新上传');
+  }
+  return source;
+}
 export function planSourceImport(value: unknown, config: AdminConfig) {
   const document = object(value, ['format', 'version', 'sources'], '导入文件');
   if (document.format !== 'china-radar-sources' || document.version !== 1) throw new BadRequestException('只支持 china-radar-sources 第一版 JSON');
@@ -30,39 +67,16 @@ export function planSourceImport(value: unknown, config: AdminConfig) {
       const input = { ...object(value, sourceFields, '来源') };
       if (typeof input.id === 'string') input.id = input.id.trim();
       const previous = config.sources.find(source => source.id === input.id);
+      const previousOrder = ordering.find(order => order.id === previous?.id)?.sortOrder ?? 0;
+      const preserveCollection = !!previous && changesOnlyRegion(input, previous, previousOrder);
       const warnings: string[] = [];
-      const kind = input.kind ?? previous?.kind ?? 'rss';
-      const apiInput: Record<string, unknown> = input.api === undefined ? {} : object(input.api, ['method', 'auth', 'mapping', 'body'], 'API 配置');
-      const auth = apiInput.auth === undefined ? {} : object(apiInput.auth, ['type', 'header'], 'API 鉴权配置（不接收密钥）');
-      const web = input.web === undefined ? {} : object(input.web, Object.keys(defaultWeb()).concat('parseInstructions'), '网页配置');
-      const baseApi = previous?.api || defaultApi();
-      const api = { ...baseApi, ...apiInput, auth: { ...baseApi.auth, ...auth, value: '' } };
-      const source = validateSource({ pollSeconds: 900, description: '', ...previous, ...input, kind,
-        ...(input.feedUrl !== undefined && input.feedUrls === undefined ? { feedUrls: [input.feedUrl] } : {}),
-        ...(input.channel !== undefined && input.target === undefined ? { target: input.channel } : {}),
-        ...(kind === 'api' ? { api } : {}),
-        ...(kind === 'web' ? { web: { ...(previous?.web || defaultWeb()), ...web } } : {}),
-      }, previous || NEWS_SOURCES.find(source => source.id === input.id && source.kind === 'reserved'));
+      const source = previous && preserveCollection
+        ? input.regionLabel == null ? previous : { ...previous, regionLabel: validateSourceRegionLabel(input.regionLabel) }
+        : reconfigureSource(input, previous, warnings);
       if (seen.has(source.id)) throw new BadRequestException('同一文件中的来源 ID 不能重复');
       seen.add(source.id);
-      source.enabled = false;
-      if (source.kind === 'telegram' && input.useProxy !== undefined) {
-        delete source.useProxy;
-        warnings.push('Telegram 代理由此服务器的账号统一设置，不随频道导入');
-      }
-      if (source.api) {
-        const sameCredentials = previous?.kind === 'api' && (previous.adapter || 'generic') === source.adapter && previous.target === source.target
-          && previous.api?.auth.type === source.api.auth.type && previous.api.auth.header === source.api.auth.header;
-        source.api.auth.value = sameCredentials ? previous.api!.auth.value : '';
-        if (source.api.auth.type !== 'none' && !source.api.auth.value) warnings.push('需在此服务器填写鉴权值');
-        if (!sameCredentials && source.api.method === 'POST' && apiInput.body === undefined) source.api.body = '';
-        if (source.api.method === 'POST' && !source.api.body) warnings.push('POST 请求正文需另行填写');
-      }
-      if (typeof input.logo === 'string' && input.logo.startsWith('/api/news/logos/') && input.logo !== previous?.logo) {
-        source.logo = previous?.logo || ''; warnings.push('站内 Logo 文件需在此服务器重新上传');
-      }
-      const sortOrder = validateSourceSortOrder(input.sortOrder ?? ordering.find(order => order.id === source.id)?.sortOrder ?? 0);
-      return { source, previous, sortOrder, warnings, input: { ...input, id: source.id } };
+      const sortOrder = validateSourceSortOrder(input.sortOrder ?? previousOrder);
+      return { source, previous, sortOrder, warnings, preserveCollection, input: { ...input, id: source.id } };
     } catch (error) {
       if (error instanceof BadRequestException) throw new BadRequestException(`第 ${index + 1} 个来源：${error.message}`);
       throw error;
@@ -78,9 +92,13 @@ export function planSourceImport(value: unknown, config: AdminConfig) {
     if (channels.has(channel)) throw new BadRequestException('合并后存在重复 Telegram 频道，请使用原来源 ID 更新');
     channels.add(channel);
   }
+  const reconfigured = entries.filter(entry => !entry.preserveCollection);
+  const reconfiguredIds = new Set(reconfigured.map(entry => entry.source.id));
   const editedAt = new Date().toISOString();
   return { entries, added, updated: entries.length - added,
     document: { format: 'china-radar-sources', version: 1, sources: entries.map(entry => entry.input) } satisfies SourceDocument,
-    config: { ...config, sources, sourceOrder: [...ordering.filter(order => !changed.has(order.id)), ...entries.map(entry => ({ id: entry.source.id, sortOrder: entry.sortOrder, editedAt }))],
-      removedSourceIds: config.removedSourceIds.filter(id => !changed.has(id)) } };
+    config: { ...config, sources, ...(reconfigured.length ? {
+      sourceOrder: [...ordering.filter(order => !reconfiguredIds.has(order.id)), ...reconfigured.map(entry => ({ id: entry.source.id, sortOrder: entry.sortOrder, editedAt }))],
+      removedSourceIds: config.removedSourceIds.filter(id => !reconfiguredIds.has(id)),
+    } : {}) } };
 }

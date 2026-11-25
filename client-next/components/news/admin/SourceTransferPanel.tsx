@@ -19,6 +19,7 @@ export function SourceTransferPanel({ busy, onBusy, onSave, onImported }: { busy
   const [preview, setPreview] = useState<SourceImportPreview | null>(null);
   const [error, setError] = useState(''); const [notice, setNotice] = useState('');
   const inputId = useId(); const pending = busy || !!operation;
+  const pausedOnImport = preview?.sources.filter(source => !source.preserveCollection).length ?? 0;
   function start(name: string) { setOperation(name); onBusy(true); setError(''); setNotice(''); }
   function finish() { setOperation(''); onBusy(false); }
   async function exportAll() {
@@ -53,7 +54,7 @@ export function SourceTransferPanel({ busy, onBusy, onSave, onImported }: { busy
     try {
       const result = await onSave('admin/sources/import', { revision: preview.revision, document: preview.document }, 'POST');
       if (!result) { setError('导入未完成，请重新预览后再确认。'); setPreview(null); return; }
-      setNotice(`导入完成：新增 ${preview.added} 个，更新 ${preview.updated} 个；这些来源均已暂停。`);
+      setNotice(`导入完成：新增 ${preview.added} 个，更新 ${preview.updated} 个。${pausedOnImport ? `${pausedOnImport} 个来源已暂停，检查后可启用。` : '采集状态保持不变。'}`);
       setText(''); setPreview(null); onImported();
     } finally { finish(); }
   }
@@ -69,8 +70,12 @@ export function SourceTransferPanel({ busy, onBusy, onSave, onImported }: { busy
       <label>或粘贴 JSON<textarea rows={5} spellCheck={false} value={text} disabled={pending} onChange={event => { setText(event.target.value); setPreview(null); setError(''); setNotice(''); }} /></label>
       <div className={styles.actions}><button type="button" disabled={pending || !text.trim()} onClick={() => void inspect()}>{operation === 'preview' ? '正在校验…' : '校验并预览'}</button></div>
       {preview && <div aria-live="polite"><h3>新增 {preview.added} 个 · 更新 {preview.updated} 个</h3>
-        <ul className={styles.sourceImportList}>{preview.sources.map(source => <li key={source.id}><strong>{source.action === 'add' ? '新增' : '更新'} · {source.name}</strong><small>{source.kind} · {source.id}</small>{source.warnings.map(warning => <p key={warning}>{warning}</p>)}</li>)}</ul>
-        <p>按 ID 合并，导入项默认暂停。接口变更时须重填鉴权值；当前未保存的来源编辑将重置。</p>
+        <ul className={styles.sourceImportList}>{preview.sources.map(source => <li key={source.id}>
+          <strong>{source.action === 'add' ? '新增' : '更新'} · {source.name}</strong>
+          <small>{source.kind} · {source.id}{source.regionLabel !== undefined && ` · 地区：${source.regionLabel || '未设置'}`} · {source.preserveCollection ? '保留采集状态' : '导入后暂停'}</small>
+          {source.warnings.map(warning => <p key={warning}>{warning}</p>)}
+        </li>)}</ul>
+        <p>{pausedOnImport ? '新增或修改其他来源设置须等本轮采集结束。' : '可在采集期间导入，不改变启停状态和采集进度。'}未保存的来源编辑将重置。</p>
         <div className={styles.formActions}><button type="button" disabled={pending} onClick={() => setPreview(null)}>取消</button><button type="button" className={styles.primary} disabled={pending} onClick={() => void confirm()}><Upload size={16} />{operation === 'import' ? '正在导入…' : '确认导入'}</button></div>
       </div>}
     </div>
