@@ -74,7 +74,7 @@ export function KeywordsView() {
 
   return <div className="mx-auto w-full max-w-5xl px-4 py-6">
     <header className="mb-6 flex items-center justify-between gap-4">
-      <h1 className="flex items-center gap-2.5 text-2xl font-bold text-[var(--text-primary)]"><Bookmark className="h-5 w-5 text-[var(--accent-blue)]" />我的关注</h1>
+      <h1 className="flex items-center gap-2.5 text-2xl font-bold text-[var(--text-primary)]"><Bookmark className="h-5 w-5 text-[var(--accent-blue)]" />自定义关注</h1>
       {access?.authenticated && <button type="button" onClick={() => void lock()} disabled={busy} className="flex min-h-11 items-center gap-2 rounded-lg px-3 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"><LogOut className="h-4 w-4" />锁定</button>}
     </header>
     {error && <p role="alert" className="mb-4 text-sm text-red-500">{error}</p>}

@@ -9,7 +9,8 @@
 - [精选资讯](https://china-news.951211.xyz/curated): 支持来源、主题、今日/本周与标题摘要搜索，可切换原文并查看出处、图片和时间
 - [热点雷达](https://china-news.951211.xyz/hotspot): 海外涉华报道与关键词相关动态
 - [AI 日报](https://china-news.951211.xyz/digest): 按 `/digest/YYYY-MM-DD` 归档，主题为政策、经济、外交、科技、安全与社会
-- [我的关注](https://china-news.951211.xyz/keywords): 关注词档案与相关报道
+- [高频关注](https://china-news.951211.xyz/high-frequency): 自动日、周、月实体榜与原文依据
+- [自定义关注](https://china-news.951211.xyz/keywords): 受访问保护的关注词档案与相关报道
 - [Agent 接入说明](https://china-news.951211.xyz/agent): 接口与 RSS 用法
 - [关于本站](https://china-news.951211.xyz/about): 项目与作者信息、上游致谢
 

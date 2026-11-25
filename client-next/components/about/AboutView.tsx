@@ -31,8 +31,8 @@ const FEATURES = [
   },
   {
     icon: Bookmark,
-    title: "我的关注",
-    desc: "关注人物、国家、机构或事件，查看相关报道与保存的关注档案，接收新报道提醒。",
+    title: "高频关注与自定义关注",
+    desc: "日、周、月榜自动关联高频实体，点选查看报道原文。自定义关注保留关注词及报道提醒。",
     accent: "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400",
   },
   {
@@ -59,7 +59,7 @@ export function AboutView() {
         </h1>
         <p className="text-[15px] text-[var(--text-secondary)] leading-[1.8]">
           China Radar 由蓝芷怡维护，追踪海外报道中的中国相关动态。
-          精选资讯、热点雷达、日报和我的关注读取同一套公开新闻，保留原文链接、媒体出处、发布时间和首次发现时间。
+          精选资讯、热点雷达、日报和高频关注读取同一套公开新闻，保留原文链接、媒体出处、发布时间和首次发现时间。
         </p>
         <p className="text-[15px] text-[var(--text-secondary)] leading-[1.8] mt-3">
           管理员统一设置来源、排除规则与 AI。分类、必要的中文翻译和质量评分在同一请求内完成，已有结果全站复用，阅读页面不产生模型调用。

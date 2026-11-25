@@ -17,7 +17,7 @@ import { NewsSourceLinks } from '../news/NewsSourceLinks';
 import { NewsCardSource } from '../news/NewsCardSource';
 import { NewsProvenance } from '../news/NewsProvenance';
 import { ChinaEvaluationDetails } from '../news/ChinaEvaluationDetails';
-import { NewsComparisonLink } from '../news/comparison/NewsComparisonLink';
+import { NewsEntityLink } from '../news/entities/NewsEntityLink';
 import { getNewsText } from '@/lib/newsText';
 import { useReadingPreference } from '@/providers/ReadingPreference';
 
@@ -142,7 +142,10 @@ export function HotspotCard({
                 {hotspot.authorAvatar ? <Image src={hotspot.authorAvatar} unoptimized referrerPolicy="no-referrer" alt="" width={16} height={16} className="shrink-0 rounded-full object-cover" /> : <User className="h-3.5 w-3.5 shrink-0" />}
                 <span className="max-w-28 truncate sm:max-w-40">{hotspot.authorName}</span>
               </span>}
-              <NewsProvenance item={hotspot} />
+              <div className="flex shrink-0 items-center gap-4">
+                {hotspot.newsItemId && <NewsEntityLink articleId={hotspot.newsItemId} iconOnly />}
+                <NewsProvenance item={hotspot} />
+              </div>
             </div>
           </div>
 
@@ -169,7 +172,6 @@ export function HotspotCard({
 
           {hotspot.chinaEvaluation && <ChinaEvaluationDetails evaluation={hotspot.chinaEvaluation} />}
           <NewsSourceLinks links={hotspot.sourceLinks || []} />
-          {hotspot.newsItemId && <NewsComparisonLink articleId={hotspot.newsItemId} />}
           {videos.length > 0 && <HotspotMedia media={videos} />}
 
           {/* Engagement metrics */}

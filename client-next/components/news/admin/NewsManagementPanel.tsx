@@ -224,7 +224,7 @@ export function NewsManagementPanel({ sources }: { sources: Pick<SourceSettings,
         <ul>{comparisonItems.map(item => <li key={item.id} className={styles.batchToolbar}>
           <span><strong>{item.publisher}</strong> · {item.title}</span><button type="button" aria-label={`移除：${item.title}`} disabled={busy} onClick={() => setComparisonItems(items => items.filter(row => row.id !== item.id))}><X size={16} /></button>
         </li>)}</ul>
-        <p className={styles.hint}>{comparisonItems.length < 2 ? '至少需要 2 份同一事件的公开材料。' : '核对材料属于同一事件后提交。任务完成后，原文摘录与对照将出现在「新闻关联」。'}</p>
+        <p className={styles.hint}>{comparisonItems.length < 2 ? '至少需要 2 份同一事件的公开材料。' : '核对材料属于同一事件后提交。任务完成后，原文摘录与对照将出现在「历史报道对照」。'}</p>
         {error && <p className={styles.error} role="alert">{error}</p>}{notice && <p className={styles.notice} role="status">{notice}</p>}
         <div className={styles.formActions}><button type="button" disabled={busy && !comparisonQueued} onClick={() => setComparisonOpen(false)}>返回列表</button>
           <button type="submit" className={styles.primary} disabled={busy || comparisonItems.length < 2 || !comparisonTitle.trim()}>{busy ? '生成中…' : '生成并发布对照'}</button></div>

@@ -20,7 +20,8 @@ import { ConfigMigrationService } from './news/config-migration.service';
 import { ConfigMigrationController } from './news/config-migration.controller';
 import { NewsComparisonService } from './news/news-comparison.service';
 import { NewsComparisonController } from './news/news-comparison.controller';
+import { NewsEntityTrendsController } from './news/news-entity-trends';
 
 @Global()
-@Module({ imports: [PrismaModule, GatewayModule, ServicesModule], controllers: [NewsController, SourceLogoController, TelegramAccountController, ConfigMigrationController, NewsComparisonController], providers: [NewsService, NewsBridgeService, NewsEditorialService, NewsComparisonService, EmailService, SourceAdapterService, WebCrawlerService, NewsAuditInterceptor, NewsTrashService, TelegramAccountService, TelegramLocalService, TelegramControlService, ConfigMigrationService], exports: [NewsService, NewsBridgeService, NewsEditorialService] })
+@Module({ imports: [PrismaModule, GatewayModule, ServicesModule], controllers: [NewsController, SourceLogoController, TelegramAccountController, ConfigMigrationController, NewsComparisonController, NewsEntityTrendsController], providers: [NewsService, NewsBridgeService, NewsEditorialService, NewsComparisonService, EmailService, SourceAdapterService, WebCrawlerService, NewsAuditInterceptor, NewsTrashService, TelegramAccountService, TelegramLocalService, TelegramControlService, ConfigMigrationService], exports: [NewsService, NewsBridgeService, NewsEditorialService] })
 export class RadarModule {}

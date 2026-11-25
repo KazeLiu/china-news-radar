@@ -15,8 +15,8 @@ interface AppLayoutProps {
 const MOBILE_NAV = [
   { path: '/curated',  label: '精选', Icon: Star },
   { path: '/hotspot',  label: '热点', Icon: Radio },
-  { path: '/news-comparison', label: '关联', Icon: Network },
-  { path: '/keywords', label: '关注', Icon: Bookmark },
+  { path: '/high-frequency', label: '高频关注', Icon: Network },
+  { path: '/keywords', label: '自定义关注', Icon: Bookmark },
   { path: '/digest',   label: '日报', Icon: CalendarDays },
 ];
 

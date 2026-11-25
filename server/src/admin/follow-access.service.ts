@@ -29,7 +29,7 @@ export class FollowAccessService {
     return { configured: !!config.passwordHash, authenticated: !!await this.admin.session(req, false) || !!config.passwordHash && this.validSession(req, config) };
   }
   async requireRead(req: AdminRequest) {
-    if (!(await this.status(req)).authenticated) throw new UnauthorizedException({ code: 'follow_access_required', message: '请先输入我的关注访问密码' });
+    if (!(await this.status(req)).authenticated) throw new UnauthorizedException({ code: 'follow_access_required', message: '请先输入自定义关注访问密码' });
   }
   async configure(body: { password?: unknown; sessionHours?: unknown }) {
     if (typeof body?.password !== 'string' || body.password.length < 12 || body.password.length > 256 || !body.password.trim()) throw new BadRequestException('访问密码须为 12–256 个字符');
@@ -49,7 +49,7 @@ export class FollowAccessService {
     const attempt = await this.prisma.adminLoginAttempt.findUnique({ where: { key } });
     if (attempt?.blockedUntil && attempt.blockedUntil > now) throw new HttpException('密码错误次数过多，请十五分钟后重试', 429);
     const config = await this.settings();
-    if (!config.passwordHash) throw new ForbiddenException('管理员尚未设置我的关注访问密码');
+    if (!config.passwordHash) throw new ForbiddenException('管理员尚未设置自定义关注访问密码');
     if (!await verifyPassword(body.password, config.passwordHash)) {
       await this.prisma.$transaction(async tx => {
         const old = await tx.adminLoginAttempt.findUnique({ where: { key } });

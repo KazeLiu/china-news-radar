@@ -33,9 +33,9 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: "/curated", label: "精选", icon: <Star className="w-4 h-4" />, accent: "text-amber-400" },
       { path: "/hotspot", label: "热点雷达", icon: <Radio className="w-4 h-4" />, accent: "text-blue-400" },
-      { path: "/news-comparison", label: "新闻关联", icon: <Network className="w-4 h-4" />, accent: "text-cyan-500" },
+      { path: "/high-frequency", label: "高频关注", icon: <Network className="w-4 h-4" />, accent: "text-cyan-500" },
       { path: "/digest", label: "AI 日报", icon: <CalendarDays className="w-4 h-4" />, accent: "text-emerald-400" },
-      { path: "/keywords", label: "我的关注", icon: <Bookmark className="w-4 h-4" />, accent: "text-purple-400" },
+      { path: "/keywords", label: "自定义关注", icon: <Bookmark className="w-4 h-4" />, accent: "text-purple-400" },
     ],
   },
   {

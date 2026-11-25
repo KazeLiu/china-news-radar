@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { fetchArticleSSR } from '@/lib/server-api';
 import { ArticleText } from '@/components/news/ArticleText';
 import { NewsSourceLinks } from '@/components/news/NewsSourceLinks';
-import { NewsComparisonLink } from '@/components/news/comparison/NewsComparisonLink';
+import { NewsEntityLink } from '@/components/news/entities/NewsEntityLink';
 
 export const dynamic = 'force-dynamic';
 export default async function ArticlePage({ params }: { params: Promise<{ id: string }> }) {
@@ -16,7 +16,7 @@ export default async function ArticlePage({ params }: { params: Promise<{ id: st
       <ArticleText title={item.titleZh || item.title} originalTitle={item.sourceTitlePresent ? item.title : ''} titleGenerated={item.titleGenerated} summary={item.summaryZh ?? item.summary} originalSummary={item.summary} displaySummary={item.displaySummary} />
       <div className="leading-loose whitespace-pre-wrap break-words">{item.body || '本站未保存完整正文。'}</div>
       <NewsSourceLinks links={item.sourceLinks} />
-      <NewsComparisonLink articleId={item.id} />
+      <NewsEntityLink articleId={item.id} />
       {images.length > 0 && <ul className="mt-8 space-y-3">{images.map((url, index) => <li key={url}><a href={url} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-blue)] underline">查看报道图片 {index + 1}</a></li>)}</ul>}
       {item.originalUrl && <a href={item.originalUrl} target="_blank" rel="noopener noreferrer" className="inline-flex min-h-11 items-center mt-8 text-[var(--accent-blue)] underline">阅读媒体原文</a>}
     </article>

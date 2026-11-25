@@ -16,6 +16,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     '',
     '/curated',
     '/hotspot',
+    '/high-frequency',
     '/digest',
     '/keywords',
     '/agent',

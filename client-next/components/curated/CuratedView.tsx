@@ -20,7 +20,7 @@ import { NewsSourceLinks } from '../news/NewsSourceLinks';
 import { NewsCardSource } from '../news/NewsCardSource';
 import { NewsProvenance } from '../news/NewsProvenance';
 import { ChinaEvaluationDetails } from '../news/ChinaEvaluationDetails';
-import { NewsComparisonLink } from '../news/comparison/NewsComparisonLink';
+import { NewsEntityLink } from '../news/entities/NewsEntityLink';
 import { getNewsText } from '@/lib/newsText';
 import { useFeedWidth, useReadingPreference } from '@/providers/ReadingPreference';
 
@@ -96,7 +96,10 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
               </span>
             )}
             {item.newsItemId && item.qualityScore == null && <span className="text-xs text-[var(--text-muted)]">{item.aiStatus === 'done' ? '未评分' : '规则兜底'}</span>}
-            {item.newsItemId && <NewsProvenance item={item} />}
+            {item.newsItemId && <div className="flex shrink-0 items-center gap-4">
+              <NewsEntityLink articleId={item.newsItemId} iconOnly />
+              <NewsProvenance item={item} />
+            </div>}
           </div>
         </div>
 
@@ -128,7 +131,6 @@ function CuratedCard({ item, index = 0 }: { item: Hotspot; index?: number }) {
         )}
         {item.chinaEvaluation && <ChinaEvaluationDetails evaluation={item.chinaEvaluation} />}
         <NewsSourceLinks links={item.sourceLinks || []} />
-        {item.newsItemId && <NewsComparisonLink articleId={item.newsItemId} />}
         {videos.length > 0 && <div className="mb-4"><HotspotMedia media={videos} /></div>}
 
         {/* Engagement metrics — only when there are any */}

@@ -14,7 +14,8 @@
 
 import type { DigestData, Hotspot } from '../types';
 import type { ComparisonResponse } from '../types/news-comparison';
-import { requestJson } from '../services/http';
+import type { EntityPeriod, EntityTrends } from '../types/entity-trends';
+import { HttpError, requestJson } from '../services/http';
 
 const API_ORIGIN =
   process.env.INTERNAL_API_URL ||
@@ -121,4 +122,11 @@ export function fetchNewsComparisonsSSR(event?: string, article?: string) {
   if (event) params.set('event', event);
   if (article) params.set('article', article);
   return getJson<ComparisonResponse>(`/api/news/comparisons?${params}`);
+}
+
+export async function fetchEntityTrendsSSR(period: EntityPeriod, article?: string) {
+  const params = new URLSearchParams({ period });
+  if (article) params.set('article', article);
+  try { return await getJson<EntityTrends>(`/api/news/entity-trends?${params}`); }
+  catch (error) { if (error instanceof HttpError && error.status === 404) return null; throw error; }
 }

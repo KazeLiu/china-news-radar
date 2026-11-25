@@ -7,7 +7,7 @@ China Radar aggregates overseas reporting about China, with Chinese classificati
 ## Features
 
 - **Curated reading**: the home page opens curated news, with source, topic, time, and keyword filters. Quality scores affect ordering, not eligibility; unscored articles can still appear.
-- **News comparison**: admins select two to six public reports about the same event and generate a comparison. Readers can trace citations and reprints on a graph, then compare original excerpts and see where source material is missing.
+- **Trending entities**: the daily, weekly, and monthly top-10 lists connect entities across public reports. Select a node or a link to check the original excerpts. The graph distinguishes co-mentions from explicit statements. The card's association icon opens the period containing that report. Custom subscriptions and published manual comparisons remain available separately.
 - **China-related evaluation**: curated and hotspot cards can show one assessment of a specific topic, with attribution and a source excerpt. Existing analyses without this field are kept as is.
 - **Source management**: RSS, public web pages, Telegram, and exclusion rules. Multiple RSS URLs per source are fetched concurrently, with four RSS requests at most globally; results are merged by article URL. RSSHub feeds use complete URLs.
 - **Shared AI analysis**: classification, translation, and scoring run in persistent batch jobs. Results are cached; reading and viewing statistics do not call a model.
