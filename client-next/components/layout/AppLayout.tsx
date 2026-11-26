@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { m, AnimatePresence, LazyMotion, domAnimation, MotionConfig } from 'framer-motion';
 import { X, Star, Radio, Bookmark, CalendarDays, Network } from 'lucide-react';
@@ -22,11 +22,23 @@ const MOBILE_NAV = [
 
 export function AppLayout({ unreadCount, children }: AppLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [pendingPath, setPendingPath] = useState<string | null>(null);
+  const [isNavigating, startNavigation] = useTransition();
   const pathname = usePathname();
   const router = useRouter();
   const { theme, toggleTheme } = useTheme();
 
   if (pathname === '/admin' || pathname.startsWith('/admin/')) return children;
+
+  const navigate = (path: string) => {
+    if (pathname === path) {
+      window.dispatchEvent(new CustomEvent('nav:reset', { detail: { path } }));
+      return;
+    }
+    setPendingPath(path);
+    startNavigation(() => router.push(path));
+  };
+  const pending = isNavigating ? pendingPath : null;
 
   return (
     <LazyMotion features={domAnimation} strict>
@@ -36,7 +48,7 @@ export function AppLayout({ unreadCount, children }: AppLayoutProps) {
     <div className="flex h-dvh overflow-hidden bg-[var(--bg-base)] text-[var(--text-primary)]">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex flex-col w-60 shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-surface)]">
-        <Sidebar unreadCount={unreadCount} />
+        <Sidebar unreadCount={unreadCount} pendingPath={pending} onNavigate={navigate} />
       </aside>
 
       {/* Mobile Sidebar Drawer with smooth slide animation */}
@@ -68,7 +80,7 @@ export function AppLayout({ unreadCount, children }: AppLayoutProps) {
               >
                 <X className="w-5 h-5" />
               </button>
-              <Sidebar unreadCount={unreadCount} onNavigate={() => setSidebarOpen(false)} />
+              <Sidebar unreadCount={unreadCount} pendingPath={pending} onNavigate={path => { setSidebarOpen(false); navigate(path); }} />
             </m.aside>
           </div>
         )}
@@ -82,19 +94,11 @@ export function AppLayout({ unreadCount, children }: AppLayoutProps) {
         <div className="fixed bottom-0 left-0 right-0 z-40 flex lg:hidden border-t border-[var(--border-subtle)] bg-[var(--bg-surface)]">
           {MOBILE_NAV.map(({ path, label, Icon }) => {
             const active = pathname === path;
-            const handleTap = () => {
-              if (active) {
-                // Tapping the current tab — reset internal view state.
-                window.dispatchEvent(new CustomEvent('nav:reset', { detail: { path } }));
-              } else {
-                router.push(path);
-              }
-            };
             return (
               <button
                 type="button"
                 key={path}
-                onClick={handleTap}
+                onClick={() => navigate(path)}
                 className={`flex flex-col items-center justify-center flex-1 py-2 text-xs gap-1 transition-colors ${
                   active ? 'text-[var(--accent-blue)] dark:text-blue-400' : 'text-[var(--text-secondary)]'
                 }`}
@@ -106,9 +110,15 @@ export function AppLayout({ unreadCount, children }: AppLayoutProps) {
           })}
         </div>
 
-        <main className="flex-1 overflow-y-scroll pb-16 lg:pb-0">
-          {children}
-        </main>
+        <div className="route-content relative flex min-h-0 flex-1 flex-col">
+          <div className="route-progress pointer-events-none absolute inset-x-0 top-0 z-10 h-[3px] overflow-hidden bg-[var(--border-subtle)]"
+            data-pending={isNavigating || undefined} role="progressbar" aria-label="正在加载页面">
+            <span className="block h-full bg-[var(--accent-blue)]" />
+          </div>
+          <main className="flex-1 overflow-y-scroll pb-16 lg:pb-0">
+            {children}
+          </main>
+        </div>
       </div>
     </div>
     </MotionConfig>

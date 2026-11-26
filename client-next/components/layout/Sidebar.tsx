@@ -1,5 +1,5 @@
 'use client';
-import Link, { useLinkStatus } from 'next/link';
+import Link from 'next/link';
 import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import {
@@ -51,7 +51,8 @@ const NAV_GROUPS: NavGroup[] = [
 
 interface SidebarProps {
   unreadCount: number;
-  onNavigate?: () => void;
+  pendingPath: string | null;
+  onNavigate: (path: string) => void;
 }
 
 /**
@@ -83,25 +84,10 @@ function BrandMark() {
   );
 }
 
-function NavigationHint() {
-  const { pending } = useLinkStatus();
-  return <Loader2 aria-hidden="true" className={cn(
-    "ml-auto h-3.5 w-3.5 shrink-0 text-[var(--accent-blue)]",
-    pending ? "motion-safe:animate-spin" : "invisible",
-  )} />;
-}
-
-export function Sidebar({ unreadCount, onNavigate }: SidebarProps) {
+export function Sidebar({ unreadCount, pendingPath, onNavigate }: SidebarProps) {
   const pathname = usePathname();
   // Prefetch only the route the user points to or focuses, not every visible link.
   const [hoverPath, setHoverPath] = useState<string | null>(null);
-
-  const handleNavigate = (path: string) => {
-    if (pathname === path) {
-      window.dispatchEvent(new CustomEvent('nav:reset', { detail: { path } }));
-    }
-    onNavigate?.();
-  };
 
   return (
     <div className="flex flex-col h-full">
@@ -137,7 +123,7 @@ export function Sidebar({ unreadCount, onNavigate }: SidebarProps) {
                     prefetch={!isActive && hoverPath === item.path ? null : false}
                     onMouseEnter={() => setHoverPath(item.path)}
                     onFocus={() => setHoverPath(item.path)}
-                    onNavigate={() => handleNavigate(item.path)}
+                    onNavigate={event => { if (!isActive) event.preventDefault(); onNavigate(item.path); }}
                     aria-current={isActive ? "page" : undefined}
                     className={cn(
                       "group relative flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left",
@@ -167,7 +153,10 @@ export function Sidebar({ unreadCount, onNavigate }: SidebarProps) {
                       {item.icon}
                     </span>
                     <span>{item.label}</span>
-                    <NavigationHint />
+                    <Loader2 aria-hidden="true" className={cn(
+                      "ml-auto h-3.5 w-3.5 shrink-0 text-[var(--accent-blue)]",
+                      pendingPath === item.path ? "motion-safe:animate-spin" : "invisible",
+                    )} />
                   </Link>
                 );
               })}

@@ -2,7 +2,7 @@ import { Skeleton, SkeletonList } from '@/components/common/Loader';
 
 export default function DigestLoading() {
   return (
-    <div className="flex h-full overflow-hidden">
+    <div data-route-loading className="flex h-full overflow-hidden">
       <div className="hidden lg:flex w-[220px] shrink-0 flex-col border-r border-[var(--border-subtle)] overflow-hidden">
         <div className="px-4 pt-4 pb-3 border-b border-[var(--border-subtle)] shrink-0">
           <Skeleton className="h-5 w-24" />

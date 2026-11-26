@@ -9,6 +9,23 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Keep the same bar visible when navigation hands off to a route's skeleton. */
+.route-progress { display: none; }
+.route-progress[data-pending],
+.route-content:has([data-route-loading]) > .route-progress { display: block; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .route-progress > span {
+    width: 28%;
+    animation: route-progress-sweep 1.15s ease-in-out infinite;
+  }
+}
+
+@keyframes route-progress-sweep {
+  from { transform: translateX(-60%); }
+  to { transform: translateX(360%); }
+}
+
 /* ===== Design Tokens ===== */
 :root {
   /* Dark palette — recalibrated for warmth and clarity.
