@@ -40,7 +40,7 @@ AI_DAILY_LIMIT=100
 }
 ```
 
-- `relation`：`related` / `unrelated` / `uncertain`，不表示新闻真实性。
+- `relation`：`related` / `unrelated` / `uncertain`。按报道主题判断，关注中国大陆的实质动态、对大陆有明确影响的国际事件，以及台海安全和两岸关系。台湾地方事故、艺人纠纷、地方选举花絮、本地合作等，原文没有明确大陆或两岸关联时判为 `unrelated`；只有原始素材指向具体关联、但信息不足以确认时，才使用 `uncertain`。
 - `topics`：1–6 个不重复主题，首项为主主题；`policy` / `economy` / `diplomacy` / `technology` / `security` / `society`。筛选支持匹配任何一个主题。
 - `type`：`breaking` / `report` / `analysis` / `opinion` / `feature` / `sports` / `entertainment` / `other`。主快讯流保留涉华的 breaking/report，其余隐藏但不删除；收藏记录仍可回查。
 - `language`：`zh-Hans` / `zh-Hant` / `en` / `other` / `mixed`。简体中文要求 `translation=null`；其他语言在同一次响应中翻译输入中的原标题和摘要。只要有原标题，即使摘要为空也必须提供标题译文。
@@ -48,6 +48,8 @@ AI_DAILY_LIMIT=100
 - `scoring`：涉华相关性、新颖性、阅读价值与摘要质量各为 0–10 整数，重要度为 low/medium/high/urgent，标签最多三个。沿用上游权重和来源等级计算质量分与精选阈值；评分不代表新闻真实性。
 
 有原标题时最多提供 600 字符标题和 1600 字符摘要，长内容明确标为截取摘要，不假装读过全文。原文和译文在阅读页可展开对照；模型判断与翻译不会覆盖原始出处、发布时间、首次发现时间或内容更新时间。
+
+综合新闻来源请关闭「强制视为涉华」，让列表使用模型的相关性判断。提示词更新用于后续模型请求，已完成的分析继续复用；如需立即移除个别旧稿，可在「新闻管理」隐藏文章。
 
 批次返回 `results` 数组，每条结果使用原样复制的输入 `id` 关联。新模型输出在校验前只修正三类已知偏差：按是否有原标题补上缺失的 `version`；将 `fr`、`de`、`it` 归为 `other`；有合法主题时移除误填到 `topics` 的 `sports`、`entertainment`。显式错误的版本、缺少必需译文或无合法主题的结果仍会被拒绝；已保存的缓存不做这些修正。
 
