@@ -8,6 +8,9 @@ import { canonicalUrl } from './rules';
 const BEIJING_OFFSET = 8 * 60 * 60 * 1000;
 const TOP_COUNT = 10;
 const SAMPLE_COUNT = 8;
+const CHINA_ENTITY_ID = 'place:中国';
+const CHINA_ENTITY_NAMES = new Set(['中国', '中國', 'china', '中华人民共和国', '中華人民共和國',
+  "people's republic of china", 'people’s republic of china']);
 const newsFields = {
   id: true, title: true, displayTitle: true, aiGeneratedTitle: true, titleZh: true,
   originalPublisher: true, originalUrl: true, url: true, publishedAt: true, firstSeenAt: true,
@@ -19,6 +22,20 @@ type Sample = { report: Report; excerpts: EntityExcerpt[]; statements?: (EntityE
 type Count = { count: number; samples: Sample[] };
 type Node = Count & { id: string; name: string; kind: EntityMention['kind'] };
 type Edge = Count & { id: string; from: string; to: string; explicitCount: number };
+
+function trendEntityId(mention: EntityMention) {
+  const id = entityKey(mention);
+  return CHINA_ENTITY_NAMES.has(id.slice(mention.kind.length + 1)) ? CHINA_ENTITY_ID : id;
+}
+
+function distinctTrendMentions(mentions: EntityMention[]) {
+  const byId = new Map<string, EntityMention>();
+  for (const mention of mentions) {
+    const id = trendEntityId(mention);
+    if (!byId.has(id)) byId.set(id, mention);
+  }
+  return byId;
+}
 
 function windowFor(date: Date, period: 'day' | 'week' | 'month') {
   const start = new Date(date.getTime() + BEIJING_OFFSET);
@@ -97,28 +114,33 @@ export class NewsEntityTrendsController {
     for (const { report, evidence } of bySourceUrl.values()) {
       if (!evidence) continue;
       analyzed++;
-      for (const mention of evidence.mentions) {
-        const { name, kind, field, excerpt } = mention;
-        const id = entityKey(mention);
-        const node = nodesById.get(id) ?? { id, name, kind, count: 0, samples: [] };
+      for (const [id, { name, kind, field, excerpt }] of distinctTrendMentions(evidence.mentions)) {
+        const node = nodesById.get(id) ?? { id, name: id === CHINA_ENTITY_ID ? '中国' : name,
+          kind: id === CHINA_ENTITY_ID ? 'place' : kind, count: 0, samples: [] };
         addSample(node, { report, excerpts: [{ field, excerpt }] }, articleId);
         nodesById.set(id, node);
       }
     }
-    const nodes = [...nodesById.values()].sort((a, b) => b.count - a.count || a.id.localeCompare(b.id)).slice(0, TOP_COUNT);
-    const rankedIds = new Set(nodes.map(node => node.id));
+    const china = nodesById.get(CHINA_ENTITY_ID);
+    const nodes = [...nodesById.values()].filter(node => node.id !== CHINA_ENTITY_ID)
+      .sort((a, b) => b.count - a.count || a.id.localeCompare(b.id)).slice(0, TOP_COUNT);
+    const graphIds = new Set(nodes.map(node => node.id));
+    if (china) graphIds.add(china.id);
     const edgesById = new Map<string, Edge>();
     for (const { report, evidence } of bySourceUrl.values()) {
       if (!evidence) continue;
-      const ids = evidence.mentions.map(entityKey);
-      const ranked = ids.flatMap((id, index) => rankedIds.has(id) ? [index] : []);
+      const ids = evidence.mentions.map(trendEntityId);
+      const ranked = ids.flatMap((id, index) => graphIds.has(id) && ids.indexOf(id) === index ? [index] : []);
       for (const [position, left] of ranked.entries()) for (const right of ranked.slice(position + 1)) {
         const [from, to] = [ids[left], ids[right]].sort();
         const id = JSON.stringify([from, to]);
         const edge = edgesById.get(id) ?? { id, from, to, count: 0, explicitCount: 0, samples: [] };
-        const statements = evidence.relations.flatMap(relation =>
-          (relation.from === left && relation.to === right) || (relation.from === right && relation.to === left)
-            ? [{ field: relation.field, excerpt: relation.excerpt, label: relation.label, from: ids[relation.from], to: ids[relation.to] }] : []);
+        const statements = evidence.relations.flatMap(relation => {
+          const source = ids[relation.from];
+          const target = ids[relation.to];
+          return (source === from && target === to) || (source === to && target === from)
+            ? [{ field: relation.field, excerpt: relation.excerpt, label: relation.label, from: source, to: target }] : [];
+        });
         const excerpts = [left, right].map(index => {
           const { field, excerpt } = evidence.mentions[index];
           return { field, excerpt };
@@ -129,8 +151,11 @@ export class NewsEntityTrendsController {
         edgesById.set(id, edge);
       }
     }
+    const edges = [...edgesById.values()].sort((a, b) => b.count - a.count);
+    const touchesChina = (edge: Edge) => edge.from === CHINA_ENTITY_ID || edge.to === CHINA_ENTITY_ID;
     return { period, firstDay, lastDay, articleRequested: !!articleId,
-      article: article && { ...article, mentions: article.mentions.map(mention => ({ ...mention, id: entityKey(mention) })) },
-      coverage: { analyzed, total: bySourceUrl.size }, nodes, edges: [...edgesById.values()].sort((a, b) => b.count - a.count) };
+      article: article && { ...article, mentions: [...distinctTrendMentions(article.mentions)].map(([id, mention]) => ({ ...mention, id })) },
+      coverage: { analyzed, total: bySourceUrl.size }, nodes, edges: edges.filter(edge => !touchesChina(edge)),
+      china: china ? { node: china, edges: edges.filter(touchesChina) } : null };
   }
 }

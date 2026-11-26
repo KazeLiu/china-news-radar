@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ArrowUpRight, LocateFixed } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -40,20 +40,36 @@ function EvidenceReport({ sample, names, current, edge }: { sample: EntitySample
 }
 
 export function EntityTrendsView({ trends }: { trends: EntityTrends }) {
-  const { nodes, edges, article, articleRequested } = trends;
+  const { nodes, edges, china, article, articleRequested } = trends;
   const linkedIds = new Set(article?.mentions.map(mention => mention.id));
-  const names = new Map(nodes.map(node => [node.id, node.name]));
   const first = article ? nodes.find(node => linkedIds.has(node.id)) : nodes[0];
-  const [selection, setSelection] = useState<TrendSelection | undefined>(first && { type: 'node', id: first.id });
+  const defaultSelection = first && { type: 'node' as const, id: first.id };
+  const [chinaFocused, setChinaFocused] = useState(false);
+  const focus = chinaFocused ? china : null;
+  const chinaNodes = useMemo(() => {
+    if (!china) return [];
+    const neighbors = new Set(china.edges.map(edge => edge.from === china.node.id ? edge.to : edge.from));
+    return [china.node, ...nodes.filter(node => neighbors.has(node.id))];
+  }, [china, nodes]);
+  const graphNodes = focus ? chinaNodes : nodes;
+  const graphEdges = focus ? focus.edges : edges;
+  const names = new Map(graphNodes.map(node => [node.id, node.name]));
+  const rankedIds = new Set(nodes.map(node => node.id));
+  const articleMentionsChina = !!china && linkedIds.has(china.node.id);
+  const [selection, setSelection] = useState<TrendSelection | undefined>(defaultSelection);
   const evidencePanel = useRef<HTMLElement>(null);
   const selectFromGraph = useCallback((next: TrendSelection) => {
     setSelection(next);
     if (window.matchMedia('(width < 80rem)').matches) evidencePanel.current?.scrollIntoView({ block: 'start' });
   }, []);
-  const node = selection?.type === 'node' ? nodes.find(item => item.id === selection.id) : undefined;
-  const edge = selection?.type === 'edge' ? edges.find(item => item.id === selection.id) : undefined;
+  function selectEntity(id: string) {
+    setChinaFocused(china?.node.id === id);
+    selectFromGraph({ type: 'node', id });
+  }
+  const node = selection?.type === 'node' ? graphNodes.find(item => item.id === selection.id) : undefined;
+  const edge = selection?.type === 'edge' ? graphEdges.find(item => item.id === selection.id) : undefined;
   const selected = node ?? edge;
-  const connections = node ? edges.filter(item => item.from === node.id || item.to === node.id) : [];
+  const connections = node ? graphEdges.filter(item => item.from === node.id || item.to === node.id) : [];
   const edgeTitle = (edge: typeof edges[number]) => `${names.get(edge.from)} / ${names.get(edge.to)}`;
 
   return <>
@@ -62,9 +78,9 @@ export function EntityTrendsView({ trends }: { trends: EntityTrends }) {
         <Link href={`/articles/${encodeURIComponent(article.id)}`} prefetch={false} className="min-w-0 break-words font-semibold hover:text-[var(--accent-blue)] hover:underline">{article.title}</Link>
       </div>
       {article.mentions.length > 0 ? <details className="ml-6 mt-2 text-sm" open={first ? undefined : true}>
-        <summary className="cursor-pointer py-1 text-[var(--accent-blue)]">查看这篇报道提到的 {article.mentions.length} 个实体{!first && '（均未进入本期前 10）'}</summary>
+        <summary className="cursor-pointer py-1 text-[var(--accent-blue)]">查看这篇报道提到的 {article.mentions.length} 个实体{!first && !articleMentionsChina && '（均未进入本期前 10）'}</summary>
         <ul className="mt-2 space-y-2.5">{article.mentions.map(mention => <li key={mention.id}>
-          {names.has(mention.id) ? <button type="button" aria-controls="trend-evidence" className="mb-1 font-medium text-[var(--accent-blue)] hover:underline" onClick={() => selectFromGraph({ type: 'node', id: mention.id })}>{mention.name}</button>
+          {rankedIds.has(mention.id) || china?.node.id === mention.id ? <button type="button" aria-controls="trend-evidence" className="mb-1 font-medium text-[var(--accent-blue)] hover:underline" onClick={() => selectEntity(mention.id)}>{mention.name}</button>
             : <p className="mb-1 font-medium">{mention.name}</p>}
           <Excerpt evidence={mention} />
         </li>)}</ul>
@@ -72,26 +88,35 @@ export function EntityTrendsView({ trends }: { trends: EntityTrends }) {
     </section>}
     {articleRequested && !article && <p className="mb-4 text-sm text-[var(--text-secondary)]">这篇报道已不可查看，下面显示当前时段的榜单。</p>}
 
-    {nodes.length ? <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-      <section aria-label="实体关联图与榜单" className="min-w-0 self-start rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]">
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-4 pt-4">
-          <h2 className="text-base font-semibold">实体关联图</h2>
-          <div className="flex gap-3 whitespace-nowrap text-xs text-[var(--text-secondary)]">
+    {nodes.length || china ? <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+      <section id="trend-association" aria-label="实体关联图与榜单" className="min-w-0 self-start rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)]">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3">
+          <h2 className="text-base font-semibold">{focus ? '中国关联图' : '实体关联图'}</h2>
+          {china && <button type="button" aria-controls="trend-association trend-evidence"
+            onClick={() => {
+              setChinaFocused(!focus);
+              setSelection(focus ? defaultSelection : { type: 'node', id: china.node.id });
+            }} className={cn(control, 'min-h-11 shrink-0 whitespace-nowrap border border-[var(--input-border)] tabular-nums', !!focus && active)}>
+            {focus ? '返回概览' : `中国 · ${china.node.count} 篇`}
+          </button>}
+          <div className="ml-auto flex gap-3 whitespace-nowrap text-xs text-[var(--text-secondary)]">
             <span className="flex items-center gap-1.5"><span className="w-4 border-t-2 border-dashed border-[var(--text-muted)]" />共同提及</span>
             <span className="flex items-center gap-1.5"><span className="w-4 border-t-2 border-[var(--accent-blue)]" />有明确陈述</span>
           </div>
         </div>
-        <EntityTrendGraph nodes={nodes} edges={edges} articleMentions={article?.mentions} onSelect={selectFromGraph} />
-        <ol aria-label="高频实体排名" className="grid grid-cols-2 gap-1 border-t border-[var(--border-subtle)] p-2">
+        {graphNodes.length ? <EntityTrendGraph nodes={graphNodes} edges={graphEdges} centerId={focus?.node.id} articleMentions={article?.mentions} onSelect={selectFromGraph} />
+          : <p className="px-4 py-8 text-sm text-[var(--text-secondary)]">本期暂无其他上榜实体。</p>}
+        {focus && !graphEdges.length && <p className="px-4 pb-4 text-sm text-[var(--text-secondary)]">本期榜单中没有与中国共同提及的实体。</p>}
+        {nodes.length > 0 && <ol aria-label="高频实体排名" className="grid grid-cols-2 gap-1 border-t border-[var(--border-subtle)] p-2">
           {nodes.map((item, index) => <li key={item.id} className="min-w-0">
-            <button type="button" aria-controls="trend-evidence" aria-pressed={node?.id === item.id} onClick={() => selectFromGraph({ type: 'node', id: item.id })} className={cn(control, 'flex w-full items-center gap-2', node?.id === item.id && active)}>
+            <button type="button" aria-controls="trend-evidence" aria-pressed={node?.id === item.id} onClick={() => selectEntity(item.id)} className={cn(control, 'flex w-full items-center gap-2', node?.id === item.id && active)}>
               <span className="w-5 shrink-0 text-right tabular-nums text-[var(--text-secondary)]">{index + 1}</span>
               <span className="min-w-0 flex-1 truncate" title={item.name}>{item.name}</span>
               {linkedIds.has(item.id) && <LocateFixed size={13} className="shrink-0 text-[var(--accent-blue)]" aria-label="当前报道提及" />}
               <span className="shrink-0 text-xs tabular-nums text-[var(--text-secondary)]">{item.count} 篇</span>
             </button>
           </li>)}
-        </ol>
+        </ol>}
       </section>
 
       <section id="trend-evidence" ref={evidencePanel} aria-label="原文依据" className="min-w-0 scroll-mt-4 self-start rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] px-4 py-4 sm:px-5">

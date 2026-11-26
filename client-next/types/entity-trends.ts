@@ -18,4 +18,5 @@ export type EntityTrends = {
   coverage: { analyzed: number; total: number };
   nodes: TrendNode[];
   edges: TrendEdge[];
+  china: { node: TrendNode; edges: TrendEdge[] } | null;
 };
