@@ -1,5 +1,6 @@
 'use client';
-import Link from 'next/link';
+import Link, { useLinkStatus } from 'next/link';
+import { useState } from 'react';
 import { usePathname } from 'next/navigation';
 import {
   Bell,
@@ -10,6 +11,7 @@ import {
   Network,
   History,
   Info,
+  Loader2,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 
@@ -81,14 +83,20 @@ function BrandMark() {
   );
 }
 
+function NavigationHint() {
+  const { pending } = useLinkStatus();
+  return <Loader2 aria-hidden="true" className={cn(
+    "ml-auto h-3.5 w-3.5 shrink-0 text-[var(--accent-blue)]",
+    pending ? "motion-safe:animate-spin" : "invisible",
+  )} />;
+}
+
 export function Sidebar({ unreadCount, onNavigate }: SidebarProps) {
   const pathname = usePathname();
+  // Prefetch only the route the user points to or focuses, not every visible link.
+  const [hoverPath, setHoverPath] = useState<string | null>(null);
 
-  /** Tapping a nav item that points to the current route should reset its
-   *  internal state (e.g. AI 日报 should jump back to today). Next.js's
-   *  <Link> swallows same-route navigation, so we broadcast a custom event
-   *  that views can subscribe to. */
-  const handleClick = (path: string) => {
+  const handleNavigate = (path: string) => {
     if (pathname === path) {
       window.dispatchEvent(new CustomEvent('nav:reset', { detail: { path } }));
     }
@@ -126,7 +134,11 @@ export function Sidebar({ unreadCount, onNavigate }: SidebarProps) {
                   <Link
                     key={item.path}
                     href={item.path}
-                    onClick={() => handleClick(item.path)}
+                    prefetch={!isActive && hoverPath === item.path ? null : false}
+                    onMouseEnter={() => setHoverPath(item.path)}
+                    onFocus={() => setHoverPath(item.path)}
+                    onNavigate={() => handleNavigate(item.path)}
+                    aria-current={isActive ? "page" : undefined}
                     className={cn(
                       "group relative flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left",
                       isActive
@@ -155,6 +167,7 @@ export function Sidebar({ unreadCount, onNavigate }: SidebarProps) {
                       {item.icon}
                     </span>
                     <span>{item.label}</span>
+                    <NavigationHint />
                   </Link>
                 );
               })}
