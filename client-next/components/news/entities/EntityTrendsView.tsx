@@ -1,8 +1,8 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { ArrowUpRight, LocateFixed } from 'lucide-react';
+import { ProgressLink } from '@/components/layout/ProgressLink';
 import { cn } from '@/lib/utils';
 import type { EntityExcerpt, EntitySample, EntityTrends } from '@/types/entity-trends';
 import { EntityTrendGraph, type TrendSelection } from './EntityTrendGraph';
@@ -28,9 +28,9 @@ function EvidenceReport({ sample, names, current, edge }: { sample: EntitySample
       {current && <span className="text-[var(--accent-blue)]">当前报道</span>}
       {report.originalUrl && <a href={report.originalUrl} target="_blank" rel="noopener noreferrer" className="text-[var(--accent-blue)] hover:underline">媒体原文<ArrowUpRight className="ml-0.5 inline size-3" aria-hidden="true" /></a>}
     </p>
-    <Link href={`/articles/${encodeURIComponent(report.id)}`} prefetch={false} className="break-words text-sm font-medium hover:text-[var(--accent-blue)] hover:underline">
+    <ProgressLink href={`/articles/${encodeURIComponent(report.id)}`} prefetch={false} className="break-words text-sm font-medium hover:text-[var(--accent-blue)] hover:underline">
       {report.title}
-    </Link>
+    </ProgressLink>
     <div className="mt-2 space-y-2">
       {statements?.length ? statements.map((statement, index) => <Excerpt key={index} evidence={statement}
         label={`${names.get(statement.from)} → ${names.get(statement.to)}：${statement.label}`} />)
@@ -75,7 +75,7 @@ export function EntityTrendsView({ trends }: { trends: EntityTrends }) {
   return <>
     {article && <section aria-label="当前报道" className="mb-5 rounded-2xl border border-[var(--card-border)] bg-[var(--card-bg)] px-4 py-3.5">
       <div className="flex items-start gap-2.5 text-sm"><LocateFixed className="mt-0.5 size-4 shrink-0 text-[var(--accent-blue)]" aria-hidden="true" />
-        <Link href={`/articles/${encodeURIComponent(article.id)}`} prefetch={false} className="min-w-0 break-words font-semibold hover:text-[var(--accent-blue)] hover:underline">{article.title}</Link>
+        <ProgressLink href={`/articles/${encodeURIComponent(article.id)}`} prefetch={false} className="min-w-0 break-words font-semibold hover:text-[var(--accent-blue)] hover:underline">{article.title}</ProgressLink>
       </div>
       {article.mentions.length > 0 ? <details className="ml-6 mt-2 text-sm" open={first ? undefined : true}>
         <summary className="cursor-pointer py-1 text-[var(--accent-blue)]">查看这篇报道提到的 {article.mentions.length} 个实体{!first && !articleMentionsChina && '（均未进入本期前 10）'}</summary>

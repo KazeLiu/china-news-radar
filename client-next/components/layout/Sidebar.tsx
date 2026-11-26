@@ -87,7 +87,8 @@ function BrandMark() {
 export function Sidebar({ unreadCount, pendingPath, onNavigate }: SidebarProps) {
   const pathname = usePathname();
   // Prefetch only the route the user points to or focuses, not every visible link.
-  const [hoverPath, setHoverPath] = useState<string | null>(null);
+  const [prefetchPath, setPrefetchPath] = useState<string | null>(null);
+  const endPrefetchIntent = (path: string) => setPrefetchPath(current => current === path ? null : current);
 
   return (
     <div className="flex flex-col h-full">
@@ -120,10 +121,16 @@ export function Sidebar({ unreadCount, pendingPath, onNavigate }: SidebarProps) 
                   <Link
                     key={item.path}
                     href={item.path}
-                    prefetch={!isActive && hoverPath === item.path ? null : false}
-                    onMouseEnter={() => setHoverPath(item.path)}
-                    onFocus={() => setHoverPath(item.path)}
-                    onNavigate={event => { if (!isActive) event.preventDefault(); onNavigate(item.path); }}
+                    prefetch={!isActive && prefetchPath === item.path ? null : false}
+                    onMouseEnter={() => setPrefetchPath(item.path)}
+                    onMouseLeave={event => { if (!event.currentTarget.matches(':focus-visible')) endPrefetchIntent(item.path); }}
+                    onFocus={() => setPrefetchPath(item.path)}
+                    onBlur={event => { if (!event.currentTarget.matches(':hover')) endPrefetchIntent(item.path); }}
+                    onNavigate={event => {
+                      endPrefetchIntent(item.path);
+                      if (!isActive) event.preventDefault();
+                      onNavigate(item.path);
+                    }}
                     aria-current={isActive ? "page" : undefined}
                     className={cn(
                       "group relative flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors w-full text-left",

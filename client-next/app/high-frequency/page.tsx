@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { Network } from 'lucide-react';
 import type { Metadata } from 'next';
 import { EntityTrendsView } from '@/components/news/entities/EntityTrendsView';
+import { ProgressLink } from '@/components/layout/ProgressLink';
 import { fetchEntityTrendsSSR } from '@/lib/server-api';
 import { cn } from '@/lib/utils';
 import type { EntityPeriod } from '@/types/entity-trends';
@@ -46,7 +47,7 @@ export default async function HighFrequencyPage({ searchParams }: { searchParams
     </> : <p className="mt-6 border-y border-[var(--border-subtle)] py-8 text-sm text-[var(--text-secondary)]">当前运行模式未提供高频关注。</p>}
     <div className="mt-6 flex gap-4 text-sm text-[var(--text-secondary)]">
       <Link href="/keywords" prefetch={false} className="hover:text-[var(--accent-blue)] hover:underline">自定义关注</Link>
-      <Link href="/news-comparison" prefetch={false} className="hover:text-[var(--accent-blue)] hover:underline">历史报道对照</Link>
+      <ProgressLink href="/news-comparison" prefetch={false} className="hover:text-[var(--accent-blue)] hover:underline">历史报道对照</ProgressLink>
     </div>
   </div>;
 }
