@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { isDeepStrictEqual } from 'node:util';
-import { defaultApi, defaultWeb, sourceOrdering, validateSource, validateSourceRegionLabel, validateSourceSortOrder, type AdminConfig } from './admin-config';
+import { defaultApi, defaultWeb, sourceOrdering, validateSource, validateSourcePollSeconds, validateSourceRegionLabel, validateSourceSortOrder, type AdminConfig } from './admin-config';
 import { NEWS_SOURCES, type NewsSourceConfig } from './sources';
 
 export interface SourceDocument { format: 'china-radar-sources'; version: 1; sources: Record<string, unknown>[] }
@@ -20,10 +20,10 @@ export function exportSource(source: NewsSourceConfig, sortOrder: number) {
 export function sourceDocument(sources: Array<{ source: NewsSourceConfig; order: { sortOrder: number } }>): SourceDocument {
   return { format: 'china-radar-sources', version: 1, sources: sources.map(({ source, order }) => exportSource(source, order.sortOrder)) };
 }
-function changesOnlyRegion(input: Record<string, unknown>, previous: NewsSourceConfig, sortOrder: number) {
+function preservesCollection(input: Record<string, unknown>, previous: NewsSourceConfig, sortOrder: number) {
   // Compare with the JSON users edit, without private fields or undefined placeholders.
   const exported: Record<string, unknown> = JSON.parse(JSON.stringify(exportSource(previous, sortOrder)));
-  return Object.entries(input).every(([key, value]) => key === 'regionLabel' || isDeepStrictEqual(value, exported[key]));
+  return Object.entries(input).every(([key, value]) => key === 'regionLabel' || (key === 'pollSeconds' && previous.kind === 'web') || isDeepStrictEqual(value, exported[key]));
 }
 function reconfigureSource(input: Record<string, unknown>, previous: NewsSourceConfig | undefined, warnings: string[]) {
   const kind = input.kind ?? previous?.kind ?? 'rss';
@@ -68,10 +68,11 @@ export function planSourceImport(value: unknown, config: AdminConfig) {
       if (typeof input.id === 'string') input.id = input.id.trim();
       const previous = config.sources.find(source => source.id === input.id);
       const previousOrder = ordering.find(order => order.id === previous?.id)?.sortOrder ?? 0;
-      const preserveCollection = !!previous && changesOnlyRegion(input, previous, previousOrder);
+      const preserveCollection = !!previous && preservesCollection(input, previous, previousOrder);
       const warnings: string[] = [];
       const source = previous && preserveCollection
-        ? input.regionLabel == null ? previous : { ...previous, regionLabel: validateSourceRegionLabel(input.regionLabel) }
+        ? { ...previous, ...(input.regionLabel == null ? {} : { regionLabel: validateSourceRegionLabel(input.regionLabel) }),
+          ...(previous.kind === 'web' && input.pollSeconds !== undefined ? { pollSeconds: validateSourcePollSeconds(input.pollSeconds, previous.kind) } : {}) }
         : reconfigureSource(input, previous, warnings);
       if (seen.has(source.id)) throw new BadRequestException('同一文件中的来源 ID 不能重复');
       seen.add(source.id);

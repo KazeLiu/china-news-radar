@@ -35,7 +35,7 @@ export interface WebRules { mode: 'metadata' | 'css'; item: string; title: strin
 export interface WebSourceSettings { rules: WebRules; previousRules?: WebRules; loadMoreText?: string; loadMoreContainer?: string; parseInstructions?: string; timeoutSeconds: number; maxItems: number; maxPages: number; concurrency: number }
 export interface SourceSettings { id: string; name: string; regionLabel?: string; englishName: string; kind: string; website: string; feedUrl?: string; feedUrls?: string[]; publisherHosts: string[]; description: string; pollSeconds: number; forceChina?: boolean; useProxy?: boolean; state?: Source; target?: string; logo?: string; notes?: string; channel?: string; adapter?: string; api?: ApiSourceSettings; web?: WebSourceSettings; timeZone?: string; sortOrder?: number; editedAt?: string | null }
 export interface SourceDocument { format: 'china-radar-sources'; version: 1; sources: Record<string, unknown>[] }
-export interface SourceImportPreview { revision: string; document: SourceDocument; added: number; updated: number; sources: { id: string; name: string; kind: string; regionLabel?: string; action: 'add' | 'update'; warnings: string[]; preserveCollection: boolean }[] }
+export interface SourceImportPreview { revision: string; document: SourceDocument; added: number; updated: number; sources: { id: string; name: string; kind: string; regionLabel?: string; action: 'add' | 'update'; warnings: string[]; preserveCollection: boolean; pollIntervalChange?: { from: number; to: number } }[] }
 export interface WebPagePreview {
   snapshotId: string; sourceId: string; loadedAt: string; expiresAt: string;
   url: string; status: number; html: string; screenshot: string; bytes: number; browserMode: string;

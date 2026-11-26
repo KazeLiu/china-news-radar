@@ -72,7 +72,8 @@ export function SourceTransferPanel({ busy, onBusy, onSave, onImported }: { busy
       {preview && <div aria-live="polite"><h3>新增 {preview.added} 个 · 更新 {preview.updated} 个</h3>
         <ul className={styles.sourceImportList}>{preview.sources.map(source => <li key={source.id}>
           <strong>{source.action === 'add' ? '新增' : '更新'} · {source.name}</strong>
-          <small>{source.kind} · {source.id}{source.regionLabel !== undefined && ` · 地区：${source.regionLabel || '未设置'}`} · {source.preserveCollection ? '保留采集状态' : '导入后暂停'}</small>
+          <small>{source.kind} · {source.id}{source.regionLabel !== undefined && ` · 地区：${source.regionLabel || '未设置'}`}
+            {source.pollIntervalChange && ` · 间隔：${source.pollIntervalChange.from} → ${source.pollIntervalChange.to} 秒`} · {source.preserveCollection ? '保留采集状态' : '导入后暂停'}</small>
           {source.warnings.map(warning => <p key={warning}>{warning}</p>)}
         </li>)}</ul>
         <p>{pausedOnImport ? '新增或修改其他来源设置须等本轮采集结束。' : '可在采集期间导入，不改变启停状态和采集进度。'}未保存的来源编辑将重置。</p>

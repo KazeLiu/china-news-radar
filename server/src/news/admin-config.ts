@@ -53,6 +53,12 @@ function string(value: unknown, name: string, max: number, empty = false) {
   return value.trim();
 }
 export function validateSourceRegionLabel(value: unknown) { return string(value, '地区', 100, true); }
+export function validateSourcePollSeconds(value: unknown, kind: string) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < (kind === 'telegram' ? 0 : 60) || value > 86400) {
+    throw new BadRequestException('采集间隔应为 60–86400 秒；Telegram 接收可为 0');
+  }
+  return value;
+}
 function boolean(value: unknown) {
   if (typeof value !== 'boolean') throw new BadRequestException('开关必须是布尔值');
   return value;
@@ -102,8 +108,7 @@ export function validateSource(value: unknown, previous?: NewsSourceConfig, rest
   if (!['rss', 'google-rss', 'rsshub', 'web', 'api', 'telegram', ...(previous?.kind === 'reserved' ? ['reserved'] : [])].includes(rawKind)) throw new BadRequestException('未知的来源获取方式');
   const adapter = String(body.adapter || 'generic') as NewsSourceConfig['adapter'];
   if (!['generic', 'x-official', 'twitter', 'bing', 'hackernews', 'bilibili', 'sogou'].includes(adapter!)) throw new BadRequestException('未知的来源适配器');
-  const pollSeconds = Number(body.pollSeconds);
-  if (!Number.isInteger(body.pollSeconds) || pollSeconds < (rawKind === 'telegram' ? 0 : 60) || pollSeconds > 86400) throw new BadRequestException('采集间隔应为 60–86400 秒；Telegram 接收可为 0');
+  const pollSeconds = validateSourcePollSeconds(body.pollSeconds, rawKind);
   const rss = ['rss', 'google-rss', 'rsshub'].includes(rawKind);
   const urls = rss ? body.feedUrls ?? [body.feedUrl] : [];
   if (!Array.isArray(urls) || urls.length > 10 || (rss && !urls.length)) throw new BadRequestException('RSS 需配置 1–10 个地址');
